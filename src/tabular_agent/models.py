@@ -56,13 +56,26 @@ def _make_model(model_type: str, task_type: str, params: dict | None, seed: int)
     raise ValueError(f"unknown model_type: {model_type}")
 
 
-def predict_model(model, X: pd.DataFrame, task_type: str) -> np.ndarray:
+def predict_model(model, X: pd.DataFrame, task_type: str, classes=None) -> np.ndarray:
     if task_type == "regression":
         return np.asarray(model.predict(X), dtype=float)
     proba = np.asarray(model.predict_proba(X), dtype=float)
+    if classes is None:
+        if task_type == "binary":
+            return proba[:, 1]
+        return proba
+    # Map the model's own (possibly class-incomplete) columns into the
+    # global, sorted `classes` index space so callers always get a
+    # consistently shaped matrix regardless of which classes this
+    # particular model happened to see during fitting.
+    classes = np.asarray(classes)
+    model_classes = np.asarray(model.classes_)
+    col_idx = np.searchsorted(classes, model_classes)
+    full = np.zeros((len(X), len(classes)))
+    full[:, col_idx] = proba
     if task_type == "binary":
-        return proba[:, 1]
-    return proba
+        return full[:, 1]
+    return full
 
 
 @dataclass
@@ -79,8 +92,11 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
     X = X.reset_index(drop=True)
     y = pd.Series(np.asarray(y)).reset_index(drop=True)
     n = len(X)
+    classes = None
+    if task_type in ("binary", "multiclass"):
+        classes = np.unique(y.to_numpy())
     if task_type == "multiclass":
-        k = int(y.nunique())
+        k = len(classes)
         oof = np.zeros((n, k))
     else:
         oof = np.zeros(n)
@@ -90,9 +106,10 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
     for tr, va in folds:
         model = _make_model(model_type, task_type, params, seed)
         model.fit(X.iloc[tr], y.iloc[tr])
-        preds = predict_model(model, X.iloc[va], task_type)
+        preds = predict_model(model, X.iloc[va], task_type, classes=classes)
         oof[va] = preds
-        fold_metrics.append(compute_metric(metric, y.iloc[va].to_numpy(), preds))
+        metric_kwargs = {"labels": list(classes)} if classes is not None else {}
+        fold_metrics.append(compute_metric(metric, y.iloc[va].to_numpy(), preds, **metric_kwargs))
         models.append(model)
 
     final = _make_model(model_type, task_type, params, seed)

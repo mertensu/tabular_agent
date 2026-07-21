@@ -3,6 +3,8 @@ import pandas as pd
 
 from tabular_agent.cv import make_folds
 from tabular_agent.models import train_cv, predict_model, TrainResult
+from tabular_agent.pipeline import Pipeline, save_bundle, load_bundle, predict_bundle
+from tabular_agent.runctx import RunContext
 
 
 def _regression_data(n=200, seed=0):
@@ -52,3 +54,52 @@ def test_predict_model_binary_returns_positive_class_prob():
     res = train_cv(X, y, folds, "binary", "auc", model_type="lgbm")
     preds = predict_model(res.final_model, X, "binary")
     assert preds.shape == (100,)
+
+
+def _multiclass_imbalanced_data(seed=0):
+    # Imbalanced 3-class data (70/46/4) sized so that with 5-fold
+    # StratifiedKFold (seed=42) the rarest class (4 members) is not spread
+    # across every fold: at least one fold's validation split ends up with
+    # only 2 of the 3 classes present, even though the model (trained on
+    # all classes globally) always emits 3 proba columns.
+    rng = np.random.default_rng(seed)
+    n0, n1, n2 = 70, 46, 4
+    y = np.array([0] * n0 + [1] * n1 + [2] * n2)
+    n = len(y)
+    x0 = rng.normal(size=n) + y * 1.5
+    x1 = rng.normal(size=n) - y * 0.8
+    X = pd.DataFrame({"f0": x0, "f1": x1})
+    return X, pd.Series(y)
+
+
+def test_multiclass_cv_survives_fold_missing_a_class():
+    X, y = _multiclass_imbalanced_data(seed=0)
+    folds = make_folds(y, "multiclass", seed=42)
+    res = train_cv(X, y, folds, "multiclass", "logloss", model_type="lgbm")
+    assert res.oof.shape == (len(y), 3)
+    assert all(np.isfinite(m) for m in res.fold_metrics)
+    assert len(res.models) == 5
+
+
+def test_multiclass_bundle_roundtrip_no_target_needed(tmp_path):
+    X, y = _multiclass_imbalanced_data(seed=0)
+    folds = make_folds(y, "multiclass", seed=42)
+    res = train_cv(X, y, folds, "multiclass", "logloss", model_type="lgbm")
+
+    pipeline = Pipeline("multiclass")
+    ctx = RunContext(str(tmp_path / "run"))
+    bundle_dir = save_bundle(
+        ctx,
+        pipeline,
+        models=[res.final_model],
+        weights=[1.0],
+        feature_names=list(X.columns),
+        task_type="multiclass",
+    )
+    bundle = load_bundle(bundle_dir)
+
+    rng = np.random.default_rng(1)
+    new_raw = pd.DataFrame({"f0": rng.normal(size=5), "f1": rng.normal(size=5)})
+    preds = predict_bundle(bundle, new_raw)
+    assert preds.shape == (5, 3)
+    assert np.allclose(preds.sum(axis=1), 1.0, atol=1e-6)

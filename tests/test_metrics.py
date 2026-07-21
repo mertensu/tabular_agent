@@ -47,3 +47,8 @@ def test_greater_is_better_directions():
 
 def test_supported_metrics_set():
     assert SUPPORTED_METRICS == {"rmse", "rmsle", "mae", "logloss", "auc", "accuracy"}
+
+
+def test_greater_is_better_unknown_metric_raises_value_error():
+    with pytest.raises(ValueError):
+        greater_is_better("bogus")

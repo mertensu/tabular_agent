@@ -22,10 +22,12 @@ _GREATER_IS_BETTER = {
 
 
 def greater_is_better(name: str) -> bool:
+    if name not in _GREATER_IS_BETTER:
+        raise ValueError(f"unknown metric: {name}")
     return _GREATER_IS_BETTER[name]
 
 
-def compute_metric(name: str, y_true, y_pred) -> float:
+def compute_metric(name: str, y_true, y_pred, labels: list | None = None) -> float:
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)
     if name == "rmse":
@@ -37,7 +39,7 @@ def compute_metric(name: str, y_true, y_pred) -> float:
     if name == "mae":
         return float(mean_absolute_error(y_true, y_pred))
     if name == "logloss":
-        return float(log_loss(y_true, y_pred))
+        return float(log_loss(y_true, y_pred, labels=labels))
     if name == "auc":
         return float(roc_auc_score(y_true, y_pred))
     if name == "accuracy":

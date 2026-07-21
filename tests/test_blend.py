@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from tabular_agent.blend import optimize_blend, apply_blend
 from tabular_agent.metrics import compute_metric
@@ -29,3 +30,9 @@ def test_blend_beats_or_matches_best_single_model():
     blended = apply_blend([a, b], w)
     best_single = min(compute_metric("rmse", y, a), compute_metric("rmse", y, b))
     assert compute_metric("rmse", y, blended) <= best_single + 1e-6
+
+
+def test_apply_blend_rejects_mismatched_weight_length():
+    preds = [np.array([1.0, 2.0]), np.array([3.0, 4.0])]
+    with pytest.raises(ValueError):
+        apply_blend(preds, np.array([1.0]))
