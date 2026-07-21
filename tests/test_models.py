@@ -81,6 +81,53 @@ def test_multiclass_cv_survives_fold_missing_a_class():
     assert len(res.models) == 5
 
 
+def test_multiclass_oof_zero_pads_class_absent_from_a_fold_train_split():
+    # Class 2 has a single member, so StratifiedKFold(n_splits=5) is forced
+    # to put it entirely in one fold's validation split, leaving that fold's
+    # training split with zero instances of class 2. This is exactly the
+    # branch in predict_model() that scatters a fold model's (class-
+    # incomplete) predict_proba columns into the full global-classes index
+    # space via np.searchsorted, leaving the unseen class's column at 0.
+    # StratifiedKFold emits a "least populated class" UserWarning here; that
+    # is expected and inherent to the scenario, not a bug to fix.
+    rng = np.random.default_rng(7)
+    n0, n1, n2 = 60, 40, 1
+    rare_class = 2
+    y = np.array([0] * n0 + [1] * n1 + [rare_class] * n2)
+    n = len(y)
+    x0 = rng.normal(size=n) + y * 1.5
+    x1 = rng.normal(size=n) - y * 0.8
+    x2 = rng.normal(size=n) + (y == 1) * 2.0
+    X = pd.DataFrame({"f0": x0, "f1": x1, "f2": x2})
+    y = pd.Series(y)
+
+    folds = make_folds(y, "multiclass", n_splits=5, seed=42)
+    res = train_cv(X, y, folds, task_type="multiclass", metric="logloss", model_type="lgbm")
+
+    assert res.oof.shape == (len(y), 3)
+    assert all(np.isfinite(m) for m in res.fold_metrics)
+
+    # Locate the fold whose training split lacks the rare class entirely
+    # while its validation split contains it.
+    zero_padded_va = None
+    for tr, va in folds:
+        ytr = y.iloc[tr]
+        yva = y.iloc[va]
+        if (ytr == rare_class).sum() == 0 and (yva == rare_class).sum() > 0:
+            zero_padded_va = va
+            break
+    assert zero_padded_va is not None, "fixture must produce a fold missing the rare class from training"
+
+    # Direct proof the zero-padding branch ran and is correct: the OOF
+    # probability column for the rare class is exactly 0 on that fold's
+    # validation rows.
+    assert np.allclose(res.oof[zero_padded_va, rare_class], 0.0)
+
+    # For all other (non-zero-padded) folds, OOF rows still sum to ~1.
+    other_va = np.setdiff1d(np.arange(len(y)), zero_padded_va)
+    assert np.allclose(res.oof[other_va].sum(axis=1), 1.0, atol=1e-6)
+
+
 def test_multiclass_bundle_roundtrip_no_target_needed(tmp_path):
     X, y = _multiclass_imbalanced_data(seed=0)
     folds = make_folds(y, "multiclass", seed=42)

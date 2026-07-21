@@ -108,6 +108,7 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
         model.fit(X.iloc[tr], y.iloc[tr])
         preds = predict_model(model, X.iloc[va], task_type, classes=classes)
         oof[va] = preds
+        # `labels` is only consumed by the logloss branch of compute_metric; it's a harmless no-op for other metrics.
         metric_kwargs = {"labels": list(classes)} if classes is not None else {}
         fold_metrics.append(compute_metric(metric, y.iloc[va].to_numpy(), preds, **metric_kwargs))
         models.append(model)
