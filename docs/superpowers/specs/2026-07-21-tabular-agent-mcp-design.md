@@ -45,8 +45,8 @@ Nutzer-Agent (Claude Code / Codex / Claude Desktop)   ← fährt den Loop, nicht
 │                         Subprozess + Import-Whitelist,          │
 │                         kann strukturell nicht trainieren       │
 │   • fit_encoding        strukturiert & ZUSTANDSBEHAFTET         │
-│                         (target-encode / scale / impute /       │
-│                         cat-encode), fit-pro-Fold, Parameter    │
+│                         (target-encode / categorical-encode),   │
+│                         fit-pro-Fold, Parameter                 │
 │                         persistiert → leakage-sicher            │
 │   • train_tabular_model LGBM / XGB / CatBoost + Baseline,       │
 │                         k-fold CV, task-aware, schreibt         │
@@ -95,7 +95,12 @@ Zeilen-lokale Mathematik ohne gelernten Parameter: `dist = √(x²+y²)`, Verhä
 - Strukturell **unfähig zu trainieren** (keine Modell-Libs in der Whitelist) und **unfähig, gelernten Zustand zu erzeugen**.
 
 ### 5.2 Zustandsbehaftete Transforms → strukturierte Tools (`fit_encoding`)
-Alles, was Statistiken aus dem Trainingsset lernt: **Target-Encoding, Skalierung, Imputation, Kategorie-Encoding/Vokabulare.**
+Alles, was einen Parameter aus dem Trainingsset lernt **und den ein Baum nicht selbst aus den Rohdaten ableiten kann**. Für die GBDT-only-v1 ist das genau **zwei** Encoder (v1-Set A):
+
+- **Target-Encoding** — Kategorie → ziel-informierter Mittelwert. Nicht-monoton, leakage-kritisch.
+- **Categorical-/Frequency-Encoding** — Kategorie → Häufigkeit/Count (+ Ordinal-Fallback), gelernte Vokabular-Tabelle, Unknown-Kategorie-Fallback. Macht Strings auch für XGBoost nutzbar.
+
+**Bewusst *nicht* im v1-Set:** Skalierung (StandardScaler/MinMax/Robust) und Power-Transforms (Box-Cox/Yeo-Johnson) sind für Bäume **monotone No-Ops** — ein GBDT splittet auf Reihenfolge, nicht auf Werten, also ändert eine monotone Ein-Feature-Transformation nichts am Modell. Sie kommen erst mit einem nicht-Baum-`model_type` (§16). Imputation ist marginal, weil LightGBM/XGBoost/CatBoost `NaN` **nativ** behandeln. Rein *zustandslose* Transforms (Log, Differencing, Sin/Cos, Fourier, Verhältnisse/Interaktionen) gehören ohnehin in den Escape-Hatch (§5.1), nicht hierher.
 
 - Werden **nicht** als freier Code erlaubt, sondern über typisierte Tool-Aufrufe.
 - **Fit pro CV-Fold**: Die gelernte Statistik wird nur aus den Trainingszeilen des jeweiligen Folds gebildet → keine Leakage in die Validierung.
@@ -241,6 +246,7 @@ Enthält den ausdrücklichen Hinweis, dass Modelltraining **nur** über `train_t
 
 - WASM- (Pydantic `mcp-run-python`) und Docker-Sandbox-Tiers als Opt-in.
 - Weitere `model_type`s (Tabular-NN, TabPFN, AutoML).
+- **Scaler / Power-Transforms / Imputation als strukturierte Encoder** — erst zusammen mit einem nicht-Baum-`model_type` (linear/NN/kNN/SVM), für den sie überhaupt wirken. Bei GBDTs sind monotone Ein-Feature-Transforms No-Ops, deshalb nicht in v1.
 - Logfire-Cloud-Auswertung (nur mit explizitem Consent).
 - Optionaler MLE-bench-Adapter, falls doch Benchmark-Reproduktion gewünscht.
 - Multi-File-Eingabe / Joins.
