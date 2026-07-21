@@ -244,3 +244,4 @@ Enthält den ausdrücklichen Hinweis, dass Modelltraining **nur** über `train_t
 - Logfire-Cloud-Auswertung (nur mit explizitem Consent).
 - Optionaler MLE-bench-Adapter, falls doch Benchmark-Reproduktion gewünscht.
 - Multi-File-Eingabe / Joins.
+- **Autonomer Loop-Runner (autoresearch-Stil):** Eine dünne CLI über denselben Tools (Frage 2, Variante B), die den Loop selbst fährt statt ihn dem Nutzer-Agenten zu überlassen — nach Karpathys `autoresearch`-Muster: *Modify → Verify → Keep/Discard → Repeat* über viele Zyklen, mit Verlaufs-Ledger und git-artigem „commit bei Verbesserung, sonst rollback". Der **Task-Spec fungiert dann als GOAL.md / Fitness-Funktion** (die Selektionsmetrik ist die eine Zahl, auf die der Loop optimiert). Voraussetzung, die unser v1-Kern bereits liefert: eine *ehrliche* Fitness-Funktion (leakage-sichere OOF-Metrik) — je autonomer der Loop, desto kritischer, dass die optimierte Zahl vertrauenswürdig ist.
