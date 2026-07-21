@@ -1,0 +1,82 @@
+"""Serializable feature pipeline + predictor bundle. predict replays stored
+parameters and never needs the target column."""
+
+import json
+import os
+
+import joblib
+import numpy as np
+import pandas as pd
+
+from .blend import apply_blend
+from .encoders import ENCODER_CLASSES
+from .models import predict_model
+
+
+class Pipeline:
+    def __init__(self, task_type: str):
+        self.task_type = task_type
+        self.steps: list[dict] = []
+
+    def add_encoder(self, encoder) -> None:
+        self.steps.append({"type": "encode", "encoder": encoder.to_dict()})
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        out = df
+        for step in self.steps:
+            if step["type"] == "encode":
+                enc = ENCODER_CLASSES[step["encoder"]["kind"]].from_dict(step["encoder"])
+                out = enc.transform(out)
+            else:
+                raise ValueError(f"unknown step type: {step['type']}")
+        return out
+
+    def to_dict(self) -> dict:
+        return {"task_type": self.task_type, "steps": self.steps}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Pipeline":
+        p = cls(d["task_type"])
+        p.steps = d["steps"]
+        return p
+
+
+def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_names, task_type) -> str:
+    bundle_dir = run_ctx.path("bundle", "_")
+    bundle_dir = os.path.dirname(bundle_dir)
+    model_paths = []
+    for i, model in enumerate(models):
+        mp = os.path.join(bundle_dir, f"model_{i}.joblib")
+        joblib.dump(model, mp)
+        model_paths.append(f"model_{i}.joblib")
+    manifest = {
+        "pipeline": pipeline.to_dict(),
+        "model_paths": model_paths,
+        "weights": np.asarray(weights, dtype=float).tolist(),
+        "feature_names": list(feature_names),
+        "task_type": task_type,
+    }
+    with open(os.path.join(bundle_dir, "pipeline.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    return bundle_dir
+
+
+def load_bundle(bundle_dir: str) -> dict:
+    with open(os.path.join(bundle_dir, "pipeline.json")) as f:
+        manifest = json.load(f)
+    models = [joblib.load(os.path.join(bundle_dir, mp)) for mp in manifest["model_paths"]]
+    return {
+        "pipeline": Pipeline.from_dict(manifest["pipeline"]),
+        "models": models,
+        "weights": np.asarray(manifest["weights"], dtype=float),
+        "feature_names": manifest["feature_names"],
+        "task_type": manifest["task_type"],
+    }
+
+
+def predict_bundle(bundle: dict, raw_df: pd.DataFrame) -> np.ndarray:
+    features = bundle["pipeline"].transform(raw_df)
+    X = features[bundle["feature_names"]]
+    task_type = bundle["task_type"]
+    preds = [predict_model(m, X, task_type) for m in bundle["models"]]
+    return apply_blend(preds, bundle["weights"])
