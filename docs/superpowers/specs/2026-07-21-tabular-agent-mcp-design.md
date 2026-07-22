@@ -251,3 +251,16 @@ Enthält den ausdrücklichen Hinweis, dass Modelltraining **nur** über `train_t
 - Optionaler MLE-bench-Adapter, falls doch Benchmark-Reproduktion gewünscht.
 - Multi-File-Eingabe / Joins.
 - **Autonomer Loop-Runner (autoresearch-Stil):** Eine dünne CLI über denselben Tools (Frage 2, Variante B), die den Loop selbst fährt statt ihn dem Nutzer-Agenten zu überlassen — nach Karpathys `autoresearch`-Muster: *Modify → Verify → Keep/Discard → Repeat* über viele Zyklen, mit Verlaufs-Ledger und git-artigem „commit bei Verbesserung, sonst rollback". Der **Task-Spec fungiert dann als GOAL.md / Fitness-Funktion** (die Selektionsmetrik ist die eine Zahl, auf die der Loop optimiert). Voraussetzung, die unser v1-Kern bereits liefert: eine *ehrliche* Fitness-Funktion (leakage-sichere OOF-Metrik) — je autonomer der Loop, desto kritischer, dass die optimierte Zahl vertrauenswürdig ist.
+
+---
+
+## 17. Nachtrag (2026-07-22): Anforderungen aus dem Phase-1-Review — für Phase 2 (v1)
+
+Beim Durcharbeiten der Core-Lib (`notebooks/phase1_core_walkthrough.ipynb`) identifiziert; beide gehören in den Phase-2-Plan, nicht in „nach v1":
+
+1. **`inspect_data`: Profil um Verteilungsinformation erweitern.** Das aktuelle `profile_dataframe` liefert nur Struktur (dtype, Missing, Unique) — für gute Modellierungsentscheidungen des Agenten fehlt Verteilung:
+   - Numerische Spalten: `mean`, `std`, `min`, `max`, Quantile, **Skewness**. Direkt entscheidungsrelevant: stark rechtsschiefes nicht-negatives Target → `rmsle` (die `default_metric`-Heuristik prüft bisher nur Nicht-Negativität); schiefe Features → `log1p`-Kandidat für `transform_features`.
+   - Kategoriale Spalten: Top-k-Kategorien mit Häufigkeiten → informiert die Smoothing-Wahl beim Target-Encoding (viele seltene Kategorien → mehr Smoothing).
+   - Umsetzung: Erweiterung von `profile_dataframe` in der Core-Lib (`inspect.py`); bleibt billig und JSON-serialisierbar.
+
+2. **Neues Tool `group_stats` (Exploration, getrennt vom Profil):** Group-by-Aggregationen (`df, by, agg`) als eigenes MCP-Tool, damit der Agent Hypothesen prüfen kann („unterscheidet sich die Churn-Rate nach City?"). **Wichtig:** In der Tool-Description explizit als *Explorations*-Tool markieren, nicht als Feature-Quelle — wer Target-Statistiken pro Kategorie auf den vollen Daten ansieht und daraus manuell Features baut, holt sich das Leakage-Problem durch die Hintertür zurück, das `fit_encoding` strukturell verhindert.
