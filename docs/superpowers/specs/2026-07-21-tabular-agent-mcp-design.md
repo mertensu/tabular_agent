@@ -264,3 +264,26 @@ Beim Durcharbeiten der Core-Lib (`notebooks/phase1_core_walkthrough.ipynb`) iden
    - Umsetzung: Erweiterung von `profile_dataframe` in der Core-Lib (`inspect.py`); bleibt billig und JSON-serialisierbar.
 
 2. **Neues Tool `group_stats` (Exploration, getrennt vom Profil):** Group-by-Aggregationen (`df, by, agg`) als eigenes MCP-Tool, damit der Agent Hypothesen prüfen kann („unterscheidet sich die Churn-Rate nach City?"). **Wichtig:** In der Tool-Description explizit als *Explorations*-Tool markieren, nicht als Feature-Quelle — wer Target-Statistiken pro Kategorie auf den vollen Daten ansieht und daraus manuell Features baut, holt sich das Leakage-Problem durch die Hintertür zurück, das `fit_encoding` strukturell verhindert.
+
+---
+
+## 18. Option (2026-07-23): Per-Vorhersage-Erklärbarkeit via Post-hoc-SHAP — „influencing factors"
+
+**Status: Option, keine harte v1-Anforderung.** Motivation aus der Praxis (Demand-Forecasting): Kunden reklamieren einzelne „komische" Vorhersagen, und man braucht eine Root-Cause-Antwort — *welches Feature hat diese Vorhersage getrieben?* Aggregierte Modellgüte hilft dabei nicht; das ist per-Zeile-Attribution zur Serving-Zeit.
+
+**Werkzeug: gruppiertes TreeSHAP.** Passt genau, weil alle `model_type`s Baum-Ensembles sind:
+- TreeSHAP ist exakt und billig für Bäume; jeder Booster liefert es nativ (LightGBM `pred_contrib=True`, XGBoost `pred_contribs=True`, CatBoost `type="ShapValues"`) → **keine `shap`-Dependency** nötig.
+- Additiv in Target-Einheiten: `base + Σ Beiträge = ŷ`. Bei Regression (Forecasting) direkt kommunizierbar.
+- **Komponiert linear über den Blend:** Da `ŷ = Σ wᵢ·ŷᵢ` und alle Modelle denselben Feature-Raum teilen, gilt `SHAP(blend) = Σ wᵢ·SHAP(modelᵢ)`. Die emittierten Beiträge **rekonziliieren exakt** zur ausgelieferten Vorhersage (Unit-testbar). `_Baseline` trägt null bei Features + Mittelwert als Base bei — komponiert sauber.
+
+**Spezifikation (falls gebaut):**
+- **Attributions-Einheit = rohes Eingabe-Feature**, nicht die daraus generierte Modellspalte. Aus Encoder-Metadaten werden abgeleitete Spalten aufs Roh-Feature zurückgefaltet (one-hot `product_is_X…` oder einzelnes `product_te` → ein Beitrag „product"). Das ist die *einzige* domänen-agnostische Gruppierung; Multi-Feature-„Faktoren" (promo = mehrere Roh-Features) brauchen Domänenwissen und sind **nicht** Teil davon.
+- Ausgabe: **signierter Beitrags-Vektor, nach Betrag sortiert** — nicht auf „das eine Feature" reduzieren (bei „Vorhersage zu hoch" will man die Top-*positiven* Treiber).
+- Präsentation im **Target-Raum**: additive Einheiten bei rohem Target, **multiplikativ** (`exp`) bei log-transformiertem Target. Erfordert, dass Link/Transform deklariert und in den Explainer getragen wird.
+- **Opt-in: paarweise SHAP-Interaktionswerte** für den Drill-down. Statt einen `promo × product`-Effekt still aufzuteilen (unehrlich), erscheint er als eigene benannte Interaktions-Zelle — rekonstruiert die „ehrliche gemeinsame Faktor"-Eigenschaft blockadditiver Modelle. Kostet O(features²)/Zeile → nur im „diese Vorhersage ist komisch"-Pfad, nicht bei jedem Serve.
+- **Label an der Ausgabe: „Modell-Begründung, nicht Kausalität".** SHAP erklärt treu, *was das Modell gerechnet hat* — bei korrelierten Features (promo/holiday) kann das vom wahren Treiber abweichen. In genau den High-Stakes-Kundengesprächen, für die man es baut, sonst ein Footgun.
+- **Optional: monotone Constraints** (alle drei Booster unterstützen sie), pro Feature im Task-Spec deklarierbar, per Default aus. Greift die Reklamationsursache an der *Quelle* an: ein aus Rauschen gelernter nicht-monotoner „Wackler" erzeugt die komische Vorhersage *und* eine SHAP-Story, die der Domänen-Intuition widerspricht. Braucht Richtung-pro-Feature = Domänenwissen → deklarierbar, nicht automatisch.
+
+**Abhängigkeit vom Kern:** Nur vertrauenswürdig auf leakage-sauberem Encoding (siehe `docs/target_encoding_leakage_insight.md`). SHAP ist *treu* gegenüber der Leakage — ein durch Second-Order-Optimismus über-vertrautes `_te`-Feature bekommt entsprechend zu viel Attribution, die autoritativ aussieht. Encoding-Disziplin ist Vorbedingung für vertrauenswürdige Erklärungen.
+
+**Warum Post-hoc-SHAP statt Glass-Box-Modell (EBM/GAM):** Ziel ist „nützlich für Unternehmen", nicht Kaggle — aber Post-hoc-SHAP entkoppelt „stärkstes Modell wählen" von „erklären". Auf der *Genauigkeits*-Achse wird nichts geopfert (volles GBM bleibt); der einzige Preis ist Erklärungs-*Exaktheit unter Interaktionen*, den die opt-in-Interaktionswerte teilweise zurückholen. Ein Glass-Box-Additivmodell (EBM/GA2M mit automatischer Interaktionserkennung) bliebe die Alternative, falls exakte native Attribution später wichtiger wird als GBM-Power.
