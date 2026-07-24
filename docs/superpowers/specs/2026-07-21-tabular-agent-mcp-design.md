@@ -265,6 +265,19 @@ Beim Durcharbeiten der Core-Lib (`notebooks/phase1_core_walkthrough.ipynb`) iden
 
 2. **Neues Tool `group_stats` (Exploration, getrennt vom Profil):** Group-by-Aggregationen (`df, by, agg`) als eigenes MCP-Tool, damit der Agent Hypothesen prüfen kann („unterscheidet sich die Churn-Rate nach City?"). **Wichtig:** In der Tool-Description explizit als *Explorations*-Tool markieren, nicht als Feature-Quelle — wer Target-Statistiken pro Kategorie auf den vollen Daten ansieht und daraus manuell Features baut, holt sich das Leakage-Problem durch die Hintertür zurück, das `fit_encoding` strukturell verhindert.
 
+### 17.1 Revision (2026-07-24): beide Punkte → *ein* read-only-Python-Tool
+
+Statt (1) das Profil um Verteilungs-Statistiken (Skewness, Quantile) zu erweitern und (2) ein eigenes, eng typisiertes `group_stats`-Tool zu bauen, gibt es **ein allgemeines read-only-Python-Tool** neben `transform_features`. Begründung:
+
+- **`profile_dataframe` bleibt ein billiger struktureller Fingerabdruck** (dtype, Missing, Unique) — die always-on-erste-Ansicht. Verteilungsformen (Skewness, Quantile) und Group-by-Statistiken sind kein fixes Set im Profil, sondern rechnet der Agent *bei Bedarf* selbst — genau die, die eine Entscheidung braucht. Kein „welche Stats backen wir ein?"-Kompromiss.
+- **Ein Tool statt vieler enger Tools.** `group_stats` wäre nur ein Spezialfall von „lass den Agenten read-only-pandas laufen". Das allgemeine Tool deckt Skewness, Quantile, Group-bys und beliebige Hypothesen-Checks ab.
+- **Symmetrie zu `transform_features` (§5.1/§6):** gleiche Sandbox (Subprozess + Import-Whitelist), gleicher „Agent schreibt Python"-Vertrag. Unterschied ist der *Verbleib des Outputs*:
+  - `transform_features`: `df → df`, wird als Pipeline-Schritt **persistiert** und speist das Modell.
+  - read-only (`explore(df) → summary`): Ergebnis wird dem Agenten **gezeigt und verworfen**. Kein Persistenz-Pfad → kann strukturell nicht zum Feature werden.
+- **Der Leakage-Backdoor aus Punkt 2 bleibt geschlossen** — nicht mehr per Tool-Description-Konvention, sondern *strukturell*: Da das read-only-Ergebnis nirgends persistiert wird und zusätzlich größenbegrenzt ist, lässt sich eine per-Kategorie-Target-Statistik nicht als handgebaute (leakage-behaftete) Spalte zurückschmuggeln. `fit_encoding` (OOF, per Fold) bleibt der einzige sanktionierte Weg von Kategorie→Target-Signal zum Feature.
+
+Umsetzung Phase 2 (Stand 2026-07-24): `sandbox.py` (Default-Tier aus §6) + `explore.py` (`explore_dataframe`) implementiert und getestet; Lehr-Notebook `notebooks/phase2_sandbox_and_exploration.ipynb`. `profile_dataframe` bleibt struktur-only. `transform_features` (gleiche Sandbox, `df→df`, persistiert) ist der nächste Chunk.
+
 ---
 
 ## 18. Option (2026-07-23): Per-Vorhersage-Erklärbarkeit via Post-hoc-SHAP — „influencing factors"
