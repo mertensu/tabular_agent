@@ -300,3 +300,88 @@ Umsetzung Phase 2 (Stand 2026-07-24): `sandbox.py` (Default-Tier aus §6) + `exp
 **Abhängigkeit vom Kern:** Nur vertrauenswürdig auf leakage-sauberem Encoding (siehe `docs/target_encoding_leakage_insight.md`). SHAP ist *treu* gegenüber der Leakage — ein durch Second-Order-Optimismus über-vertrautes `_te`-Feature bekommt entsprechend zu viel Attribution, die autoritativ aussieht. Encoding-Disziplin ist Vorbedingung für vertrauenswürdige Erklärungen.
 
 **Warum Post-hoc-SHAP statt Glass-Box-Modell (EBM/GAM):** Ziel ist „nützlich für Unternehmen", nicht Kaggle — aber Post-hoc-SHAP entkoppelt „stärkstes Modell wählen" von „erklären". Auf der *Genauigkeits*-Achse wird nichts geopfert (volles GBM bleibt); der einzige Preis ist Erklärungs-*Exaktheit unter Interaktionen*, den die opt-in-Interaktionswerte teilweise zurückholen. Ein Glass-Box-Additivmodell (EBM/GA2M mit automatischer Interaktionserkennung) bliebe die Alternative, falls exakte native Attribution später wichtiger wird als GBM-Power.
+
+---
+
+## 19. Harness & resumierbares Gedächtnis (2026-07-25): Langläufe über Kontext-Grenzen hinweg
+
+**Status: Design-Note für die *Harness*, nicht für den Server.** Der MCP-Server bleibt zustandslos und zielagnostisch (§4, §12) — er *fährt den Loop nicht*. Diese Note fixiert, wie eine dünne Harness den Loop über viele Zyklen und **über Kontext-Kompaktierungen hinweg** laufen lässt („über Nacht"-Betrieb), damit die dafür nötigen Server-Artefakte **jetzt** richtig geschnitten werden. Motivation: der NOMAD-Report (`wandb.ai/wandb_fc/tabular-nomad`) zeigt Nacht-Läufe, verschweigt aber genau diese Mechanik; Kontext-Management liegt strukturell auf der Client-/Harness-Seite.
+
+**Was Langläufe überhaupt ermöglicht (zwei Eigenschaften, nur die erste ist Server-Sache):**
+1. **Langsames Kontext-Wachstum** — jedes Tool gibt *kompakte Zusammenfassung + Pfade* zurück, nie den DataFrame (§4). Das ist der eigentliche Enabler: der Agent kann Dutzende Zyklen fahren, bevor das Fenster voll ist. Schon vorhanden.
+2. **Kontext-Kompaktierung über Stunden** — wenn das Fenster doch voll wird, muss *etwas* den Transcript zusammenfassen/verwerfen und frisch starten. Das kann der zustandslose Server nicht; es ist Harness-Aufgabe. Der Server *ermöglicht* es nur, indem der Zustand auf Platte liegt.
+
+### 19.1 Zwei Artefakte, bewusst getrennt — nicht `finalize_run` überladen
+
+| | **`run_journal`** (resumierbares Gedächtnis) | **`finalize_run`** (terminales Deliverable) |
+|---|---|---|
+| Wann | *jeden* Zyklus aktualisiert, während des Laufs | **einmal**, am Ende |
+| Für wen | den *nächsten* Agenten (maschinenlesbar) | den Menschen (`report.md` + `predict`-Bundle) |
+| Form | kompaktes, strukturiertes Leaderboard | bestes Modell, voller Report, deploybares Bundle |
+| Lebenszyklus | append-lastig, wächst | write-once, final |
+
+**Anti-Pattern:** `finalize_run` pro Zyklus neu schreiben. Das koppelt „mein Scratch-Gedächtnis" an „das Ding, das ich ausliefere" und führt eine Bundle-erzeugende Operation 10× aus. Stattdessen: **`run_journal.json` während, `finalize_run` genau einmal am Schluss** (liest den `best`-Pointer des Journals und packt daraus das Bundle).
+
+### 19.2 Wer schreibt was — Fakten vom Werkzeug, Deutung vom Agenten
+
+Nicht *der Agent* pflegt das Log (fragil — Disziplin, die er vergisst; genau der Footgun aus dem NOMAD-Report). Aufteilung nach *wer die Information hat*:
+
+- **Fakten → das Tool appendet deterministisch, als Seiteneffekt.** `train_tabular_model` schreibt eine Leaderboard-Zeile beim tatsächlichen Trainieren: `{features, encoder_config, model_type, cv_score, fold_spread, vs_baseline, artifact_path}`. Der Experiment-Record ist ein *Nebenprodukt des Experiments*, keine Agenten-Pflicht → kann nicht übersprungen werden, kostet null Agenten-Disziplin.
+- **Deutung → der Agent appendet eine dünne Notiz.** Nur der Agent weiß *warum* er etwas probiert und was als Nächstes: pro Zyklus `{hypothesis, why, outcome_interpretation, next_ideas, dead_ends}`. Klein, Prosa, billig.
+
+→ Journal = auto-gewachsenes Leaderboard (vertrauenswürdig, vollständig) + schlanke agenten-geschriebene Plan-/Hypothesen-Schicht. Keine der beiden hängt von der Perfektion der anderen ab.
+
+### 19.3 Resume-Handoff: was der frische Agent liest
+
+Nicht „die finalize-Logs", nicht alle Artefakte — nur:
+
+```
+task_spec  +  run_journal.json  +  server-instructions
+```
+
+Das Leaderboard sagt, **was schon probiert und gescored wurde** (keine Wiederholung), `best` die zu schlagende Latte, `next_ideas`/`dead_ends` die Richtung. Artefakte bleiben auf Platte als Detail, in das er *bei Bedarf* drilldownt — der Resume-Prompt bleibt klein genug, um ihn beliebig oft zu wiederholen.
+
+### 19.4 Schema-Skizze `run_journal.json`
+
+```jsonc
+{
+  "task": { "target": "churn", "task_type": "binary", "metric": "auc" },
+  "baseline": { "cv_score": 0.50 },
+  "best": { "experiment_id": "e7", "cv_score": 0.83, "bundle_hint": "runs/e7/" },
+  "leaderboard": [            // 1 Zeile/Training, vom Tool deterministisch appended
+    { "id": "e7", "cycle": 4, "features": ["log_income","city_te"],
+      "encoder_config": {"city":"target"}, "model_type": "lgbm",
+      "cv_score": 0.83, "fold_spread": 0.011, "vs_baseline": "+0.33",
+      "artifact_path": "runs/e7/" }
+  ],
+  "log": [                    // 1 Eintrag/Zyklus, vom Agenten geschrieben
+    { "cycle": 4, "hypothesis": "city treibt churn -> target-encode",
+      "why": "explore zeigte churn-rate-Spread über Städte",
+      "outcome_interpretation": "bestes Modell bisher; fold-spread niedrig",
+      "next_ideas": ["income/age-ratio", "xgb zum Blend"],
+      "dead_ends": ["age allein: kein Lift"] }
+  ]
+}
+```
+
+### 19.5 Trigger & Stop — Harness-Sache, nicht Agenten-Sache
+
+- **Kompaktieren nach *Budget*, nicht nach fixem N.** Zyklen variieren stark im Kontext-Kosten (ein Feature vs. ein CatBoost-Training). Auslöser: Fenster überschreitet ~70%. Ein Zyklus-Cap ist ein akzeptabler *v1*-Ersatz, aber das echte Signal ist Token-Budget.
+- **Die Harness besitzt die Stop-Entscheidung und liest dafür das Leaderboard.** Regel über den auto-geloggten Scores: „kein Fortschritt über die letzten K Zyklen ODER Wall-Clock-Budget erschöpft → stop + `finalize_run`". Der Agent muss das nicht besitzen; das verhindert auch das ewige Weiterlaufen.
+
+### 19.6 Loop-Skizze
+
+```
+loop (harness):
+  spawn agent  mit  [ task_spec + run_journal + instructions ]
+  agent fährt Zyklen: inspect → hypothesize → transform_features/fit_encoding
+                      → train_tabular_model (appendet Leaderboard-Zeile)
+                      → agent appendet Hypothesen-/next-ideas-Notiz
+  bis  Kontext ~70%  ODER  Zyklus-Cap
+  kompaktiere: Transcript verwerfen, run_journal behalten (es IST der Zustand)
+  wiederhole mit frischem Agenten
+stop wenn: kein Fortschritt über K Zyklen  ODER  Zeitbudget
+  → finalize_run genau einmal (bestes Modell → report + bundle)
+```
+
+**Kern-Inversion ggü. dem naiven Entwurf:** der dauerhafte Zustand ist **kein Report, den der Agent pflegt**, sondern ein **Journal, das die Tools pflegen**, mit einer dünnen Deutungs-Schicht darüber. Das macht die „Kontext leeren und resumen"-Grenze beliebig oft sicher überquerbar. `run_journal` als Tool-geschriebenes Artefakt gehört damit in den Server-Scope (Seiteneffekt von `train_tabular_model` + ein schlankes `journal_append` für die Agenten-Notiz); die Loop-/Kompaktier-/Stop-Logik bleibt außerhalb, in der Harness.
