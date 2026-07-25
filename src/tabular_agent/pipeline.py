@@ -21,12 +21,25 @@ class Pipeline:
     def add_encoder(self, encoder) -> None:
         self.steps.append({"type": "encode", "encoder": encoder.to_dict()})
 
+    def add_transform(self, code: str, func_name: str = "transform_features") -> None:
+        """Persist a stateless df->df sandbox transform (§5.1) as an ordered step.
+
+        Only the code is stored; it is re-run in the sandbox at ``transform``
+        time (i.e. at predict), never the produced columns — that is what keeps
+        it reproducible and train/serve-skew-free."""
+        self.steps.append({"type": "transform", "code": code, "func_name": func_name})
+
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         out = df
         for step in self.steps:
             if step["type"] == "encode":
                 enc = ENCODER_CLASSES[step["encoder"]["kind"]].from_dict(step["encoder"])
                 out = enc.transform(out)
+            elif step["type"] == "transform":
+                # Imported lazily so predict does not require the sandbox unless
+                # a code step is actually present.
+                from .sandbox import run_transform
+                out, _ = run_transform(out, step["code"], func_name=step["func_name"])
             else:
                 raise ValueError(f"unknown step type: {step['type']}")
         return out

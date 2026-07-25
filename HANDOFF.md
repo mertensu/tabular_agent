@@ -3,6 +3,26 @@
 > Session log for working across two machines. Newest entry on top.
 > Update before ending a session, then commit & push. Pull and read this first when starting.
 
+## 2026-07-25 — Phase 2: transform_features + fit_encoding (+ notebook)
+
+**Machine:** MacBook Air
+**Branch:** master
+
+**Done:**
+- **`transform_features` (§5.1)** — the stateless `df→df` escape hatch. Reuses the same sandbox: extended `sandbox.py` with a shared `_run` driver + `run_transform` (mode `"transform"`) that returns the **whole** DataFrame via pickle (not JSON-capped like `run_readonly`). Contract enforced in-child: must return a DataFrame **with the same row index** (no reorder/drop/add rows) → teaching errors otherwise. New thin wrapper `transform.py` (`transform_features(df, code) -> (df, summary)`), symmetric to `explore.py`.
+- **Pipeline persistence** — `Pipeline.add_transform(code)` stores a `{"type":"transform","code":...}` step; `Pipeline.transform` re-runs it via the sandbox at predict (lazy import so predict doesn't need the sandbox unless a code step exists). Only the **code** is stored, never the produced columns → reproducible, no train/serve skew.
+- **`fit_encoding` (§5.2)** — structured stateful encoding tool in `encoders.py`. Dispatches `method="target"` (needs `y`+`folds`, returns `(oof_features, final_encoder)` via existing `oof_target_encode`) vs `method="frequency"` (new `FrequencyEncoder`, X-only so no OOF, unknown category → 0). Both registered in `ENCODER_CLASSES` and serializable.
+- **Tests:** `tests/test_transform.py` (7) + `tests/test_fit_encoding.py` (8). **Full suite: 74 passed** (libomp now installed — the old 7 lgbm/xgboost failures are gone).
+- **Notebook** `notebooks/phase2_transforms_and_encoding.ipynb` — phase-style, low-jargon, covers **both** tools + an end-to-end transform+encode→train→predict. Ships **unexecuted**; every cell smoke-tested in order.
+
+**Next:**
+- **The MCP server itself (§3)** — none exists yet. Wrap the primitives (`inspect_data`, `transform_features`, `fit_encoding`, `train_tabular_model`, `blend_models`, `predict`, `finalize_run`) as the stateless, file-based tool surface + server-instructions + OTel spans. This is now the big remaining v1 piece.
+- Optional: §18 post-hoc SHAP explainability.
+
+**Gotchas:**
+- Task-type string is **`"binary"`** (not `"classification"`) for `train_cv`/`make_folds`/`Pipeline`; `TrainResult` exposes `fold_metrics` (list), no `cv_score` — mean it yourself. (Both bit me while writing the notebook.)
+- `libomp` fixed via `brew install libomp`; the `LDFLAGS`/`CPPFLAGS` export hints Homebrew prints are **compile-time only** and not needed — the pre-built lgbm/xgboost wheels just needed `libomp.dylib` present.
+
 ## 2026-07-24 — Phase 2 started: sandbox + read-only exploration tool
 
 **Machine:** MacBook Air
