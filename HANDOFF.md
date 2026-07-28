@@ -3,6 +3,37 @@
 > Session log for working across two machines. Newest entry on top.
 > Update before ending a session, then commit & push. Pull and read this first when starting.
 
+## 2026-07-28 — Harness step 1: file-based tool layer + PydanticAI loop (thin vertical slice)
+
+**Machine:** MacBook Air
+**Branch:** master
+
+**Done:**
+- **New package `src/tabular_agent/harness/`** — the constrained harness from the pivot.
+  - `session.py` — `RunSession(run_dir, data_path, spec)`. Holds *pointers only*; the run dir is the state (§4). Resolves+caches the task spec (task type/metric auto-detected once, then pinned so leaderboard scores stay comparable).
+  - `tools.py` — **the file-based adapter layer** (this was the real design call, see below): `inspect_data`, `train_tabular_model`, `finalize_run`. Paths in → artifacts into `run_dir/` → compact JSON summary + paths out. Plain functions, **no LLM dependency** → unit-testable and hand-drivable.
+  - `journal.py` — `run_journal.json` (§19), minimal: `task`/`baseline`/`best`/`leaderboard`/`log`. `train_tabular_model` appends a leaderboard row **as a side effect of training** (§19.2) — can't be skipped. `best` re-derived from the whole leaderboard each append; baseline tracked separately so it's never shipped as the deliverable. `append_note` exists but isn't wired to a tool yet.
+  - `instructions.py` — system prompt (§12 revision): only *order* + how to read results; no "please don't train outside the tool" guidance, because there's no other tool.
+  - `agent.py` — thin PydanticAI loop. `DEFAULT_MODEL = "anthropic:claude-opus-5"`, `defer_model_check=True`, `deps_type=Deps(session)`. Registers exactly the three functions.
+- **Tests:** `test_harness_tools.py` (10) + `test_harness_agent.py` (3, incl. **tool surface == exactly those 3** — fails loudly if anyone adds a `read_file`). **Full suite: 87 passed.**
+- **Notebook** `notebooks/phase3_harness_step1.ipynb` (38 cells, ships unexecuted, all 15 code cells smoke-tested in order) — drives the whole pipeline by hand *first*, LLM only at the end. Live-API cell is commented out.
+- `pydantic-ai` 2.19.0 added as a hard dep (`uv add pydantic-ai`).
+
+**Design call made this session (Ulf's, from a 3-option question):**
+- Handoff said "register exactly the existing library functions as tools" — **not literally possible**: every library fn takes/returns an in-memory DataFrame, while §4 demands stateless file-based tools. Chose **file-based paths** over the cheaper in-memory-deps option, because in-memory state dies with the process → §19 resume would have forced a rewrite. Hence `tools.py` as a real adapter layer.
+- Scope: **thin vertical slice** (inspect → train → finalize) over all-7-at-once, so any adapter-shape mistake is made once.
+
+**Next:**
+- **The other four tools** — `transform_features`, `fit_encoding`, `blend_models`, `predict`. Same adapter pattern, now proven. This is where non-numeric columns (currently dropped-with-a-warning) become usable.
+- Then: `journal_append` for the agent's note layer; §19 compaction + harness-owned stop; multi-provider model config.
+
+**Gotchas:**
+- `train_tabular_model` currently **drops non-numeric columns** and reports them in `dropped_non_numeric` — deliberate (a silent cast is how train/serve skew starts), and it's the hook for the `fit_encoding` slice.
+- `finalize_run` **auto-trains a baseline** if the run never did, so the report can always answer "did this beat doing nothing".
+- Bundles ship `final_model` (refit on all data) with weight 1.0 — matches the existing phase-1 convention in `test_pipeline.py`.
+- pydantic-ai 2.19.0's `KnownModelName` literal **doesn't list `claude-opus-5` yet** (lags releases); the string passes through to the provider fine — that's what `defer_model_check=True` is for.
+- Tool-surface assertions reach into `agent._function_toolset.tools` (private API). If pydantic-ai churns, that's the line that breaks.
+
 ## 2026-07-28 — Architecture pivot: owned constrained harness (not MCP-for-others)
 
 **Machine:** MacBook Air
