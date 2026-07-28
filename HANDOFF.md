@@ -3,6 +3,26 @@
 > Session log for working across two machines. Newest entry on top.
 > Update before ending a session, then commit & push. Pull and read this first when starting.
 
+## 2026-07-28 — Architecture pivot: owned constrained harness (not MCP-for-others)
+
+**Machine:** MacBook Air
+**Branch:** master
+
+**Done (spec + design only — no code yet):**
+- **The pivot (Ulf's call):** the "leakage-safe *by construction*" guarantee only holds if **our tools are the only path to the data**. A general-purpose MCP client (Claude Code's bash + scratchpad) makes free code the path of least resistance → around the sandbox/OOF discipline. So: **we own a thin, constrained harness; only the LLM is swappable.** MCP demoted from "the product / distribution surface" to **optional internal transport**.
+- **Harness framework decision: PydanticAI** (leaning) — model-agnostic (satisfies "LLM free"), typed tools (matches `fit_encoding` et al., no hidden tools), self-managed message history (needed for §19 compaction), headless/embeddable. Explicitly **not** Claude/OpenAI agent SDKs (model lock-in) and **not** smolagents/code-first (the free-code escape *as a feature* = anti-fit). TUI deferred (interface is Axis B, not where the value is).
+- **Spec updated** (`docs/superpowers/specs/2026-07-21-...md`), all as dated `Revision (2026-07-28)` blocks so original reasoning stays visible: §3 (diagram + note), §12 (instructions → harness system-prompt, boundary enforced by tool-set not guidance), §13 (ship the harness, `pydantic-ai` hard dep / `mcp` optional), §15 (decision #2 struck + superseded by rows 2′/11-13), §16 (autonomous loop-runner promoted to v1 core — the harness *is* that runner). Commit `dfc6e7b`.
+- Also this session: docs `oof_vs_final_encoder.md` (why `final_enc` isn't leakage) `f1f31dd`; **spec §19** harness & resumable memory (`run_journal` = tool-written leaderboard + thin agent notes; compact on token budget; harness owns stop) `78a7fdd`.
+
+**Next:**
+- **Build the harness, step 1:** a thin PydanticAI loop that registers exactly the existing library functions (`inspect`, `transform_features`, `fit_encoding`, `train_cv`, `blend`, `predict`, `finalize`) as its *only* tools — headless, one model to start. Validates the constrained-tool-surface end-to-end before adding model-abstraction or the §19 journal.
+- Then: `run_journal` writes (train side-effect + `journal_append`), §19 compaction/stop, then multi-provider model config.
+
+**Gotchas / open:**
+- Spec **title still says "MCP-Server für …"** — now stale; retitle later (didn't, to avoid breaking refs).
+- Decision still a *leaning*, not locked: PydanticAI is young/moving fast; fine, but revisit if API churn bites.
+- Phase-2 core lib (transform_features/fit_encoding) is done + committed; the pivot doesn't touch it — sandbox just gets *promoted* to "the agent's scratchpad".
+
 ## 2026-07-25 — Phase 2: transform_features + fit_encoding (+ notebook)
 
 **Machine:** MacBook Air
