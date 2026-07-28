@@ -33,9 +33,11 @@ Der W&B-Report zeigt, dass ein Frontier-LLM mit einem **strukturierten Werkzeugk
 
 ## 3. Architektur auf einen Blick
 
+> **Revision (2026-07-28) — Pivot: die Harness gehört uns, frei ist nur das LLM.** Ursprünglich (Entscheidung #2) sollte ein *generischer* Nutzer-Agent (Claude Code / Codex / Desktop) den Loop fahren und wir nur Tools liefern. Das untergräbt aber die Kern-Garantie „leakage-sicher *by construction*": ein General-Purpose-Client bringt bash, Scratchpad und freien Python-Interpreter mit — der bequemste Pfad ist dann „12 Zeilen sklearn im Scratchpad", *vorbei* an Sandbox, OOF-Disziplin und `fit_encoding`. Die Grenze ist nur real, wenn **unsere Tools der einzige Weg an die Daten sind**. Daher: **wir besitzen die (schlanke, constrainte) Harness**; austauschbar ist allein das **LLM** (Claude / GPT / Gemini per Config). Die Tool-Box unten bleibt unverändert, aber der Kasten ist ab jetzt **unsere Tool-Library, nicht „der MCP-Server"**; **MCP wird zum optionalen internen Transport** degradiert (nicht mehr die Vertriebs-/UX-Fläche). Die Sandbox (§6) ist damit nicht mehr nur ein Tool, sondern **der Scratchpad des Agenten** — expressiv, aber strukturell außerstande zu trainieren oder ein Leak-Feature zu bauen. Siehe §12/§13-Revisionen und §15-Revision.
+
 ```
-Nutzer-Agent (Claude Code / Codex / Claude Desktop)   ← fährt den Loop, nicht wir
-        │  MCP (stdio)
+Constrained Harness (unser Code) — fährt den Loop;  LLM per Config (Claude / GPT / Gemini)
+        │  registriert NUR unsere leakage-sicheren Tools — kein bash / Scratchpad / Free-Code
 ┌───────┴───────────────────────────────────────────────────────┐
 │  MCP-Server "tabular-agent"  (Python)                          │
 │                                                                │
@@ -204,6 +206,8 @@ Der MCP-Server liefert eine **empfohlene Workflow-Anleitung** mit (MCP-Server-`i
 
 Enthält den ausdrücklichen Hinweis, dass Modelltraining **nur** über `train_tabular_model` läuft (die *Führung*; die *Grenze* erzwingt ohnehin die Sandbox).
 
+**Revision (2026-07-28):** Mit dem Harness-Pivot (§3) werden diese Instructions zum **System-Prompt unserer Harness**, nicht zur Empfehlung an einen Fremd-Client. „Training nur über `train_tabular_model`" ist dann keine *Führung* mehr, sondern **durch die Tool-Menge erzwungen** — der Agent hat schlicht kein anderes Werkzeug. Aus „Führung per Prompt + Grenze per Sandbox" wird „**Grenze per Tool-Menge**; der Prompt gibt nur noch die *Reihenfolge* und die *Iterations-/Resume-Disziplin* vor" (u.a.: nach jedem Kontext-Reset zuerst `run_journal.json` lesen, §19).
+
 ---
 
 ## 13. Verteilung / Packaging
@@ -212,6 +216,13 @@ Enthält den ausdrücklichen Hinweis, dass Modelltraining **nur** über `train_t
 - Konsolen-Entry-Point startet den MCP-Server (stdio).
 - README mit Registrierungs-Snippet für gängige MCP-Clients (Claude Code / Codex / Claude Desktop).
 - Harte Deps minimal: `mcp`-SDK, `pandas`, `numpy`, `scipy`, `lightgbm`, `xgboost`, `catboost`, `scikit-learn`, `pyarrow`, OTel/`logfire`. Deno/Docker **nicht** hart erforderlich (nur für optionale Sandbox-Tiers).
+
+**Revision (2026-07-28) — Vertrieb folgt dem Harness-Pivot (§3):**
+- Ausgeliefert wird die **Harness** (Loop + constrainte Tool-Menge), nicht „registriere unseren MCP-Server im eigenen Client". Ein Registrierungs-Snippet für Fremd-Clients ist *nicht* der primäre Weg — das wäre genau der Escape-Hatch-Pfad, den der Pivot schließt.
+- Konsolen-Entry-Point startet die **Harness** (headless: startet einen Lauf über `run_dir/` + Task-Spec). **LLM per Config**, Nutzer bringt Modell + API-Key (Claude / GPT / Gemini).
+- **Harness-Framework: PydanticAI** (Leaning, siehe §15/#12). Warum: modell-agnostisch (erfüllt „LLM frei"); getippte Tools (passt zu `fit_encoding` et al. und verhindert versteckte Tools); Message-History selbst verwaltbar (nötig für die §19-Kompaktierung); headless/embeddbar (Loop = Library, kein App-Zwang). **Bewusst *nicht*** Claude Agent SDK / OpenAI Agents SDK (Modell-Lock-in verletzt „LLM frei") und **nicht** code-first-Frameworks wie smolagents (die den Free-Code-Escape *zum Feature* machen — das exakte Gegenteil der Garantie).
+- **Interface (Axis B) bleibt vorerst headless** (CLI/Funktion, die einen Lauf/Lane startet). Eine TUI ist ein *späteres, separates* Add-on auf demselben Loop, kein v1-Blocker — der Wert liegt in Guardrails + ML, nicht im Terminal-UI.
+- Deps-Verschiebung: **`pydantic-ai`** wird harte Dep; **`mcp`-SDK wird optional** (nur falls der MCP-Transport tatsächlich genutzt wird).
 
 ---
 
@@ -230,7 +241,7 @@ Enthält den ausdrücklichen Hinweis, dass Modelltraining **nur** über `train_t
 | # | Entscheidung | Wahl | Kern-Begründung |
 |---|---|---|---|
 | 1 | Ziel | Wiederverwendbares Tool für andere, nicht Kaggle-spezifisch | Nutzwert statt Benchmark-Reproduktion |
-| 2 | Form | MCP-Server (Tools, kein eigener Loop) | Wert liegt in den Tools; Loop können Coding-Agenten schon |
+| 2 | Form | ~~MCP-Server (Tools, kein eigener Loop)~~ → **revidiert 2026-07-28** (siehe unten) | (ursprünglich: Wert in Tools; Loop können Coding-Agenten schon) |
 | 3 | Traces | Local-first, Logfire opt-in | Kein SaaS-Zwang; OTel = kein Lock-in |
 | 4 | Zustandsmodell | Stateless / dateibasiert | Artefakte *sind* der Zustand; robust gegen MCP-Prozessmodell |
 | 5 | Escape-Hatch | Ja, aber `df→df`, gesandboxt, kann nicht trainieren | Flexibilität behalten, Disziplin strukturell erzwingen |
@@ -239,6 +250,17 @@ Enthält den ausdrücklichen Hinweis, dass Modelltraining **nur** über `train_t
 | 8 | Zustands-Besitz | Split: stateless Escape-Hatch + strukturierte Encoding-Tools | Leakage/Skew per Konstruktion unmöglich |
 | 9 | Modelle | GBDT-Trio + Blend + Baseline | Arbeitspferd für Tabular; Blend = billiger Score-Hebel |
 | 10 | Task/Metrik | Auto-Detect mit Override (Task-Spec) | Reibungsarm, aber Nutzer behält Kontrolle |
+
+**Revision (2026-07-28) — Pivot „Harness statt Fremd-Client" (ersetzt #2):**
+
+| # | Entscheidung | Wahl | Kern-Begründung |
+|---|---|---|---|
+| 2′ | Form | **Eigene, constrainte Harness** (Loop + feste Tool-Menge), LLM per Config | „leakage-sicher by construction" hält nur, wenn unsere Tools der *einzige* Datenzugang sind; ein General-Purpose-Client (bash/Scratchpad/Free-Code) umgeht Sandbox + OOF-Disziplin und macht die Garantie zur bloßen README-Fußnote |
+| 11 | Was ist frei | **Nur das LLM**, nicht die Harness | Harness-Wahl = Escape-Hatch-Wahl → freie Harness-Wahl höbe die Kern-Idee auf |
+| 12 | Harness-Framework | **PydanticAI** (Leaning) | Modell-agnostisch + getippte Tools + selbst-verwaltete History (für §19-Kompaktierung) + headless; *nicht* Claude/OpenAI-Agent-SDK (Modell-Lock-in), *nicht* smolagents (code-first = Anti-Fit) |
+| 13 | MCP | **Optionaler interner Transport**, nicht Vertriebsfläche | Zwischen zwei Enden, die wir besitzen, ist das Protokoll Zeremonie; als *unbewachte* Power-User-Fläche allenfalls bei Nachfrage |
+
+**Konsequenz für Bereits-Gebautes: nichts verworfen.** Library-Kern unverändert; **Sandbox (§6) wird zentraler** (= Agenten-Scratchpad statt Randtool); **§12-Instructions → Harness-System-Prompt** (Grenze per Tool-Menge erzwungen); **§19-`run_journal`** bleibt das resumierbare Gedächtnis, und die Harness besitzt jetzt auch die Kompaktierung/Stop-Logik. Anmerkung zu #4: die „dateibasiert"-Begründung verschiebt sich von „das MCP-Prozessmodell erzwingt es" zu „**Resumierbarkeit/§19 rechtfertigt es**" — die Harness *könnte* nun Objekte in-memory reichen, hält aber am `run_dir/` fest, weil er das resumierbare Gedächtnis *ist*. Der §16-Punkt „Autonomer Loop-Runner" rückt damit von „nach v1" in den **v1-Kern** (die Harness *ist* dieser Runner).
 
 ---
 
@@ -250,7 +272,7 @@ Enthält den ausdrücklichen Hinweis, dass Modelltraining **nur** über `train_t
 - Logfire-Cloud-Auswertung (nur mit explizitem Consent).
 - Optionaler MLE-bench-Adapter, falls doch Benchmark-Reproduktion gewünscht.
 - Multi-File-Eingabe / Joins.
-- **Autonomer Loop-Runner (autoresearch-Stil):** Eine dünne CLI über denselben Tools (Frage 2, Variante B), die den Loop selbst fährt statt ihn dem Nutzer-Agenten zu überlassen — nach Karpathys `autoresearch`-Muster: *Modify → Verify → Keep/Discard → Repeat* über viele Zyklen, mit Verlaufs-Ledger und git-artigem „commit bei Verbesserung, sonst rollback". Der **Task-Spec fungiert dann als GOAL.md / Fitness-Funktion** (die Selektionsmetrik ist die eine Zahl, auf die der Loop optimiert). Voraussetzung, die unser v1-Kern bereits liefert: eine *ehrliche* Fitness-Funktion (leakage-sichere OOF-Metrik) — je autonomer der Loop, desto kritischer, dass die optimierte Zahl vertrauenswürdig ist.
+- **Autonomer Loop-Runner (autoresearch-Stil):** **(2026-07-28: durch den Harness-Pivot §3/§15 in den v1-Kern hochgestuft — die constrainte Harness *ist* dieser Runner; hier bleibt nur das autoresearch-*Muster* als Referenz.)** Eine dünne CLI über denselben Tools (Frage 2, Variante B), die den Loop selbst fährt statt ihn dem Nutzer-Agenten zu überlassen — nach Karpathys `autoresearch`-Muster: *Modify → Verify → Keep/Discard → Repeat* über viele Zyklen, mit Verlaufs-Ledger und git-artigem „commit bei Verbesserung, sonst rollback". Der **Task-Spec fungiert dann als GOAL.md / Fitness-Funktion** (die Selektionsmetrik ist die eine Zahl, auf die der Loop optimiert). Voraussetzung, die unser v1-Kern bereits liefert: eine *ehrliche* Fitness-Funktion (leakage-sichere OOF-Metrik) — je autonomer der Loop, desto kritischer, dass die optimierte Zahl vertrauenswürdig ist.
 
 ---
 
