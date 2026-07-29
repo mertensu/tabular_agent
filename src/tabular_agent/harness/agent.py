@@ -9,6 +9,7 @@ swapping Claude for GPT or Gemini is a one-line change.
 usable — and testable — without it.
 """
 
+import os
 from dataclasses import dataclass
 
 from . import tools
@@ -19,6 +20,58 @@ from .session import RunSession
 #: `google-gla:gemini-...` — because nothing above this line is Claude-specific.
 DEFAULT_MODEL = "anthropic:claude-opus-5"
 
+#: OpenAI-compatible gateway used when there is no first-party provider key.
+REQUESTY_BASE_URL = "https://router.requesty.ai/v1"
+
+#: Untracked `KEY=value` file `load_api_key` falls back to (gitignored: `*.env`).
+DEFAULT_KEY_PATH = "config.env"
+
+#: Model served through the gateway. Must support tool calling — the harness is
+#: nothing but tool calls, so a chat-only model fails on the first turn.
+DEFAULT_GATEWAY_MODEL = "tensorx/deepseek-v4-flash"
+
+
+def load_api_key(env_var: str = "REQUESTY_API_KEY", key_path: str = DEFAULT_KEY_PATH) -> str:
+    """The API key from the environment, falling back to an untracked env file.
+
+    The file form exists so a notebook can be run on a fresh machine without
+    exporting anything first. Everything matching `*.env` is gitignored, and the
+    key is never written as a literal anywhere in the repo — which is also why
+    this returns the key instead of logging or echoing it.
+    """
+    key = os.environ.get(env_var)
+    if key:
+        return key.strip()
+    if os.path.exists(key_path):
+        with open(key_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                name, _, value = line.partition("=")
+                if name.strip() == env_var:
+                    return value.strip().strip("'\"")
+    raise RuntimeError(
+        f"no API key: set ${env_var} or put `{env_var}=...` in {key_path} (untracked)."
+    )
+
+
+def gateway_model(model_name: str, *, base_url: str = REQUESTY_BASE_URL, api_key: str | None = None):
+    """A model served by an OpenAI-compatible gateway (Requesty by default).
+
+    Returns a PydanticAI ``Model`` rather than a string, which is the whole
+    point of `build_agent` accepting either: the harness stays provider-agnostic
+    (§13) and the choice of who actually serves the tokens is made at the call
+    site, not baked into the agent.
+    """
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.openai import OpenAIProvider
+
+    return OpenAIChatModel(
+        model_name,
+        provider=OpenAIProvider(base_url=base_url, api_key=api_key or load_api_key()),
+    )
+
 
 @dataclass
 class Deps:
@@ -27,8 +80,13 @@ class Deps:
     session: RunSession
 
 
-def build_agent(model: str = DEFAULT_MODEL):
-    """An agent whose *entire* tool surface is the three functions below."""
+def build_agent(model=DEFAULT_MODEL):
+    """An agent whose *entire* tool surface is the three functions below.
+
+    ``model`` is either a PydanticAI model string (``"anthropic:..."``,
+    ``"openai:..."``) or a ``Model`` object — e.g. from :func:`gateway_model`,
+    for a provider reached through an OpenAI-compatible gateway.
+    """
     from pydantic_ai import Agent, RunContext
 
     agent = Agent(
@@ -48,6 +106,39 @@ def build_agent(model: str = DEFAULT_MODEL):
             table: Path to the table. Omit to use the run's raw input table.
         """
         return tools.inspect_data(ctx.deps.session, table)
+
+    @agent.tool
+    def fit_encoding(
+        ctx: RunContext[Deps],
+        columns: list[str],
+        method: str = "frequency",
+        table: str | None = None,
+        categories: dict[str, list] | None = None,
+        smoothing: float = 10.0,
+    ) -> dict:
+        """Encode categorical columns, writing a new feature table to train on.
+
+        Args:
+            columns: The categorical columns to encode.
+            method: "frequency" (how common each category is), "ordinal" (ordered
+                categories -> their rank; requires `categories`), or "target"
+                (out-of-fold target mean; strongest, but only worth it for
+                columns with enough rows per category).
+            table: Path to the source table. Omit to use the run's raw input table.
+            categories: For method="ordinal" only: {column: [level, ...]} in
+                increasing order. State the real order (e.g. small, medium,
+                large) — it is never inferred from the data.
+            smoothing: For method="target" only: pulls small categories towards
+                the global mean.
+        """
+        return tools.fit_encoding(
+            ctx.deps.session,
+            columns=columns,
+            method=method,
+            table=table,
+            categories=categories,
+            smoothing=smoothing,
+        )
 
     @agent.tool
     def train_tabular_model(
@@ -78,6 +169,6 @@ def build_agent(model: str = DEFAULT_MODEL):
     return agent
 
 
-def run(session: RunSession, prompt: str, model: str = DEFAULT_MODEL):
+def run(session: RunSession, prompt: str, model=DEFAULT_MODEL):
     """Drive one agent run against ``session``. Returns the PydanticAI result."""
     return build_agent(model).run_sync(prompt, deps=Deps(session=session))

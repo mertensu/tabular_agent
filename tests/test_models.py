@@ -150,3 +150,24 @@ def test_multiclass_bundle_roundtrip_no_target_needed(tmp_path):
     preds = predict_bundle(bundle, new_raw)
     assert preds.shape == (5, 3)
     assert np.allclose(preds.sum(axis=1), 1.0, atol=1e-6)
+
+
+def test_caller_params_override_defaults_instead_of_colliding():
+    """These params come from an LLM: re-specifying a default must not be a crash."""
+    from tabular_agent.models import _make_model
+
+    m = _make_model("lgbm", "binary", {"n_estimators": 7}, seed=0)
+    assert m.n_estimators == 7
+    m = _make_model("xgb", "regression", {"n_estimators": 7, "random_state": 1}, seed=0)
+    assert m.n_estimators == 7 and m.random_state == 1
+
+
+def test_catboost_aliases_replace_the_default_spelling():
+    """CatBoost rejects two spellings of one setting, even with equal values."""
+    from tabular_agent.models import _make_model
+
+    m = _make_model("catboost", "binary", {"iterations": 5, "depth": 3}, seed=0)
+    p = m.get_params()
+    assert p["iterations"] == 5 and "n_estimators" not in p
+    assert p["depth"] == 3 and "max_depth" not in p
+    m.fit(pd.DataFrame({"a": [0.0, 1.0] * 10}), pd.Series([0, 1] * 10))  # actually builds

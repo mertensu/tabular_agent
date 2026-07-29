@@ -9,7 +9,13 @@ import pytest
 
 from tabular_agent.harness import journal
 from tabular_agent.harness.session import RunSession
-from tabular_agent.harness.tools import finalize_run, inspect_data, train_tabular_model
+from tabular_agent.io import load_table
+from tabular_agent.harness.tools import (
+    finalize_run,
+    fit_encoding,
+    inspect_data,
+    train_tabular_model,
+)
 from tabular_agent.taskspec import TaskSpec
 
 
@@ -98,6 +104,91 @@ def test_train_refuses_when_no_numeric_features_remain(tmp_path):
     inspect_data(s)
     with pytest.raises(ValueError, match="no numeric feature columns"):
         train_tabular_model(s)
+
+
+def test_fit_encoding_makes_a_dropped_column_usable(session):
+    inspect_data(session)
+    out = fit_encoding(session, ["city"], "frequency")
+
+    assert out["new_columns"] == ["city_freq"]
+    assert out["non_numeric_columns"] == ["city"]  # the raw string column stays, unused
+    json.dumps(out)
+
+    trained = train_tabular_model(session, table=out["table"])
+    assert trained["n_features"] == 3  # x1, x2 + the new encoded column
+    assert "city_freq" in load_table(os.path.join(session.run_dir, out["table"])).columns
+
+
+def test_fit_encoding_records_the_table_in_the_journal(session):
+    inspect_data(session)
+    out = fit_encoding(session, ["city"], "frequency")
+
+    tables = journal.load(session.run_dir)["tables"]
+    assert [t["id"] for t in tables] == ["t1"]
+    assert tables[0]["path"] == out["table"]
+    assert tables[0]["method"] == "frequency"
+
+
+def test_target_encoding_stores_oof_values_but_a_full_fit_encoder(session):
+    """The §5.2 split: honest values to train on, the all-rows encoder to serve."""
+    inspect_data(session)
+    out = fit_encoding(session, ["city"], "target")
+
+    table = load_table(os.path.join(session.run_dir, out["table"]))
+    lineage_path = os.path.join(session.run_dir, "tables", "t1.pipeline.json")
+    with open(lineage_path) as f:
+        lineage = json.load(f)
+    encoder = lineage["steps"][0]["encoder"]
+    assert encoder["kind"] == "target"
+
+    # Each row's stored value was fitted without that row's fold; the serving
+    # encoder saw every row. They must therefore disagree.
+    full_fit = pd.Series(table["city"].map(encoder["mapping"]["city"]))
+    assert not np.allclose(table["city_te"], full_fit)
+
+
+def test_ordinal_encoding_needs_the_order_and_keeps_it(tmp_path):
+    path = str(tmp_path / "d.csv")
+    rng = np.random.default_rng(0)
+    sizes = rng.choice(["small", "medium", "large"], size=60)
+    rank = pd.Series(sizes).map({"small": 0, "medium": 1, "large": 2})
+    pd.DataFrame({"size": sizes, "y": rank * 2.0 + rng.normal(size=60)}).to_csv(path, index=False)
+    s = RunSession(str(tmp_path / "run"), path, TaskSpec(target="y", n_splits=3))
+    inspect_data(s)
+
+    with pytest.raises(ValueError, match="requires categories"):
+        fit_encoding(s, ["size"], "ordinal")
+
+    out = fit_encoding(
+        s, ["size"], "ordinal", categories={"size": ["small", "medium", "large"]}
+    )
+    table = load_table(os.path.join(s.run_dir, out["table"]))
+    assert list(table.loc[table["size"] == "large", "size_ord"].unique()) == [2.0]
+
+
+def test_encoder_reaches_the_bundle_and_predicts_from_raw_rows(session):
+    """The point of the lineage sidecar: raw strings in, prediction out."""
+    inspect_data(session)
+    enc = fit_encoding(session, ["city"], "frequency")
+    train_tabular_model(session, table=enc["table"], model_type="lgbm")
+    out = finalize_run(session)
+
+    from tabular_agent.pipeline import load_bundle, predict_bundle
+
+    bundle_dir = os.path.join(session.run_dir, out["bundle_dir"])
+    bundle = load_bundle(bundle_dir)
+    assert [s["type"] for s in bundle["pipeline"].to_dict()["steps"]] == ["encode"]
+    assert "city_freq" in bundle["feature_names"]
+
+    # Raw rows: the string column, never the encoded one, and no target.
+    raw = load_table(session.data_path).drop(columns=["y"])
+    assert len(predict_bundle(bundle, raw)) == 200
+
+
+def test_fit_encoding_refuses_to_encode_the_target(session):
+    inspect_data(session)
+    with pytest.raises(ValueError, match="refusing to encode the target"):
+        fit_encoding(session, ["y"], "frequency")
 
 
 def test_finalize_packages_the_best_experiment(session):

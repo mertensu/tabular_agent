@@ -20,8 +20,9 @@ import numpy as np
 import pandas as pd
 
 from ..cv import make_folds
+from ..encoders import fit_encoding as _fit_encoding
 from ..inspect import profile_dataframe
-from ..io import load_table
+from ..io import load_table, save_parquet
 from ..metrics import greater_is_better
 from ..models import train_cv
 from ..pipeline import Pipeline, save_bundle
@@ -31,6 +32,27 @@ from .session import RunSession
 
 #: Column-level detail is capped so a wide table cannot blow up the context.
 MAX_REPORTED_COLUMNS = 60
+
+
+def _lineage_path(table_path: str) -> str:
+    """Sidecar recording the pipeline steps that produced a derived table.
+
+    A feature table on disk is only half the artifact: the other half is *how to
+    reproduce its columns from raw input at predict time*. Keeping that next to
+    the table (rather than in a single run-wide pipeline) means a run can branch
+    into several feature tables and each still knows its own provenance, so
+    ``finalize_run`` can package whichever one the winning model was trained on.
+    """
+    return os.path.splitext(table_path)[0] + ".pipeline.json"
+
+
+def _load_lineage(table_path: str, task_type: str) -> Pipeline:
+    """The steps behind ``table_path``; empty for the raw input table."""
+    path = _lineage_path(table_path)
+    if not os.path.exists(path):
+        return Pipeline(task_type)
+    with open(path) as f:
+        return Pipeline.from_dict(json.load(f))
 
 
 def _feature_frame(df: pd.DataFrame, target: str) -> tuple[pd.DataFrame, list[str]]:
@@ -86,6 +108,92 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
             "method='frequency' or 'target' when they are nominal."
             if dropped
             else "All feature columns are numeric and usable as-is."
+        ),
+    }
+
+
+def fit_encoding(
+    session: RunSession,
+    columns: list[str],
+    method: str = "frequency",
+    table: str | None = None,
+    categories: dict[str, list] | None = None,
+    smoothing: float = 10.0,
+) -> dict:
+    """Encode categorical columns into a new feature table (spec §5.2).
+
+    The only way to make a non-numeric column usable: ``train_tabular_model``
+    drops what it cannot feed to a GBDT, and there is no tool that casts a
+    column in place. Writes ``tables/<id>.parquet`` (the source table plus the
+    encoded columns) and, beside it, the lineage sidecar recording the fitted
+    encoder — so whichever table the winning model was trained on carries the
+    parameters needed to reproduce its columns at predict time.
+
+    ``method="target"`` is the leaky one, and is why this is a tool rather than
+    a free-code transform: the table gets **out-of-fold** values (honest to
+    train on) while the sidecar stores the **all-rows** encoder (correct at
+    predict). ``method="frequency"`` and ``method="ordinal"`` never look at the
+    target; ``ordinal`` needs ``categories`` — the level order per column, which
+    is never inferred.
+    """
+    path = session.resolve_table(table)
+    spec = session.resolved()
+    df = load_table(path)
+
+    missing = [c for c in columns if c not in df.columns]
+    if missing:
+        raise ValueError(f"columns not in {session.rel(path)}: {missing}")
+    if spec.target in columns:
+        raise ValueError(f"refusing to encode the target column {spec.target!r} as a feature")
+
+    kwargs = {"smoothing": smoothing, "categories": categories}
+    if method == "target":
+        y = df[spec.target]
+        # Same seed and n_splits as training, so the out-of-fold values in the
+        # table were held out of exactly the folds the model is scored on.
+        kwargs["y"] = y
+        kwargs["folds"] = make_folds(y, spec.task_type, n_splits=spec.n_splits, seed=spec.seed)
+    train_features, encoder = _fit_encoding(df, columns, method, **kwargs)
+
+    out = df.join(train_features)
+    table_id = journal.next_table_id(session.run_dir)
+    out_path = session.ctx.path("tables", f"{table_id}.parquet")
+    save_parquet(out, out_path)
+
+    lineage = _load_lineage(path, spec.task_type)
+    lineage.add_encoder(encoder)
+    with open(_lineage_path(out_path), "w") as f:
+        json.dump(lineage.to_dict(), f, indent=2)
+
+    new_columns = list(train_features.columns)
+    row = {
+        "id": table_id,
+        "path": session.rel(out_path),
+        "source_table": session.rel(path),
+        "method": method,
+        "encoded_columns": list(columns),
+        "new_columns": new_columns,
+        "n_steps": len(lineage.steps),
+    }
+    journal.append_table(session.run_dir, row)
+
+    _, still_dropped = _feature_frame(out, spec.target)
+    return {
+        "table": row["path"],
+        "method": method,
+        "new_columns": new_columns,
+        "n_rows": int(len(out)),
+        "source_table": row["source_table"],
+        "non_numeric_columns": still_dropped,
+        "note": (
+            "Pass this table to train_tabular_model to use the new columns. "
+            + (
+                "The values stored here are out-of-fold; the encoder fitted on all "
+                "rows is kept in the table's lineage and is what runs at predict time."
+                if method == "target"
+                else "The fitted encoder is kept in the table's lineage and replays at "
+                "predict time."
+            )
         ),
     }
 
@@ -201,7 +309,10 @@ def finalize_run(session: RunSession) -> dict:
         meta = json.load(f)
     model = joblib.load(os.path.join(exp_dir, "final_model.joblib"))
 
-    pipeline = Pipeline(meta["task_type"])
+    # The bundle must be able to rebuild the winning model's features from *raw*
+    # input, so it inherits the lineage of whichever table that model was trained
+    # on — empty when it trained on the raw table, one step per encoding otherwise.
+    pipeline = _load_lineage(session.resolve_table(meta["source_table"]), meta["task_type"])
     bundle_dir = save_bundle(
         session.ctx,
         pipeline,

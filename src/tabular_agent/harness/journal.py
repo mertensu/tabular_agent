@@ -33,6 +33,7 @@ def load(run_dir: str) -> dict:
             "task": None,
             "baseline": None,
             "best": None,
+            "tables": [],
             "leaderboard": [],
             "log": [],
         }
@@ -50,6 +51,23 @@ def save(run_dir: str, journal: dict) -> str:
 def set_task(run_dir: str, *, target: str, task_type: str, metric: str) -> dict:
     journal = load(run_dir)
     journal["task"] = {"target": target, "task_type": task_type, "metric": metric}
+    save(run_dir, journal)
+    return journal
+
+
+def next_table_id(run_dir: str) -> str:
+    return f"t{len(load(run_dir).get('tables', [])) + 1}"
+
+
+def append_table(run_dir: str, row: dict) -> dict:
+    """Record a derived feature table (§19.2, same discipline as experiments).
+
+    Written as a side effect of actually producing the table, so an agent
+    resuming after a context reset can see which feature tables exist and how
+    each was made without re-deriving it.
+    """
+    journal = load(run_dir)
+    journal.setdefault("tables", []).append(row)
     save(run_dir, journal)
     return journal
 

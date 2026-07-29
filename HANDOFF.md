@@ -3,6 +3,28 @@
 > Session log for working across two machines. Newest entry on top.
 > Update before ending a session, then commit & push. Pull and read this first when starting.
 
+## 2026-07-29 — Harness step 2: `fit_encoding` tool + table lineage + non-Anthropic model
+
+**Machine:** MacBook Air
+**Branch:** master
+
+**Done:**
+- **`fit_encoding` is now a tool** (4th on the agent's surface) — `tools.fit_encoding(session, columns, method, table, categories, smoothing)`. Writes `tables/<id>.parquet` (source table + encoded columns), records the table in the journal (`next_table_id`/`append_table`), returns paths + column names only. Refuses to encode the target. Chains: pass a previous tool's `table` back in.
+- **Table lineage — the real design call.** Each derived table gets a `tables/<id>.pipeline.json` sidecar holding the fitted encoders that produced it. `finalize_run` now loads the lineage of *the table the winning model trained on* instead of building an empty `Pipeline`. Per-table rather than per-run because a run branches (t1, t2, …) and a run-wide pipeline would be a lie about at least one model. Generalizes to `transform_features` (`Pipeline.add_transform` already exists).
+- **Provider-agnostic model wiring** — `agent.gateway_model(model_id)` → `OpenAIChatModel` over an OpenAI-compatible gateway (Requesty, `https://router.requesty.ai/v1`); `build_agent`/`run` now accept a model string *or* a `Model` object. `load_api_key` reads `$REQUESTY_API_KEY` then `config.env`. **`DEFAULT_GATEWAY_MODEL = "tensorx/deepseek-v4-flash"`.** `.gitignore` now covers `*.env`, `.secrets/`, `*.key` — `config.env` is untracked and was never committed.
+- **Bug found by the live run** (`models._make_model`): caller params collided with our keyword defaults — `TypeError: got multiple values` for lgbm/xgb, and CatBoost *rejects* two spellings of one setting (`iterations` vs `n_estimators`), which killed a whole agent run. Now merged through `_resolve_params` with a CatBoost alias table. 2 tests.
+- **Notebook `phase3_harness_step2_encoding.ipynb`** (40 cells, ships unexecuted, all 19 code cells smoke-tested in order **including a real agent run on deepseek**). Covers the label-encoding trap, the three encoders, OOF-vs-full-fit, lineage, and journal-vs-model-prose.
+- **Tests: 103 passed** (7 new in `test_harness_tools.py`, tool-surface set updated to 4).
+
+**Next:**
+- `transform_features` (sandboxed free code) — the lineage step type already exists, so this is the same adapter pattern plus `add_transform`.
+- Then `blend_models`, `predict`, `journal_append`; §19 compaction + harness-owned stop (the live run did 12 experiments long past the point of gains).
+
+**Gotchas:**
+- The live agent frequency-encoded `size` instead of using `ordinal` — safe but suboptimal. The harness enforces *can't do the unsafe thing*, not *does the smart thing*. Don't confuse the two when reading a run.
+- `result.usage` is a property in pydantic-ai 2.19, not a method.
+- Requesty rewrites the model id in its response (`tensorx/...` → `deepseek/...`); that's the router, not a misconfiguration.
+
 ## 2026-07-29 — `OrdinalEncoder`: ordered categoricals as a first-class encoder
 
 **Machine:** MacBook Air

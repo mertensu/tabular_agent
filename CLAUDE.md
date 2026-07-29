@@ -2,6 +2,21 @@
 
 Leakage-safe tabular-ML core library. See `docs/` for Phase-2 requirements.
 
+## Keep Ulf in the loop (quizzes + notebooks)
+
+Ulf is building this to *understand* it, not just to have it built. Code that lands
+without him following it is a failure even if the tests pass. So, for every
+meaningful chunk:
+
+- **Quiz him on it.** Short, concrete questions about the chunk just built — the
+  design call and the failure it prevents, not trivia. Ask them one at a time and
+  wait for the answer.
+- **Ship a notebook with it**, in the style of `notebooks/phase3_harness_step1.ipynb`:
+  drive the new machinery by hand first, LLM/automation only at the end; ships
+  unexecuted, but every code cell smoke-tested in order beforehand. One notebook
+  per slice — extend the existing one if the chunk is a direct continuation of it,
+  otherwise start a new one.
+
 ## Multi-machine workflow
 
 This repo is worked on from two Macs. `HANDOFF.md` is the session log that bridges them:

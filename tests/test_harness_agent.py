@@ -12,7 +12,7 @@ pytest.importorskip("pydantic_ai")
 
 from tabular_agent.harness.agent import DEFAULT_MODEL, build_agent  # noqa: E402
 
-EXPECTED_TOOLS = {"inspect_data", "train_tabular_model", "finalize_run"}
+EXPECTED_TOOLS = {"inspect_data", "fit_encoding", "train_tabular_model", "finalize_run"}
 
 
 def test_the_agent_has_exactly_the_leakage_safe_tools():

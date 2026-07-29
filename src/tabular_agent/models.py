@@ -31,28 +31,63 @@ class _Baseline:
         return np.tile(self.proba_, (len(X), 1))
 
 
-def _make_model(model_type: str, task_type: str, params: dict | None, seed: int):
+#: CatBoost accepts several spellings of the same setting and **rejects** being given
+#: two of them, even with identical values. Our defaults use one spelling; a caller may
+#: reasonably use another (`iterations` for `n_estimators`, `depth` for `max_depth`), so
+#: a supplied alias has to *replace* our default rather than sit next to it.
+_CATBOOST_ALIASES: tuple[tuple[str, ...], ...] = (
+    ("n_estimators", "iterations", "num_boost_round", "num_trees"),
+    ("random_state", "random_seed"),
+    ("verbose", "logging_level", "silent", "verbose_eval"),
+    ("learning_rate", "eta"),
+    ("max_depth", "depth"),
+    ("reg_lambda", "l2_leaf_reg"),
+)
+
+
+def _resolve_params(defaults: dict, params: dict | None, aliases=()) -> dict:
+    """Defaults with caller params layered on top, one key per setting.
+
+    Splatting `**params` next to keyword defaults raises `TypeError: got multiple
+    values` the moment a caller re-specifies a default — and these params come from
+    an LLM, which will. Merging into a single dict makes overriding the normal case
+    instead of a crash.
+    """
+    out = dict(defaults)
     p = dict(params or {})
+    for group in aliases:
+        if any(name in p for name in group):
+            for name in group:
+                out.pop(name, None)
+    out.update(p)
+    return out
+
+
+def _make_model(model_type: str, task_type: str, params: dict | None, seed: int):
     if model_type == "baseline":
         return _Baseline(task_type)
     if model_type == "lgbm":
         import lightgbm as lgb
 
-        if task_type == "regression":
-            return lgb.LGBMRegressor(random_state=seed, n_estimators=200, verbose=-1, **p)
-        return lgb.LGBMClassifier(random_state=seed, n_estimators=200, verbose=-1, **p)
+        kw = _resolve_params({"random_state": seed, "n_estimators": 200, "verbose": -1}, params)
+        cls = lgb.LGBMRegressor if task_type == "regression" else lgb.LGBMClassifier
+        return cls(**kw)
     if model_type == "xgb":
         import xgboost as xgb
 
-        if task_type == "regression":
-            return xgb.XGBRegressor(random_state=seed, n_estimators=200, verbosity=0, **p)
-        return xgb.XGBClassifier(random_state=seed, n_estimators=200, verbosity=0, **p)
+        kw = _resolve_params({"random_state": seed, "n_estimators": 200, "verbosity": 0}, params)
+        cls = xgb.XGBRegressor if task_type == "regression" else xgb.XGBClassifier
+        return cls(**kw)
     if model_type == "catboost":
         from catboost import CatBoostClassifier, CatBoostRegressor
 
-        if task_type == "regression":
-            return CatBoostRegressor(random_state=seed, n_estimators=200, verbose=False, **p)
-        return CatBoostClassifier(random_state=seed, n_estimators=200, verbose=False, **p)
+        kw = _resolve_params(
+            {"random_state": seed, "n_estimators": 200, "verbose": False},
+            params,
+            _CATBOOST_ALIASES,
+        )
+        cls = CatBoostRegressor if task_type == "regression" else CatBoostClassifier
+        return cls(**kw)
     raise ValueError(f"unknown model_type: {model_type}")
 
 

@@ -1,7 +1,15 @@
 .venv/
 __pycache__/
+.DS_Store
+catboost_info/
 *.pyc
 .pytest_cache/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Secrets — API keys live here and must never be committed.
+.secrets/
+.env
+*.env
+*.key
