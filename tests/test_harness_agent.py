@@ -68,3 +68,32 @@ def test_missing_key_says_what_to_do(tmp_path, monkeypatch):
     monkeypatch.delenv("REQUESTY_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="no API key"):
         load_api_key(key_path="definitely_absent.env")
+
+
+def test_a_bad_argument_is_retryable_not_fatal(tmp_path):
+    """One malformed argument must not throw away a run's completed experiments."""
+    import pandas as pd
+    from pydantic_ai import ModelRetry
+
+    from tabular_agent.harness.agent import _retryable
+    from tabular_agent.harness.session import RunSession
+    from tabular_agent.harness.tools import fit_encoding, inspect_data
+    from tabular_agent.taskspec import TaskSpec
+
+    path = str(tmp_path / "d.csv")
+    pd.DataFrame({"size": ["small", "large"] * 20, "y": [0, 1] * 20}).to_csv(path, index=False)
+    s = RunSession(str(tmp_path / "run"), path, TaskSpec(target="y", n_splits=2))
+    inspect_data(s)
+
+    with pytest.raises(ModelRetry, match="no level order given"):
+        _retryable(lambda: fit_encoding(s, ["size"], "ordinal", categories={"size": []}))
+
+
+def test_a_real_bug_still_stops_the_run():
+    from tabular_agent.harness.agent import _retryable
+
+    def boom():
+        raise KeyError("this is a bug, not a bad argument")
+
+    with pytest.raises(KeyError):
+        _retryable(boom)

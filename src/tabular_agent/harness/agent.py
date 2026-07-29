@@ -106,8 +106,29 @@ class Deps:
     session: RunSession
 
 
+def _retryable(call):
+    """Turn a rejected argument into a message the model can act on.
+
+    Every tool here validates its inputs and raises ``ValueError`` — an
+    undeclared ordinal level, a missing column, encoding the target. Letting
+    that propagate ends the run, throwing away every experiment already
+    completed because of one malformed argument. As ``ModelRetry`` it costs a
+    single turn instead, and the message *is* the correction: the validation
+    errors are written to say what was wrong and what to pass.
+
+    Only ``ValueError`` is caught. A bug in the pipeline should still stop the
+    run loudly rather than be handed to the model to guess at.
+    """
+    from pydantic_ai import ModelRetry
+
+    try:
+        return call()
+    except ValueError as e:
+        raise ModelRetry(str(e)) from e
+
+
 def build_agent(model=DEFAULT_MODEL):
-    """An agent whose *entire* tool surface is the three functions below.
+    """An agent whose *entire* tool surface is the four functions below.
 
     ``model`` is either a PydanticAI model string (``"anthropic:..."``,
     ``"openai:..."``) or a ``Model`` object — e.g. from :func:`gateway_model`,
@@ -131,7 +152,7 @@ def build_agent(model=DEFAULT_MODEL):
         Args:
             table: Path to the table. Omit to use the run's raw input table.
         """
-        return tools.inspect_data(ctx.deps.session, table)
+        return _retryable(lambda: tools.inspect_data(ctx.deps.session, table))
 
     @agent.tool
     def fit_encoding(
@@ -157,13 +178,15 @@ def build_agent(model=DEFAULT_MODEL):
             smoothing: For method="target" only: pulls small categories towards
                 the global mean.
         """
-        return tools.fit_encoding(
-            ctx.deps.session,
-            columns=columns,
-            method=method,
-            table=table,
-            categories=categories,
-            smoothing=smoothing,
+        return _retryable(
+            lambda: tools.fit_encoding(
+                ctx.deps.session,
+                columns=columns,
+                method=method,
+                table=table,
+                categories=categories,
+                smoothing=smoothing,
+            )
         )
 
     @agent.tool
@@ -180,8 +203,10 @@ def build_agent(model=DEFAULT_MODEL):
             model_type: One of "baseline", "lgbm", "xgb", "catboost".
             params: Optional model hyper-parameters.
         """
-        return tools.train_tabular_model(
-            ctx.deps.session, table=table, model_type=model_type, params=params
+        return _retryable(
+            lambda: tools.train_tabular_model(
+                ctx.deps.session, table=table, model_type=model_type, params=params
+            )
         )
 
     @agent.tool
@@ -190,7 +215,7 @@ def build_agent(model=DEFAULT_MODEL):
 
         Call this exactly once, when you are done experimenting.
         """
-        return tools.finalize_run(ctx.deps.session)
+        return _retryable(lambda: tools.finalize_run(ctx.deps.session))
 
     return agent
 

@@ -129,6 +129,12 @@ class OrdinalEncoder:
 
     def fit(self, df: pd.DataFrame, y=None) -> "OrdinalEncoder":
         for col, levels in self.categories.items():
+            if not levels:
+                raise ValueError(
+                    f"column {col!r}: no level order given. Pass every level in "
+                    f"increasing order, e.g. ['small', 'medium', 'large']; the "
+                    f"column's values are {sorted(df[col].astype(str).dropna().unique())[:10]}."
+                )
             dupes = {v for v in levels if levels.count(v) > 1}
             if dupes:
                 raise ValueError(
@@ -140,8 +146,9 @@ class OrdinalEncoder:
             if undeclared:
                 raise ValueError(
                     f"column {col!r}: values present in the data but missing from the "
-                    f"declared order: {undeclared}. Add them in the right position "
-                    f"(an ordinal encoding is only meaningful if the order is complete)."
+                    f"declared order: {undeclared}. Declared was {levels}. Add them in "
+                    f"the right position (an ordinal encoding is only meaningful if the "
+                    f"order is complete)."
                 )
         return self
 
