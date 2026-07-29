@@ -265,6 +265,10 @@ def train_tabular_model(
         "model_type": model_type,
         "params": params or {},
         "features": list(result.feature_names),
+        # Which feature table this was trained on, so a resuming agent can read
+        # the leaderboard alone and know what to reuse or beat — without opening
+        # each experiment's meta.json.
+        "source_table": session.rel(path),
         "metric": spec.metric,
         "cv_score": cv_score,
         "fold_spread": fold_spread,
@@ -281,6 +285,7 @@ def train_tabular_model(
         "fold_spread": fold_spread,
         "fold_metrics": meta["fold_metrics"],
         "n_features": len(result.feature_names),
+        "source_table": row["source_table"],
         "dropped_non_numeric": dropped,
         "vs_baseline": row["vs_baseline"],
         "higher_is_better": greater_is_better(spec.metric),

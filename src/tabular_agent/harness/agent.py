@@ -31,6 +31,31 @@ DEFAULT_KEY_PATH = "config.env"
 DEFAULT_GATEWAY_MODEL = "tensorx/deepseek-v4-flash"
 
 
+def _find_key_file(key_path: str) -> str | None:
+    """Locate a relative key file from anywhere sane — notably `notebooks/`.
+
+    A notebook's working directory is the notebook's own folder, not the repo
+    root, so a bare relative path resolves to nothing. Walk up from the working
+    directory and from this package, and take the first hit.
+    """
+    if os.path.isabs(key_path):
+        return key_path if os.path.exists(key_path) else None
+    starts = [os.getcwd(), os.path.dirname(os.path.abspath(__file__))]
+    seen = set()
+    for start in starts:
+        d = start
+        while d not in seen:
+            seen.add(d)
+            candidate = os.path.join(d, key_path)
+            if os.path.exists(candidate):
+                return candidate
+            parent = os.path.dirname(d)
+            if parent == d:
+                break
+            d = parent
+    return None
+
+
 def load_api_key(env_var: str = "REQUESTY_API_KEY", key_path: str = DEFAULT_KEY_PATH) -> str:
     """The API key from the environment, falling back to an untracked env file.
 
@@ -42,8 +67,9 @@ def load_api_key(env_var: str = "REQUESTY_API_KEY", key_path: str = DEFAULT_KEY_
     key = os.environ.get(env_var)
     if key:
         return key.strip()
-    if os.path.exists(key_path):
-        with open(key_path) as f:
+    found = _find_key_file(key_path)
+    if found:
+        with open(found) as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:

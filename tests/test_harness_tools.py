@@ -119,6 +119,18 @@ def test_fit_encoding_makes_a_dropped_column_usable(session):
     assert "city_freq" in load_table(os.path.join(session.run_dir, out["table"])).columns
 
 
+def test_leaderboard_rows_say_which_table_they_trained_on(session):
+    """A resuming agent must not have to open each meta.json to know that."""
+    inspect_data(session)
+    enc = fit_encoding(session, ["city"], "frequency")
+    train_tabular_model(session, model_type="baseline")
+    train_tabular_model(session, table=enc["table"], model_type="lgbm")
+
+    rows = journal.load(session.run_dir)["leaderboard"]
+    assert rows[0]["source_table"] == session.rel(session.data_path)  # the raw table
+    assert rows[1]["source_table"] == enc["table"] == "tables/t1.parquet"
+
+
 def test_fit_encoding_records_the_table_in_the_journal(session):
     inspect_data(session)
     out = fit_encoding(session, ["city"], "frequency")

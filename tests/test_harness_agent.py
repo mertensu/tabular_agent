@@ -36,3 +36,35 @@ def test_default_model_is_swappable():
     assert DEFAULT_MODEL.startswith("anthropic:")
     agent = build_agent("openai:gpt-4o")
     assert set(agent._function_toolset.tools) == EXPECTED_TOOLS
+
+
+def test_key_file_is_found_from_a_subdirectory(tmp_path, monkeypatch):
+    """Notebooks run with CWD set to their own folder, not the repo root."""
+    from tabular_agent.harness.agent import load_api_key
+
+    (tmp_path / "config.env").write_text("# comment\nREQUESTY_API_KEY=abc123\n")
+    sub = tmp_path / "notebooks"
+    sub.mkdir()
+    monkeypatch.chdir(sub)
+    monkeypatch.delenv("REQUESTY_API_KEY", raising=False)
+
+    assert load_api_key() == "abc123"
+
+
+def test_env_var_wins_over_the_file(tmp_path, monkeypatch):
+    from tabular_agent.harness.agent import load_api_key
+
+    (tmp_path / "config.env").write_text("REQUESTY_API_KEY=from_file\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REQUESTY_API_KEY", "from_env")
+
+    assert load_api_key() == "from_env"
+
+
+def test_missing_key_says_what_to_do(tmp_path, monkeypatch):
+    from tabular_agent.harness.agent import load_api_key
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("REQUESTY_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="no API key"):
+        load_api_key(key_path="definitely_absent.env")
