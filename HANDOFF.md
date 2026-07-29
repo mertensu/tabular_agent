@@ -3,6 +3,35 @@
 > Session log for working across two machines. Newest entry on top.
 > Update before ending a session, then commit & push. Pull and read this first when starting.
 
+## 2026-07-29 (later) — Live-run hardening: everything the first real agent runs broke
+
+Four live runs on `tensorx/deepseek-v4-flash` (Requesty) found five bugs the unit tests
+could not, because they were all *environment* or *agent-behaviour* bugs.
+
+**Fixed:**
+- **`config.env` wasn't found from `notebooks/`** — a notebook's CWD is its own folder. `load_api_key` now walks up from CWD *and* from the package. My smoke test ran from the repo root, which is exactly why it passed.
+- **`run_sync` in Jupyter** — "This event loop is already running". Notebook cells must `await agent.run(...)`; scripts want `run_sync`. Noted in the notebook.
+- **Ordinal encoding was impossible to request.** `inspect_data` reported `n_unique: 3` and never the values, so the agent could not state a level order it had never seen — it sent an empty list and the run died. Non-numeric columns with ≤20 uniques now list their `categories`. **After this fix the agent chose `ordinal` for `size` on the very next run, having gone `frequency` three runs running.** It wasn't reluctance, it was missing data.
+- **One bad argument killed a whole run** (8 completed experiments discarded). Tool `ValueError`/`FileNotFoundError` are now raised as `ModelRetry` → the agent self-corrects in one turn. Other exceptions still stop the run loudly.
+- **…which then died at PydanticAI's default budget of 1 retry.** `TOOL_RETRIES = 3` on the `Agent`, and unknown table paths now list the tables that exist instead of failing deeper down.
+- **`_make_model` param collisions** (see previous entry) — same class of bug: agent-supplied input meeting our defaults.
+
+**Result — "don't tune hyperparameters, work on features" beats tuning, on this data:**
+`0.2825` in 5–6 experiments (untuned) vs `0.2870` in 12 (tuned). The agent's own ablation:
+CatBoost on the raw table scores `0.6282` against a `0.6905` baseline — essentially all the
+signal is in the encoding. It also **branched** exactly as the lineage design assumes:
+`t1 (ordinal size)` → `t2 (freq city)` **and** → `t3 (target city)`, holding `t1` fixed to
+compare two encoders. Reproducible across two runs, 0 retries.
+
+**Next:**
+- **Concurrency (real, unfixed):** `next_table_id`/`next_experiment_id` read-then-write without a lock. PydanticAI dispatches a turn's tool calls concurrently, so two `fit_encoding` calls can both claim `t1` and write the same parquet — I saw one corrupt-parquet crash consistent with this. `e1` collisions would overwrite artifacts *silently*, which is worse. Fix: exclusive-create id claim + write-then-rename.
+- Ulf's call to make: put "prefer feature work over hyperparameter tuning" into `SYSTEM_PROMPT`? The evidence above supports it, but this dataset is friendly to that conclusion.
+- Then `transform_features`.
+
+**Gotchas:**
+- The model's prose lies in small ways — it reported the ordinal codes as "small=1, medium=2, large=3" when they are 0/1/2. The journal and the lineage sidecar are the record; the summary is a claim.
+- Restart the kernel after pulling, or the notebook keeps the old module.
+
 ## 2026-07-29 — Harness step 2: `fit_encoding` tool + table lineage + non-Anthropic model
 
 **Machine:** MacBook Air
