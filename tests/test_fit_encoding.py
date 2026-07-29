@@ -5,10 +5,13 @@ import pytest
 from tabular_agent.cv import make_folds
 from tabular_agent.encoders import (
     FrequencyEncoder,
+    OrdinalEncoder,
     ENCODER_CLASSES,
     fit_encoding,
     oof_target_encode,
 )
+
+SIZES = ["small", "medium", "large"]
 
 
 def test_frequency_encoder_maps_and_normalizes():
@@ -68,3 +71,52 @@ def test_fit_encoding_rejects_unknown_method():
     df = pd.DataFrame({"c": ["a"]})
     with pytest.raises(ValueError, match="unknown encoding method"):
         fit_encoding(df, ["c"], "onehot")
+
+
+def test_ordinal_encoder_uses_declared_order_not_appearance_order():
+    # "large" appears first and sorts first alphabetically; neither may decide the code.
+    df = pd.DataFrame({"size": ["large", "small", "medium"]})
+    enc = OrdinalEncoder({"size": SIZES}).fit(df)
+    assert list(enc.transform(df)["size_ord"]) == [2.0, 0.0, 1.0]
+
+
+def test_ordinal_unknown_category_maps_below_every_level():
+    train = pd.DataFrame({"size": ["small", "large"]})
+    enc = OrdinalEncoder({"size": SIZES}).fit(train)
+    unseen = pd.DataFrame({"size": ["medium", "gigantic"]})
+    assert list(enc.transform(unseen)["size_ord"]) == [1.0, -1.0]
+
+
+def test_ordinal_fit_rejects_a_value_missing_from_the_declared_order():
+    df = pd.DataFrame({"size": ["small", "gigantic"]})
+    with pytest.raises(ValueError, match="missing from the declared order.*gigantic"):
+        OrdinalEncoder({"size": SIZES}).fit(df)
+
+
+def test_ordinal_fit_rejects_duplicate_levels():
+    df = pd.DataFrame({"size": ["small"]})
+    with pytest.raises(ValueError, match="duplicate levels"):
+        OrdinalEncoder({"size": ["small", "small", "large"]}).fit(df)
+
+
+def test_ordinal_encoder_roundtrips_through_registry():
+    df = pd.DataFrame({"size": ["small", "medium", "large"]})
+    enc = OrdinalEncoder({"size": SIZES}).fit(df)
+    restored = ENCODER_CLASSES["ordinal"].from_dict(enc.to_dict())
+    pd.testing.assert_frame_equal(enc.transform(df), restored.transform(df))
+
+
+def test_fit_encoding_ordinal_needs_no_target():
+    df = pd.DataFrame({"size": ["medium", "small", "large"]})
+    train_feats, final = fit_encoding(df, ["size"], "ordinal", categories={"size": SIZES})
+    assert list(train_feats.columns) == ["size_ord"]
+    assert final.kind == "ordinal"
+    assert list(train_feats["size_ord"]) == [1.0, 0.0, 2.0]
+
+
+def test_fit_encoding_ordinal_requires_categories():
+    df = pd.DataFrame({"size": ["small"]})
+    with pytest.raises(ValueError, match="requires categories"):
+        fit_encoding(df, ["size"], "ordinal")
+    with pytest.raises(ValueError, match="missing a level order"):
+        fit_encoding(df, ["size"], "ordinal", categories={"other": SIZES})

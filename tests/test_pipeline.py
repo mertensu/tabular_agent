@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from tabular_agent.cv import make_folds
-from tabular_agent.encoders import oof_target_encode
+from tabular_agent.encoders import OrdinalEncoder, oof_target_encode
 from tabular_agent.models import train_cv
 from tabular_agent.pipeline import (
     Pipeline,
@@ -22,6 +22,32 @@ def test_pipeline_transform_roundtrip_dict():
     p.add_encoder(final_enc)
     restored = Pipeline.from_dict(p.to_dict())
     pd.testing.assert_frame_equal(p.transform(df), restored.transform(df))
+
+
+def test_ordinal_encoding_survives_the_bundle_and_ignores_row_order(tmp_path):
+    """The train/serve-skew guarantee: codes come from the stored order, not the data."""
+    levels = ["small", "medium", "large"]
+    train = pd.DataFrame({"size": ["small", "medium", "large", "small"]})
+    y = pd.Series([1.0, 5.0, 9.0, 1.0])
+    enc = OrdinalEncoder({"size": levels}).fit(train)
+
+    folds = make_folds(y, "regression", n_splits=4, seed=42)
+    X = enc.transform(train)[["size_ord"]]
+    res = train_cv(X, y, folds, "regression", "rmse", model_type="baseline")
+
+    pipeline = Pipeline("regression")
+    pipeline.add_encoder(enc)
+    ctx = RunContext(str(tmp_path / "run"))
+    bundle_dir = save_bundle(
+        ctx, pipeline, [res.final_model], np.array([1.0]), ["size_ord"], "regression"
+    )
+    bundle = load_bundle(bundle_dir)  # goes through JSON, like a real predict
+
+    # Reversed rows, and a level absent from this frame entirely: codes are unchanged.
+    new_raw = pd.DataFrame({"size": ["large", "small"]})
+    coded = bundle["pipeline"].transform(new_raw)["size_ord"]
+    assert list(coded) == [2.0, 0.0]
+    assert predict_bundle(bundle, new_raw).shape == (2,)
 
 
 def test_predict_bundle_no_target_needed_and_consistent(tmp_path):

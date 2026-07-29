@@ -81,7 +81,9 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
         "non_numeric_columns": dropped,
         "note": (
             "Non-numeric columns are not usable by the models as-is; encode them "
-            "with fit_encoding to bring them in."
+            "with fit_encoding to bring them in — method='ordinal' (stating the "
+            "level order) when the categories are genuinely ordered, "
+            "method='frequency' or 'target' when they are nominal."
             if dropped
             else "All feature columns are numeric and usable as-is."
         ),

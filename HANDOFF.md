@@ -3,6 +3,24 @@
 > Session log for working across two machines. Newest entry on top.
 > Update before ending a session, then commit & push. Pull and read this first when starting.
 
+## 2026-07-29 — `OrdinalEncoder`: ordered categoricals as a first-class encoder
+
+**Machine:** MacBook Air
+**Branch:** master
+
+**Done:**
+- **`OrdinalEncoder` in `encoders.py`** — `OrdinalEncoder(categories={"size": ["small","medium","large"]}, unknown=-1.0)`, emits `<col>_ord`, registered in `ENCODER_CLASSES` so it round-trips through `Pipeline`/`save_bundle` JSON. Uses only `X` → no folds, no leakage (same class of encoder as `FrequencyEncoder`).
+  - **Order is a required parameter, never inferred.** That's the whole point: `pd.factorize` orders by first appearance, `.cat.codes` lexicographically — both encode `Large/Medium/Small` as `0/1/2` and look fine doing it.
+  - **Strict at fit, lenient at predict:** a value in the fit data missing from the declared order raises (typo / forgotten level); a category first seen at predict maps to `unknown = -1`, below every level, so one split isolates it. Duplicate levels also raise.
+- **`fit_encoding(..., method="ordinal", categories={...})`** — third method alongside `target`/`frequency`; errors if `categories` is absent or doesn't cover `columns`.
+- **`inspect_data`'s note** now steers the agent: ordinal when the categories are genuinely ordered, frequency/target when nominal.
+- **Tests:** 8 new in `test_fit_encoding.py` + a bundle round-trip in `test_pipeline.py` (reversed row order + a level absent from the predict frame → codes unchanged). **Full suite: 95 passed.**
+
+**Why (Ulf's prompt):** he'd been label-encoding by hand and asked whether that was wrong. It's not leaky — the real risk is that an ad-hoc `factorize`/`cat.codes` mapping isn't *stateful*, so train and predict can silently disagree, and nothing lands in the pipeline. Ordered columns being common, the fix was a real encoder rather than a warning.
+
+**Next:**
+- Unchanged from below: `fit_encoding` (now with three methods) still needs its **harness tool wrapper** in `tools.py`, plus `transform_features`, `blend_models`, `predict`.
+
 ## 2026-07-28 — Harness step 1: file-based tool layer + PydanticAI loop (thin vertical slice)
 
 **Machine:** MacBook Air

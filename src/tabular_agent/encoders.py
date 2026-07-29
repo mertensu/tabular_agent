@@ -97,14 +97,87 @@ class FrequencyEncoder:
         return enc
 
 
+class OrdinalEncoder:
+    """Ordered category -> its rank, from an order the caller states explicitly.
+
+    For columns whose categories genuinely have an order (``small < medium <
+    large``, education level, Likert scales) integer codes are the *right*
+    encoding: one tree split at ``<= medium`` captures the concept, where
+    :class:`FrequencyEncoder` would scramble the order. Like the frequency
+    encoder it never touches ``y``, so it needs no out-of-fold machinery.
+
+    The order is a required parameter, never inferred. ``pd.factorize`` orders by
+    first appearance and ``.cat.codes`` on an unordered dtype orders
+    lexicographically -- both would encode ``Large/Medium/Small`` as ``0/1/2``
+    and look perfectly fine while doing it. Making the order an argument that is
+    serialized with the encoder is the whole point of this class.
+
+    Fit is strict, predict is lenient: a value present in the fit data but
+    missing from the declared order is an error (a typo or a forgotten level,
+    not something to paper over), while a category first seen at predict time
+    maps to ``unknown`` -- ``-1`` by default, i.e. below every declared level, so
+    a single split isolates it.
+    """
+
+    kind = "ordinal"
+
+    def __init__(self, categories: dict[str, list], unknown: float = -1.0):
+        self.categories = {str(c): [str(v) for v in levels] for c, levels in categories.items()}
+        self.columns = list(self.categories)
+        self.unknown = float(unknown)
+        self.mapping_: dict[str, dict[str, float]] = {}
+
+    def fit(self, df: pd.DataFrame, y=None) -> "OrdinalEncoder":
+        for col, levels in self.categories.items():
+            dupes = {v for v in levels if levels.count(v) > 1}
+            if dupes:
+                raise ValueError(
+                    f"column {col!r}: duplicate levels in the declared order: {sorted(dupes)}"
+                )
+            self.mapping_[col] = {v: float(i) for i, v in enumerate(levels)}
+            seen = set(df[col].astype(str).dropna().unique())
+            undeclared = sorted(seen - set(levels))
+            if undeclared:
+                raise ValueError(
+                    f"column {col!r}: values present in the data but missing from the "
+                    f"declared order: {undeclared}. Add them in the right position "
+                    f"(an ordinal encoding is only meaningful if the order is complete)."
+                )
+        return self
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        out = df.copy()
+        for col in self.columns:
+            mapped = df[col].astype(str).map(self.mapping_[col])
+            out[col + "_ord"] = mapped.fillna(self.unknown).astype(float)
+        return out
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": self.kind,
+            "columns": self.columns,
+            "categories": self.categories,
+            "unknown": self.unknown,
+            "mapping": self.mapping_,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "OrdinalEncoder":
+        enc = cls(d["categories"], d["unknown"])
+        enc.mapping_ = {c: dict(m) for c, m in d["mapping"].items()}
+        return enc
+
+
 ENCODER_CLASSES: dict[str, type] = {
     "target": TargetEncoder,
     "frequency": FrequencyEncoder,
+    "ordinal": OrdinalEncoder,
 }
 
 
 def fit_encoding(df, columns, method="target", *, y=None, folds=None,
-                 smoothing: float = 10.0, normalize: bool = True):
+                 smoothing: float = 10.0, normalize: bool = True,
+                 categories: dict[str, list] | None = None, unknown: float = -1.0):
     """Structured, leakage-safe encoding tool (spec §5.2).
 
     The typed entry point the MCP ``fit_encoding`` tool wraps. Unlike the
@@ -122,7 +195,9 @@ def fit_encoding(df, columns, method="target", *, y=None, folds=None,
       :class:`~tabular_agent.pipeline.Pipeline` and apply at predict.
 
     ``method="target"`` requires ``y`` and ``folds``. ``method="frequency"``
-    requires neither.
+    requires neither. ``method="ordinal"`` requires ``categories`` -- the level
+    order per column -- and no target either; use it when the column's
+    categories are genuinely ordered, frequency/target when they are nominal.
     """
     if method == "target":
         if y is None or folds is None:
@@ -134,7 +209,19 @@ def fit_encoding(df, columns, method="target", *, y=None, folds=None,
         enc = FrequencyEncoder(columns, normalize=normalize).fit(df)
         new = [c + "_freq" for c in columns]
         return enc.transform(df)[new], enc
-    raise ValueError(f"unknown encoding method: {method!r} (use 'target' or 'frequency')")
+    if method == "ordinal":
+        if categories is None:
+            raise ValueError("method='ordinal' requires categories={column: [level, ...]} "
+                             "(the order is never inferred, see OrdinalEncoder).")
+        missing = [c for c in columns if c not in categories]
+        if missing:
+            raise ValueError(f"method='ordinal' is missing a level order for: {missing}")
+        enc = OrdinalEncoder({c: categories[c] for c in columns}, unknown=unknown).fit(df)
+        new = [c + "_ord" for c in columns]
+        return enc.transform(df)[new], enc
+    raise ValueError(
+        f"unknown encoding method: {method!r} (use 'target', 'frequency' or 'ordinal')"
+    )
 
 
 def oof_target_encode(df, y, columns, folds, smoothing: float = 10.0):
