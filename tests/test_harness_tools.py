@@ -248,3 +248,14 @@ def test_bundle_predicts_on_raw_rows(session):
     preds = predict_bundle(bundle, raw)
 
     assert len(preds) == 200
+
+
+def test_an_invented_table_path_lists_the_real_ones(session):
+    """The caller is a model that mistyped; show it the menu instead of a stack trace."""
+    inspect_data(session)
+    fit_encoding(session, ["city"], "frequency")
+
+    with pytest.raises(ValueError, match=r"no such table: 'tables/t9.parquet'.*tables/t1.parquet"):
+        train_tabular_model(session, table="tables/t9.parquet")
+
+    assert session.available_tables() == ["tables/t1.parquet"]

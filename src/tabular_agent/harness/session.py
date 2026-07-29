@@ -47,12 +47,30 @@ class RunSession:
         Tools speak in paths (§4). ``None`` means the raw input table; a relative
         path is interpreted inside ``run_dir`` so the agent can pass back paths
         the tools handed it.
+
+        A path that does not exist raises ``ValueError`` listing the ones that do,
+        rather than failing later with a bare ``FileNotFoundError``: the caller is
+        usually a model that mistyped or invented a table, and the fix is to show
+        it the menu.
         """
         if table is None:
             return self.data_path
-        if os.path.isabs(table):
-            return table
-        return os.path.join(self.run_dir, table)
+        path = table if os.path.isabs(table) else os.path.join(self.run_dir, table)
+        if not os.path.exists(path):
+            raise ValueError(
+                f"no such table: {table!r}. Available: None (the raw input table)"
+                + "".join(f", {t!r}" for t in self.available_tables())
+            )
+        return path
+
+    def available_tables(self) -> list[str]:
+        """Derived feature tables that exist in the run dir, as the agent sees them."""
+        tables_dir = os.path.join(self.run_dir, "tables")
+        if not os.path.isdir(tables_dir):
+            return []
+        return sorted(
+            f"tables/{name}" for name in os.listdir(tables_dir) if name.endswith(".parquet")
+        )
 
     def rel(self, path: str) -> str:
         """Path as the agent should see it: relative to run_dir when inside it."""

@@ -30,6 +30,10 @@ DEFAULT_KEY_PATH = "config.env"
 #: nothing but tool calls, so a chat-only model fails on the first turn.
 DEFAULT_GATEWAY_MODEL = "tensorx/deepseek-v4-flash"
 
+#: Corrections allowed per tool before the run is abandoned. Bounded on purpose:
+#: a model looping on the same rejected argument should stop, not burn the budget.
+TOOL_RETRIES = 3
+
 
 def _find_key_file(key_path: str) -> str | None:
     """Locate a relative key file from anywhere sane — notably `notebooks/`.
@@ -116,14 +120,16 @@ def _retryable(call):
     single turn instead, and the message *is* the correction: the validation
     errors are written to say what was wrong and what to pass.
 
-    Only ``ValueError`` is caught. A bug in the pipeline should still stop the
-    run loudly rather than be handed to the model to guess at.
+    ``ValueError`` (our own input validation) and ``FileNotFoundError`` (a path
+    the model invented) are both argument problems. Anything else is a bug in the
+    pipeline and should stop the run loudly rather than be handed to the model to
+    guess at.
     """
     from pydantic_ai import ModelRetry
 
     try:
         return call()
-    except ValueError as e:
+    except (ValueError, FileNotFoundError) as e:
         raise ModelRetry(str(e)) from e
 
 
@@ -143,6 +149,10 @@ def build_agent(model=DEFAULT_MODEL):
         # The model name may be newer than the installed pydantic-ai's list of
         # known names; the string is passed through to the provider regardless.
         defer_model_check=True,
+        # PydanticAI allows one retry per tool by default. Exhausting it ends the
+        # run and discards every experiment already completed, which is a brutal
+        # price for two bad arguments in a run that makes dozens of calls.
+        retries=TOOL_RETRIES,
     )
 
     @agent.tool
