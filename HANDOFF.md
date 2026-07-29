@@ -24,7 +24,10 @@ signal is in the encoding. It also **branched** exactly as the lineage design as
 compare two encoders. Reproducible across two runs, 0 retries.
 
 **Next:**
-- **Concurrency (real, unfixed):** `next_table_id`/`next_experiment_id` read-then-write without a lock. PydanticAI dispatches a turn's tool calls concurrently, so two `fit_encoding` calls can both claim `t1` and write the same parquet — I saw one corrupt-parquet crash consistent with this. `e1` collisions would overwrite artifacts *silently*, which is worse. Fix: exclusive-create id claim + write-then-rename.
+- **Concurrency (real, unfixed):** `next_table_id`/`next_experiment_id` read-then-write without a lock. A model can put several tool calls in **one** message, and PydanticAI runs those concurrently (sync tools go to worker threads), so two `fit_encoding` calls can both claim `t1` and write the same parquet — one corrupt-parquet crash seen, consistent with this, but **not reproduced on demand**; it is not confirmed that this model emits parallel calls. Worth checking first: count tool-call parts per message in `result.all_messages()`; >1 in a message means it happens. `e1` collisions would overwrite artifacts *silently*, which is worse than the crash.
+  Two fixes, do both eventually:
+  1. `Agent(..., max_concurrency=1)` — one line, serializes tool execution, kills the whole class now. Costs parallelism we don't currently benefit from (each tool takes seconds anyway). **Unverified — no live run since finding it.**
+  2. Exclusive-create id claim + write-then-rename. The real fix: `max_concurrency` is per-Agent, so it cannot protect a run dir touched by two processes (a resumed run alongside the original).
 - Ulf's call to make: put "prefer feature work over hyperparameter tuning" into `SYSTEM_PROMPT`? The evidence above supports it, but this dataset is friendly to that conclusion.
 - Then `transform_features`.
 
