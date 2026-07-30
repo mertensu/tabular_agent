@@ -92,3 +92,60 @@ def test_pipeline_persists_and_replays_transform():
     b = restored.transform(df)
     pd.testing.assert_frame_equal(a, b)
     assert list(a["dist"]) == [5.0, 10.0]
+
+
+ROW_LOCAL = """
+import numpy as np
+def transform_features(df):
+    df = df.copy()
+    df["ratio"] = df["a"] / (df["b"] + 1)
+    df["flag"] = (df["a"] > 2).astype(int)
+    df["binned"] = np.digitize(df["a"], [0, 5, 10])
+    return df
+"""
+
+BATCH_DEPENDENT = """
+import pandas as pd
+def transform_features(df):
+    df = df.copy()
+    df["a_bin"] = pd.qcut(df["a"], 4, labels=False, duplicates="drop")
+    return df
+"""
+
+NORMALISED = """
+def transform_features(df):
+    df = df.copy()
+    df["a_z"] = (df["a"] - df["a"].mean()) / df["a"].std()
+    return df
+"""
+
+
+def _frame(n=40):
+    return pd.DataFrame({"a": np.arange(n, dtype=float), "b": np.arange(n, dtype=float) * 2})
+
+
+def test_row_local_code_is_stable_and_accepted():
+    out, summary = transform_features(_frame(), ROW_LOCAL)
+    assert set(summary["new_columns"]) == {"ratio", "flag", "binned"}
+
+
+def test_qcut_is_rejected_because_it_reads_the_whole_column():
+    """The real bug: quantiles over 800 training rows, over 5 at serving time."""
+    with pytest.raises(SandboxError, match="depend on which other rows"):
+        transform_features(_frame(), BATCH_DEPENDENT)
+
+
+def test_batch_normalisation_is_rejected_too():
+    with pytest.raises(SandboxError, match="a_z"):
+        transform_features(_frame(), NORMALISED)
+
+
+def test_the_message_points_at_the_tool_that_can_do_it_properly():
+    with pytest.raises(SandboxError, match="fit_encoding"):
+        transform_features(_frame(), NORMALISED)
+
+
+def test_the_check_can_be_switched_off():
+    """Predict-time replay must not pay for a fit-time check."""
+    out, _ = transform_features(_frame(), BATCH_DEPENDENT, check_stability=False)
+    assert "a_bin" in out.columns

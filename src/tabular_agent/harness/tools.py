@@ -210,9 +210,11 @@ def transform_features(
 
     The escape hatch: everything the structured tools cannot express — ratios,
     distances, date parts, per-row counts — while staying leakage-safe by
-    construction. The sandbox blocks the model and sklearn libraries, so this
-    code *cannot* learn a parameter from the data; anything stateful has to go
-    through ``fit_encoding``, which fits per fold.
+    construction. Two guards keep it stateless: the sandbox blocks the model and
+    sklearn libraries, and every produced column is re-run over a subset and
+    rejected if its values depend on the rest of the batch (``pd.qcut``, batch
+    normalisation — pure pandas, and the reason the import block alone is not
+    enough). Anything genuinely stateful goes through ``fit_encoding``.
 
     **The target column is not passed to the code.** Two reasons, and the second
     is the one that would actually bite: a derived column cannot be a function of
@@ -297,7 +299,43 @@ def _progress(session: RunSession) -> dict:
     return stop.evaluate(j["leaderboard"], metric, session.stop_policy)
 
 
-def _refuse_if_finished(session: RunSession) -> dict | None:
+def _refuse_if_table_exhausted(session: RunSession, path: str) -> dict | None:
+    """``None`` if this table may still be trained on, otherwise the redirect.
+
+    Distinct from :func:`_refuse_if_finished` in what it costs the agent: nothing.
+    The run is not over, and the next call on a *new* table goes straight
+    through. That asymmetry is the point — a table is cheap to give up on, a run
+    is not.
+    """
+    rel = session.rel(path)
+    # The raw input table lives outside run_dir, so `rel` hands back an absolute
+    # path. Correct for matching leaderboard rows, useless in a sentence aimed at
+    # a model whose way of naming it is to pass nothing at all.
+    label = "the raw input table" if path == session.data_path else rel
+    j = journal.load(session.run_dir)
+    metric = (j.get("task") or {}).get("metric") or session.resolved().metric
+    status = stop.table_status(j["leaderboard"], metric, session.stop_policy, rel, label)
+    if not status["exhausted"]:
+        return None
+
+    # A model that keeps asking for the same refused table is not being
+    # redirected, it is stuck. Escalate it into the run-level path, which knows
+    # how to end things with a bundle on disk.
+    repeats = journal.record_table_refusal(session.run_dir, rel)
+    if repeats >= session.stop_policy.max_refusals:
+        return _refuse_if_finished(session, force=True)
+
+    return {
+        "trained": False,
+        "table": label,
+        "table_exhausted": True,
+        "reason": status["reason"],
+        "next": "transform_features or fit_encoding, then train on the new table",
+        "note": stop.advisory(_progress(session), status),
+    }
+
+
+def _refuse_if_finished(session: RunSession, force: bool = False) -> dict | None:
     """``None`` if training may proceed, otherwise the refusal to hand back.
 
     The escalation matters. A first refusal explains itself and points at
@@ -307,8 +345,10 @@ def _refuse_if_finished(session: RunSession) -> dict | None:
     that is safely on disk does the harness raise and end things outright.
     """
     status = _progress(session)
-    if not status["should_stop"]:
+    if not status["should_stop"] and not force:
         return None
+    if force and status["reason"] is None:
+        status = dict(status, reason="the same exhausted table was requested repeatedly")
 
     refusals = journal.record_refusal(session.run_dir)
     policy = session.stop_policy
@@ -375,6 +415,11 @@ def train_tabular_model(
             return refusal
 
     path = session.resolve_table(table)
+    if enforce_stop:
+        refusal = _refuse_if_table_exhausted(session, path)
+        if refusal is not None:
+            return refusal
+
     spec = session.resolved()
     df = load_table(path)
 
@@ -440,6 +485,12 @@ def train_tabular_model(
     }
     journal.append_experiment(session.run_dir, row)
     status = _progress(session)
+    table_state = stop.table_status(
+        journal.load(session.run_dir)["leaderboard"],
+        spec.metric,
+        session.stop_policy,
+        session.rel(path),
+    )
 
     return {
         "trained": True,
@@ -459,8 +510,9 @@ def train_tabular_model(
         # run stands after every experiment, so a cooperative one never has to be
         # refused at all.
         "since_improvement": status["since_improvement"],
+        "since_improvement_on_table": table_state["since_improvement_on_table"],
         "experiments_remaining": status["experiments_remaining"],
-        "note": stop.advisory(status),
+        "note": stop.advisory(status, table_state),
     }
 
 
@@ -498,7 +550,9 @@ def finalize_run(session: RunSession) -> dict:
         meta["task_type"],
     )
 
+    credit = journal.attribution(j, meta["source_table"])
     text = build_report(
+        attribution=credit,
         task_type=meta["task_type"],
         metric=meta["metric"],
         selection_score=meta["cv_score"],
@@ -519,4 +573,9 @@ def finalize_run(session: RunSession) -> dict:
         "n_experiments": len(j["leaderboard"]),
         "bundle_dir": session.rel(bundle_dir),
         "report_path": session.rel(report_path),
+        # Which links in the winning table's history were actually measured. An
+        # unmeasured one means the score cannot be attributed to the columns
+        # either side of it — worth saying, since the agent is about to write a
+        # summary claiming some feature was the one that worked.
+        "unmeasured_tables": [s["table"] for s in credit if not s["measured"]],
     }

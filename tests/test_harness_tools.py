@@ -361,7 +361,68 @@ def test_every_result_says_where_the_run_stands(session):
 
     second = train_tabular_model(session, model_type="lgbm")
     assert second["since_improvement"] == 1
-    assert "since the last real improvement" in second["note"]
+    assert second["since_improvement_on_table"] == 1
+    assert "on this table without an improvement" in second["note"]
+
+
+def test_an_exhausted_table_is_refused_but_the_run_continues(tmp_path):
+    """The redirect: a table is cheap to give up on, a run is not."""
+    from tabular_agent.harness.stop import StopPolicy
+
+    rng = np.random.default_rng(3)
+    n = 200
+    x1 = rng.normal(size=n)
+    path = str(tmp_path / "d.csv")
+    pd.DataFrame(
+        {
+            "x1": x1,
+            "city": rng.choice(["a", "b", "c"], size=n),
+            "y": (x1 + rng.normal(scale=0.4, size=n) > 0).astype(int),
+        }
+    ).to_csv(path, index=False)
+    s = RunSession(
+        str(tmp_path / "run"),
+        path,
+        TaskSpec(target="y", n_splits=3),
+        stop_policy=StopPolicy(table_patience=2),
+    )
+    inspect_data(s)
+    for _ in range(3):
+        train_tabular_model(s, model_type="lgbm")  # same table, same model
+
+    refused = train_tabular_model(s, model_type="lgbm")
+    assert refused["trained"] is False
+    assert refused["table_exhausted"] is True
+    assert "transform_features" in refused["note"]
+
+    # The run is emphatically not over: new features, and training resumes.
+    enc = fit_encoding(s, ["city"], "frequency")
+    ok = train_tabular_model(s, table=enc["table"], model_type="lgbm")
+    assert ok["trained"] is True
+
+
+def test_asking_for_the_same_dead_table_over_and_over_ends_the_run(tmp_path):
+    from tabular_agent.harness.stop import StopPolicy
+
+    rng = np.random.default_rng(4)
+    n = 150
+    x1 = rng.normal(size=n)
+    path = str(tmp_path / "d.csv")
+    pd.DataFrame({"x1": x1, "y": (x1 > 0).astype(int)}).to_csv(path, index=False)
+    s = RunSession(
+        str(tmp_path / "run"),
+        path,
+        TaskSpec(target="y", n_splits=3),
+        stop_policy=StopPolicy(table_patience=1, max_refusals=2),
+    )
+    inspect_data(s)
+    train_tabular_model(s, model_type="lgbm")
+    train_tabular_model(s, model_type="lgbm")
+
+    outs = [train_tabular_model(s, model_type="lgbm") for _ in range(3)]
+    assert all(o["trained"] is False for o in outs)
+    # Stuck, not redirected — so it ends the way a finished run should: with a bundle.
+    assert outs[-1]["harness_finalized"] is True
 
 
 def test_a_model_that_will_not_stop_gets_the_run_packaged_for_it(tmp_path):
@@ -427,6 +488,56 @@ def test_finalize_autotrains_a_baseline_if_the_run_never_did(session):
     # The report can always answer "did this beat doing nothing?".
     assert out["baseline_score"] is not None
     assert out["best_experiment_id"] == "e1"
+
+
+def test_finalize_flags_a_table_that_was_never_trained_on(session):
+    """The t5/t6 case: build, extend, train only the child — the link is unmeasured.
+
+    The score of `t6` then cannot be split between what `t5` added and what `t6`
+    added, because nothing ever scored `t5`. The run stays valid; the report has
+    to stop short of claiming which features earned it.
+    """
+    inspect_data(session)
+    train_tabular_model(session, model_type="baseline")
+
+    t1 = transform_features(session, RATIO_CODE)              # built...
+    t2 = fit_encoding(session, ["city"], "frequency", table=t1["table"])  # ...and extended
+    train_tabular_model(session, table=t2["table"], model_type="lgbm")
+
+    out = finalize_run(session)
+    assert out["unmeasured_tables"] == [t1["table"]]
+
+    report = open(os.path.join(session.run_dir, out["report_path"])).read()
+    assert "Attribution gap" in report
+    assert "never trained on" in report
+
+
+def test_a_fully_measured_chain_has_no_gap(session):
+    inspect_data(session)
+    t1 = transform_features(session, RATIO_CODE)
+    train_tabular_model(session, table=t1["table"], model_type="lgbm")
+    t2 = fit_encoding(session, ["city"], "frequency", table=t1["table"])
+    train_tabular_model(session, table=t2["table"], model_type="lgbm")
+
+    out = finalize_run(session)
+    assert out["unmeasured_tables"] == []
+    report = open(os.path.join(session.run_dir, out["report_path"])).read()
+    assert "Attribution gap" not in report
+    assert "How the winning feature set was built" in report
+
+
+def test_attribution_walks_the_whole_chain(session):
+    inspect_data(session)
+    t1 = transform_features(session, RATIO_CODE)
+    t2 = fit_encoding(session, ["city"], "frequency", table=t1["table"])
+    train_tabular_model(session, table=t2["table"], model_type="lgbm")
+
+    j = journal.load(session.run_dir)
+    chain = journal.attribution(j, t2["table"])
+    assert [s["table"] for s in chain] == [t2["table"], t1["table"]]
+    assert chain[0]["measured"] and not chain[1]["measured"]
+    # The raw input table is not a derived table and has no row of its own.
+    assert journal.ancestry(j, session.rel(session.data_path)) == []
 
 
 def test_finalize_refuses_an_empty_run(session):

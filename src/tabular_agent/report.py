@@ -21,6 +21,7 @@ def build_report(
     model_types: list[str],
     feature_names: list[str],
     holdout_score: float | None = None,
+    attribution: list[dict] | None = None,
 ) -> str:
     fold_std = float(np.std(fold_metrics))
     lines = [
@@ -45,6 +46,29 @@ def build_report(
     lines.append("## Per-fold metrics")
     for i, m in enumerate(fold_metrics):
         lines.append(f"- fold {i}: {m:.4f}")
+
+    if attribution:
+        lines += ["", "## How the winning feature set was built", ""]
+        # Oldest first: the chain reads as the story of the features.
+        for step in reversed(attribution):
+            added = ", ".join(step["added"]) or "(no new columns)"
+            if step["measured"]:
+                scored = f"best {step['best_score']:.4f} over {step['n_experiments']} experiment(s)"
+            else:
+                scored = "**never trained on**"
+            lines.append(f"- `{step['table']}` — {step['method']}: {added} — {scored}")
+
+        unmeasured = [s for s in attribution if not s["measured"]]
+        if unmeasured:
+            names = ", ".join(f"`{s['table']}`" for s in unmeasured)
+            lines += [
+                "",
+                f"> **Attribution gap:** {names} was built and then extended without ever "
+                "being trained on. The winning score therefore cannot be split between "
+                "the columns that table added and the ones added after it — there is no "
+                "measurement in between. The model is valid; the explanation of *which "
+                "features earned the score* is not available from this run.",
+            ]
     return "\n".join(lines)
 
 

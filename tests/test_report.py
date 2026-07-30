@@ -54,3 +54,44 @@ def test_write_report_creates_file(tmp_path):
     path = write_report(ctx, "# hello")
     assert os.path.exists(path)
     assert path.endswith("run_report.md")
+
+
+def test_the_feature_story_reads_oldest_first():
+    """The chain is stored newest-first; the report has to tell it forwards."""
+    text = build_report(
+        task_type="binary",
+        metric="logloss",
+        selection_score=0.27,
+        fold_metrics=[0.27, 0.28],
+        baseline_score=0.69,
+        model_types=["lgbm"],
+        feature_names=["a"],
+        attribution=[
+            {"table": "tables/t2.parquet", "added": ["city_freq"], "method": "frequency",
+             "n_experiments": 1, "best_score": 0.27, "measured": True},
+            {"table": "tables/t1.parquet", "added": ["ratio"], "method": "transform",
+             "n_experiments": 1, "best_score": 0.31, "measured": True},
+        ],
+    )
+    assert text.index("tables/t1.parquet") < text.index("tables/t2.parquet")
+    assert "Attribution gap" not in text
+
+
+def test_an_unmeasured_link_is_called_out():
+    text = build_report(
+        task_type="binary",
+        metric="logloss",
+        selection_score=0.27,
+        fold_metrics=[0.27, 0.28],
+        baseline_score=0.69,
+        model_types=["lgbm"],
+        feature_names=["a"],
+        attribution=[
+            {"table": "tables/t6.parquet", "added": ["city_freq"], "method": "frequency",
+             "n_experiments": 4, "best_score": 0.27, "measured": True},
+            {"table": "tables/t5.parquet", "added": ["log_price", "price_sq"],
+             "method": "transform", "n_experiments": 0, "best_score": None, "measured": False},
+        ],
+    )
+    assert "never trained on" in text
+    assert "Attribution gap" in text and "tables/t5.parquet" in text

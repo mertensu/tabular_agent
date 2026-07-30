@@ -112,6 +112,61 @@ def append_experiment(run_dir: str, row: dict) -> dict:
     return journal
 
 
+def ancestry(journal: dict, table_path: str) -> list[str]:
+    """``table_path`` and every derived table behind it, newest first.
+
+    Stops at the raw input table, which has no row in ``tables`` because nothing
+    derived it.
+    """
+    parents = {t["path"]: t.get("source_table") for t in journal.get("tables") or []}
+    chain = []
+    seen = set()
+    current = table_path
+    while current in parents and current not in seen:
+        seen.add(current)
+        chain.append(current)
+        current = parents[current]
+    return chain
+
+
+def attribution(journal: dict, table_path: str) -> list[dict]:
+    """Which links in a table's history were actually measured (spec §19.4).
+
+    A feature table that was built and then extended without ever being trained
+    on leaves a gap: the score of its child cannot be attributed to the child's
+    columns rather than the parent's, because nothing ever scored the parent. The
+    run is still correct — the model that ships is the model that scored best —
+    but the *explanation* has a hole in it, and the report should say so rather
+    than let the winning table take credit for all of its columns.
+
+    Nothing here constrains the search. It only records what the run does and
+    does not entitle you to conclude.
+    """
+    by_path = {t["path"]: t for t in journal.get("tables") or []}
+    rows = journal.get("leaderboard") or []
+    metric = (journal.get("task") or {}).get("metric")
+    pick = max if (metric and greater_is_better(metric)) else min
+    out = []
+    for path in ancestry(journal, table_path):
+        experiments = [
+            r for r in rows if r.get("source_table") == path and r.get("cv_score") is not None
+        ]
+        table = by_path.get(path, {})
+        out.append(
+            {
+                "table": path,
+                "added": table.get("new_columns") or [],
+                "method": table.get("method"),
+                "n_experiments": len(experiments),
+                "best_score": (
+                    pick(r["cv_score"] for r in experiments) if experiments else None
+                ),
+                "measured": bool(experiments),
+            }
+        )
+    return out
+
+
 def stop_state(run_dir: str) -> dict:
     """Refusal bookkeeping for the stop rule (§19.3), tolerant of old journals."""
     return load(run_dir).get("stop") or {"refusals": 0, "finalized": False}
@@ -125,6 +180,21 @@ def record_refusal(run_dir: str) -> int:
     journal["stop"] = state
     save(run_dir, journal)
     return state["refusals"]
+
+
+def record_table_refusal(run_dir: str, table: str) -> int:
+    """Count a refused request for one exhausted table; return that table's total.
+
+    Per table rather than per run: being redirected off `t1` and then asking for
+    `t2` is the agent doing what it was told, and must not look like a loop.
+    """
+    journal = load(run_dir)
+    state = journal.get("stop") or {"refusals": 0, "finalized": False}
+    per_table = state.setdefault("table_refusals", {})
+    per_table[table] = per_table.get(table, 0) + 1
+    journal["stop"] = state
+    save(run_dir, journal)
+    return per_table[table]
 
 
 def mark_finalized(run_dir: str) -> dict:

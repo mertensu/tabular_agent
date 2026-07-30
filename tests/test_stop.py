@@ -6,11 +6,17 @@ series of sub-noise gains, a dip before a real improvement) would each take a
 dozen model fits to produce by accident.
 """
 
-from tabular_agent.harness.stop import StopPolicy, advisory, evaluate
+from tabular_agent.harness.stop import StopPolicy, advisory, evaluate, table_status
 
 
-def row(id, score, spread=0.04, model_type="lgbm"):
-    return {"id": id, "model_type": model_type, "cv_score": score, "fold_spread": spread}
+def row(id, score, spread=0.04, model_type="lgbm", source_table="t1.parquet"):
+    return {
+        "id": id,
+        "model_type": model_type,
+        "cv_score": score,
+        "fold_spread": spread,
+        "source_table": source_table,
+    }
 
 
 POLICY = StopPolicy(patience=3, min_gain_ratio=0.25, max_experiments=25)
@@ -78,12 +84,65 @@ def test_the_experiment_ceiling_stops_a_run_that_keeps_improving():
     assert status["experiments_remaining"] == 0
 
 
+def test_a_long_search_over_new_tables_is_not_stopped():
+    """Eight ideas that did not work, to find the ninth that does. That is the job."""
+    lb = [row("e1", 0.40, source_table="t1.parquet")]
+    lb += [row(f"e{i + 2}", 0.41 + i * 0.01, source_table=f"t{i + 2}.parquet") for i in range(8)]
+
+    status = evaluate(lb, "logloss", StopPolicy())
+    assert status["since_improvement"] == 8
+    assert not status["should_stop"]  # patience is 10: the search continues
+
+
+def test_tuning_one_table_exhausts_that_table_and_not_the_run():
+    """Six hyper-parameter settings on one table are one experiment costed six times."""
+    lb = [row("e1", 0.40)] + [row(f"e{i + 2}", 0.41 + i * 0.005) for i in range(5)]
+
+    run = evaluate(lb, "logloss", StopPolicy())
+    assert not run["should_stop"]  # the run is fine
+
+    table = table_status(lb, "logloss", StopPolicy(), "t1.parquet")
+    assert table["exhausted"]  # this table is not
+    assert "hyper-parameters" in table["reason"]
+
+
+def test_a_fresh_table_is_never_exhausted():
+    lb = [row("e1", 0.40)] + [row(f"e{i + 2}", 0.41) for i in range(5)]
+    assert not table_status(lb, "logloss", StopPolicy(), "t2.parquet")["exhausted"]
+
+
+def test_a_table_that_keeps_improving_stays_open():
+    lb = [row(f"e{i + 1}", 0.5 - i * 0.1) for i in range(6)]
+    assert not table_status(lb, "logloss", StopPolicy(), "t1.parquet")["exhausted"]
+
+
+def test_experiments_on_other_tables_do_not_exhaust_this_one():
+    lb = [
+        row("e1", 0.40, source_table="t1.parquet"),
+        row("e2", 0.41, source_table="t2.parquet"),
+        row("e3", 0.42, source_table="t2.parquet"),
+        row("e4", 0.43, source_table="t2.parquet"),
+        row("e5", 0.44, source_table="t2.parquet"),
+    ]
+    assert not table_status(lb, "logloss", StopPolicy(), "t1.parquet")["exhausted"]
+    assert table_status(lb, "logloss", StopPolicy(), "t2.parquet")["exhausted"]
+
+
+def test_the_table_advisory_points_at_features_not_hyperparameters():
+    lb = [row("e1", 0.40)] + [row(f"e{i + 2}", 0.41) for i in range(3)]
+    note = advisory(
+        evaluate(lb, "logloss", StopPolicy()),
+        table_status(lb, "logloss", StopPolicy(), "t1.parquet"),
+    )
+    assert "transform_features" in note and "fit_encoding" in note
+
+
 def test_the_advisory_says_something_actionable_in_each_state():
     fresh = evaluate([row("e1", 0.3)], "logloss", POLICY)
     assert "best result so far" in advisory(fresh)
 
     stalling = evaluate([row("e1", 0.30), row("e2", 0.2999)], "logloss", POLICY)
-    assert "2 more without one" in advisory(stalling)
+    assert "1 experiment(s) since the last real improvement" in advisory(stalling)
 
     stopped = evaluate(
         [row("e1", 0.30), row("e2", 0.2999), row("e3", 0.2998), row("e4", 0.2997)],

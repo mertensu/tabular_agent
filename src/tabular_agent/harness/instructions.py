@@ -39,12 +39,18 @@ How to read a result:
 - `dropped_non_numeric` lists columns the model could not use. Those are
   signal you are leaving on the table, not columns to ignore.
 - `since_improvement` counts experiments since the score last moved by more than
-  the fold noise. When it starts climbing, more hyper-parameters will not save
-  you — change the features or stop.
+  the fold noise. `since_improvement_on_table` counts the same thing for the
+  table you just trained on.
 
-Knowing when to stop is part of the job. This run has a budget, and a score that
-has not moved in several experiments is finished, not unlucky. When the harness
-says the run is over, call `finalize_run` — it will not train again.
+Trying ideas that do not work is the job, and the run's budget is generous about
+it. But they have to be different ideas. Once a feature table has taken a few
+experiments without improving, the only thing left to vary on it is the model and
+its hyper-parameters — the cheapest experiment available and the least
+informative — so the harness stops training on that table. Build new features
+with `transform_features` or `fit_encoding` and train on what they produce.
+
+Knowing when to stop is also part of the job. When the harness says the run is
+over, call `finalize_run` — it will not train again.
 
 Report honestly. If a model does not beat the baseline, or a score looks too
 good, say that plainly rather than presenting it as a success.

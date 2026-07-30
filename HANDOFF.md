@@ -3,6 +3,86 @@
 > Session log for working across two machines. Newest entry on top.
 > Update before ending a session, then commit & push. Pull and read this first when starting.
 
+## 2026-07-30 (latest) — Stop rule reworked, attribution gaps, and a real leakage hole
+
+**Machine:** MacBook Air
+**Branch:** master
+
+### 1. `pd.qcut` — the guarantee had a hole (the important one)
+
+A live run wrote `pd.qcut(df["price"], 10)` inside a good 60-line transform. **Proved
+the skew:** loaded the shipped bundle, predicted the same 5 rows batched with 800 and
+alone — different predictions. `qcut` takes deciles of whatever frame it is handed.
+
+The step-3 notebook claimed the sandbox's import block means the code "cannot learn a
+parameter". **That was wrong.** Blocking sklearn does nothing against `qcut`,
+`rank(pct=True)`, `x / x.mean()` — pure pandas, all batch-dependent, and only the
+*code* is stored, so replay recomputes them from whatever arrives.
+
+Blacklisting calls is unwinnable (any aggregation is one), so `transform.unstable_columns`
+tests the **property**: re-run the code over a random 25% subset, compare rows present in
+both, reject columns that disagree. Costs one extra sandbox call at fit time, nothing at
+predict (`check_stability=False` on the replay path). Verified against the real offending
+code — flags exactly `['area_bin', 'price_bin']`, passes the other ~50 columns.
+Docstrings in `transform.py` / `tools.py` and the step-3 notebook all corrected.
+
+### 2. Stop rule reworked — **Ulf's call: "let it iterate and search"**
+
+`patience=4` punished exploration. Two-level rule now:
+- **`patience=10`** (run level, generous) — eight ideas that fail to find the ninth is
+  the job, not a failing search.
+- **`table_patience=3`** (per feature table, tight) — experiments on one table can only
+  differ by model/hyper-parameters. Refuses **that table**, not the run, and names
+  `transform_features`/`fit_encoding` as the next move. A redirect costs nothing; a stop
+  costs the answer. Escalates to the run level only if the same dead table is demanded
+  `max_refusals` times.
+
+**This settles the deferred `SYSTEM_PROMPT` question: "features over tuning" does NOT go
+in the prompt — it is now structural, in the tool.**
+
+### 3. Attribution gaps (Ulf spotted this)
+
+`t5` was built and immediately extended into `t6`; only `t6` was trained. So the jump
+`0.316 → 0.2741` cannot be split between t5's columns and t6's — no measurement in
+between. **Ulf chose option 2 of 3: report it, don't constrain the search.**
+`journal.attribution()` walks the winner's ancestry; `finalize_run` returns
+`unmeasured_tables`; the report gets a "How the winning feature set was built" section
+plus an explicit **Attribution gap** warning. Rejected option 1 (refuse to stack on an
+untrained table) for the same reason patience is generous.
+
+**Tests: 152 passed.** Notebooks `step3` (45 cells) and `step4` (38 cells) both
+regenerated and fully smoke-tested.
+
+### Live run (deepseek, apartments) — three-way comparison
+
+| rule | experiments | best |
+|---|---|---|
+| uncapped | 11 | 0.2718 |
+| patience=4 | 8 | 0.2743 |
+| patience=10 + table redirect | 19 | 0.2719 |
+
+**All three found the same score** (differences ≪ fold spread 0.02). Two findings:
+- **The structural refusal never fired — `refusals: 0`.** t6 hit its limit at e12, the
+  *advisory* said "this table is used up", and the model went and built new features on
+  its own. The guidance layer did the work; enforcement was the backstop that wasn't
+  needed. Best evidence yet for the two-layer design.
+- **The loosening bought nothing here: 19 experiments vs 8 for the same answer.** Open
+  question, not a settled result — this dataset's signal is nearly all in one column, so
+  there was never a ninth idea waiting. Needs a second dataset before judging.
+
+**Next:**
+- `blend_models` + `predict`, then §19 compaction.
+- **Known gap (Ulf raised, deferred):** nothing caps table *building* — only trainings
+  (`max_experiments=25`). A model could call `transform_features` forever without
+  training. Not observed; the fix is `max_tables` on `StopPolicy`.
+- Exclusive-create id claim (other half of the concurrency fix).
+
+**Gotchas:**
+- The model's summary claimed "city one-hot encoding" and "target encoding of listed_at
+  captured it" — it did hand-roll one-hot in transform code (`is_berlin` etc., which is
+  fine, stateless). Prose still drifts from the journal; the journal is the record.
+- `attribution()` picks best-per-table with `max`/`min` off the metric — don't hardcode.
+
 ## 2026-07-30 (later) — Harness step 4: the stop rule (§19.3)
 
 **Machine:** MacBook Air
