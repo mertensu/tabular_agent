@@ -36,6 +36,7 @@ def load(run_dir: str) -> dict:
             "tables": [],
             "leaderboard": [],
             "log": [],
+            "stop": {"refusals": 0, "finalized": False},
         }
     with open(path) as f:
         return json.load(f)
@@ -107,6 +108,30 @@ def append_experiment(run_dir: str, row: dict) -> dict:
                 "artifact_path": top["artifact_path"],
             }
 
+    save(run_dir, journal)
+    return journal
+
+
+def stop_state(run_dir: str) -> dict:
+    """Refusal bookkeeping for the stop rule (§19.3), tolerant of old journals."""
+    return load(run_dir).get("stop") or {"refusals": 0, "finalized": False}
+
+
+def record_refusal(run_dir: str) -> int:
+    """Count a training call the harness turned down; return the new total."""
+    journal = load(run_dir)
+    state = journal.get("stop") or {"refusals": 0, "finalized": False}
+    state["refusals"] = state.get("refusals", 0) + 1
+    journal["stop"] = state
+    save(run_dir, journal)
+    return state["refusals"]
+
+
+def mark_finalized(run_dir: str) -> dict:
+    journal = load(run_dir)
+    state = journal.get("stop") or {"refusals": 0, "finalized": False}
+    state["finalized"] = True
+    journal["stop"] = state
     save(run_dir, journal)
     return journal
 

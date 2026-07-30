@@ -306,6 +306,103 @@ def test_transform_must_preserve_the_rows(session):
         transform_features(session, code)
 
 
+def _stalled_session(tmp_path, patience=1, max_refusals=3):
+    """A run that has already trained twice with no real gain, so it is stalled."""
+    from tabular_agent.harness.stop import StopPolicy
+
+    rng = np.random.default_rng(0)
+    n = 120
+    x1 = rng.normal(size=n)
+    df = pd.DataFrame({"x1": x1, "y": (x1 + rng.normal(scale=0.3, size=n) > 0).astype(int)})
+    path = str(tmp_path / "d.csv")
+    df.to_csv(path, index=False)
+    s = RunSession(
+        str(tmp_path / "run"),
+        path,
+        TaskSpec(target="y", n_splits=3),
+        stop_policy=StopPolicy(patience=patience, max_refusals=max_refusals),
+    )
+    inspect_data(s)
+    train_tabular_model(s, model_type="baseline")
+    train_tabular_model(s, model_type="lgbm")
+    # Identical model, identical table: cannot possibly be an improvement.
+    train_tabular_model(s, model_type="lgbm")
+    return s
+
+
+def test_a_stalled_run_stops_being_allowed_to_train(tmp_path):
+    s = _stalled_session(tmp_path)
+    before = len(journal.load(s.run_dir)["leaderboard"])
+
+    out = train_tabular_model(s, model_type="lgbm")
+
+    assert out["trained"] is False
+    assert out["next"] == "finalize_run"
+    assert "no real improvement" in out["reason"]
+    # Refused means refused: no model fitted, no leaderboard row.
+    assert len(journal.load(s.run_dir)["leaderboard"]) == before
+
+
+def test_a_refusal_is_a_return_value_not_an_exception(tmp_path):
+    """An exception would burn the retry budget meant for malformed arguments."""
+    pytest.importorskip("pydantic_ai")
+    from tabular_agent.harness.agent import _retryable
+
+    s = _stalled_session(tmp_path)
+    out = _retryable(lambda: train_tabular_model(s, model_type="lgbm"))
+    assert out["trained"] is False
+
+
+def test_every_result_says_where_the_run_stands(session):
+    inspect_data(session)
+    first = train_tabular_model(session, model_type="lgbm")
+    assert first["since_improvement"] == 0
+    assert "best result so far" in first["note"]
+
+    second = train_tabular_model(session, model_type="lgbm")
+    assert second["since_improvement"] == 1
+    assert "since the last real improvement" in second["note"]
+
+
+def test_a_model_that_will_not_stop_gets_the_run_packaged_for_it(tmp_path):
+    """The bundle is the deliverable; a loop that ends without one is the failure."""
+    s = _stalled_session(tmp_path, max_refusals=2)
+
+    first = train_tabular_model(s, model_type="lgbm")
+    assert first["trained"] is False and "bundle_dir" not in first
+
+    second = train_tabular_model(s, model_type="lgbm")
+    assert second["harness_finalized"] is True
+    assert os.path.exists(os.path.join(s.run_dir, second["bundle_dir"], "pipeline.json"))
+
+    # And now the run really is over.
+    with pytest.raises(RuntimeError, match="this run is finished"):
+        train_tabular_model(s, model_type="lgbm")
+
+
+def test_finalize_can_still_train_the_baseline_it_needs(tmp_path):
+    """The stop rule must not block the harness from doing its own bookkeeping."""
+    from tabular_agent.harness.stop import StopPolicy
+
+    rng = np.random.default_rng(1)
+    n = 120
+    x1 = rng.normal(size=n)
+    path = str(tmp_path / "d.csv")
+    pd.DataFrame({"x1": x1, "y": (x1 > 0).astype(int)}).to_csv(path, index=False)
+    s = RunSession(
+        str(tmp_path / "run"),
+        path,
+        TaskSpec(target="y", n_splits=3),
+        stop_policy=StopPolicy(patience=1),
+    )
+    inspect_data(s)
+    train_tabular_model(s, model_type="lgbm")
+    train_tabular_model(s, model_type="lgbm")  # stalls the run, still no baseline
+
+    out = finalize_run(s)
+    assert out["baseline_score"] is not None
+
+
 def test_finalize_packages_the_best_experiment(session):
     inspect_data(session)
     train_tabular_model(session, model_type="baseline")

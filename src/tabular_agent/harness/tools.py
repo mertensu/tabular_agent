@@ -29,7 +29,7 @@ from ..pipeline import Pipeline, save_bundle
 from ..report import build_report, write_report
 from ..sandbox import SandboxError
 from ..transform import transform_features as _transform_features
-from . import journal
+from . import journal, stop
 from .session import RunSession
 
 #: Column-level detail is capped so a wide table cannot blow up the context.
@@ -290,11 +290,65 @@ def transform_features(
     }
 
 
+def _progress(session: RunSession) -> dict:
+    """This run's stop status, from the leaderboard as it currently stands."""
+    j = journal.load(session.run_dir)
+    metric = (j.get("task") or {}).get("metric") or session.resolved().metric
+    return stop.evaluate(j["leaderboard"], metric, session.stop_policy)
+
+
+def _refuse_if_finished(session: RunSession) -> dict | None:
+    """``None`` if training may proceed, otherwise the refusal to hand back.
+
+    The escalation matters. A first refusal explains itself and points at
+    ``finalize_run``, which is all a cooperative model needs. A model that keeps
+    asking gets the run packaged **for** it — because the alternative is a loop
+    that ends with no bundle, and the bundle is the entire deliverable. Only once
+    that is safely on disk does the harness raise and end things outright.
+    """
+    status = _progress(session)
+    if not status["should_stop"]:
+        return None
+
+    refusals = journal.record_refusal(session.run_dir)
+    policy = session.stop_policy
+    finalized = journal.stop_state(session.run_dir).get("finalized")
+
+    if refusals >= policy.max_refusals and not finalized:
+        final = finalize_run(session)
+        return {
+            "trained": False,
+            "reason": status["reason"],
+            "harness_finalized": True,
+            "note": (
+                "Asked to train after the run was over, so the harness packaged the "
+                "run itself. Nothing further will be trained. Report what you found "
+                "and stop."
+            ),
+            **final,
+        }
+    if finalized:
+        raise RuntimeError(
+            "this run is finished: the harness has already packaged it and will not "
+            f"train again ({status['reason']})"
+        )
+
+    return {
+        "trained": False,
+        "reason": status["reason"],
+        "n_experiments": status["n_experiments"],
+        "since_improvement": status["since_improvement"],
+        "next": "finalize_run",
+        "note": stop.advisory(status),
+    }
+
+
 def train_tabular_model(
     session: RunSession,
     table: str | None = None,
     model_type: str = "lgbm",
     params: dict | None = None,
+    enforce_stop: bool = True,
 ) -> dict:
     """Cross-validated training — the only way to fit a model in this harness.
 
@@ -302,7 +356,24 @@ def train_tabular_model(
     ``experiments/<id>/`` and appends a leaderboard row to the journal as a
     **side effect of training** (§19.2), so the experiment record can never
     drift from the experiments actually run.
+
+    Refuses to train once the run has stopped making progress (§19.3). The
+    refusal is a normal return value, not an exception, for a practical reason:
+    an exception would burn the tool's retry budget, and being asked to train one
+    more time is not a malformed argument — it is a model that has not yet read
+    the news.
+
+    ``enforce_stop=False`` is the harness training on its own behalf — the
+    baseline `finalize_run` fills in when a run never trained one. Refusing that
+    would leave the report unable to answer "did this beat doing nothing", which
+    is the one question it must always answer. It is not part of the agent-facing
+    signature.
     """
+    if enforce_stop:
+        refusal = _refuse_if_finished(session)
+        if refusal is not None:
+            return refusal
+
     path = session.resolve_table(table)
     spec = session.resolved()
     df = load_table(path)
@@ -368,8 +439,10 @@ def train_tabular_model(
         "artifact_path": session.rel(exp_dir),
     }
     journal.append_experiment(session.run_dir, row)
+    status = _progress(session)
 
     return {
+        "trained": True,
         "experiment_id": exp_id,
         "model_type": model_type,
         "metric": spec.metric,
@@ -382,6 +455,12 @@ def train_tabular_model(
         "vs_baseline": row["vs_baseline"],
         "higher_is_better": greater_is_better(spec.metric),
         "artifact_path": row["artifact_path"],
+        # The advisory half of the stop rule (§19.3): the model is told where the
+        # run stands after every experiment, so a cooperative one never has to be
+        # refused at all.
+        "since_improvement": status["since_improvement"],
+        "experiments_remaining": status["experiments_remaining"],
+        "note": stop.advisory(status),
     }
 
 
@@ -397,7 +476,7 @@ def finalize_run(session: RunSession) -> dict:
         raise ValueError("nothing to finalize: no model has been trained yet")
 
     if j.get("baseline") is None:
-        train_tabular_model(session, model_type="baseline")
+        train_tabular_model(session, model_type="baseline", enforce_stop=False)
         j = journal.load(session.run_dir)
 
     best = j["best"]
@@ -429,6 +508,7 @@ def finalize_run(session: RunSession) -> dict:
         feature_names=meta["feature_names"],
     )
     report_path = write_report(session.ctx, text)
+    journal.mark_finalized(session.run_dir)
 
     return {
         "best_experiment_id": best["experiment_id"],

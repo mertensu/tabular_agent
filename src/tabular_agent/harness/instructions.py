@@ -38,6 +38,13 @@ How to read a result:
   large spread is an unstable model, not a good one — say so.
 - `dropped_non_numeric` lists columns the model could not use. Those are
   signal you are leaving on the table, not columns to ignore.
+- `since_improvement` counts experiments since the score last moved by more than
+  the fold noise. When it starts climbing, more hyper-parameters will not save
+  you — change the features or stop.
+
+Knowing when to stop is part of the job. This run has a budget, and a score that
+has not moved in several experiments is finished, not unlucky. When the harness
+says the run is over, call `finalize_run` — it will not train again.
 
 Report honestly. If a model does not beat the baseline, or a score looks too
 good, say that plainly rather than presenting it as a success.

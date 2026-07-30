@@ -255,6 +255,9 @@ def build_agent(model=DEFAULT_MODEL):
     ) -> dict:
         """Train a model with k-fold cross-validation and record the experiment.
 
+        Returns `trained: false` instead of an experiment once this run has
+        stopped making progress; call `finalize_run` at that point.
+
         Args:
             table: Path to the feature table. Omit to use the run's raw input table.
             model_type: One of "baseline", "lgbm", "xgb", "catboost".

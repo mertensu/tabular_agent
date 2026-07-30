@@ -10,15 +10,26 @@ import os
 from ..io import load_table
 from ..runctx import RunContext
 from ..taskspec import ResolvedSpec, TaskSpec, resolve_taskspec
+from .stop import StopPolicy
 
 
 class RunSession:
     """One run: a raw table, a task spec, and a run directory to write into."""
 
-    def __init__(self, run_dir: str, data_path: str, spec: TaskSpec):
+    def __init__(
+        self,
+        run_dir: str,
+        data_path: str,
+        spec: TaskSpec,
+        stop_policy: StopPolicy | None = None,
+    ):
         self.ctx = RunContext(run_dir)
         self.data_path = os.path.abspath(data_path)
         self.spec = spec
+        # How long this run is allowed to keep going without getting better
+        # (§19.3). On the session rather than as a module constant because it is
+        # a property of *this* run's budget, not of the library.
+        self.stop_policy = stop_policy or StopPolicy()
         self._resolved: ResolvedSpec | None = None
 
     @property

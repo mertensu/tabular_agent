@@ -3,6 +3,66 @@
 > Session log for working across two machines. Newest entry on top.
 > Update before ending a session, then commit & push. Pull and read this first when starting.
 
+## 2026-07-30 (later) — Harness step 4: the stop rule (§19.3)
+
+**Machine:** MacBook Air
+**Branch:** master
+
+**Done:**
+- **`harness/stop.py`** — `StopPolicy` (patience=4, min_gain_ratio=0.25,
+  max_experiments=25, max_refusals=3) + `evaluate(leaderboard, metric, policy)`, a
+  **pure function of the leaderboard** so the interesting histories can be unit-tested
+  instead of trained. On `RunSession(..., stop_policy=...)`, since it's this run's
+  budget, not a library constant.
+- **The yardstick is `fold_spread`, not an absolute threshold.** A gain counts only if
+  it beats `0.25 x` the incumbent's own fold-to-fold wobble. An absolute number would
+  need tuning per metric and per dataset and fails silently. The incumbent tracks the
+  *true best*, so a creeping series of sub-noise gains can't be laundered into progress
+  by moving the comparison point.
+- **Patience > 1 on purpose** — a run branches; a dip before a real improvement is the
+  search working. This is early stopping, same trade-off.
+- **Two layers.** Advisory: every train result carries `since_improvement`,
+  `experiments_remaining` and a note, so a cooperative model never gets refused.
+  Structural: past patience, `train_tabular_model` returns `{"trained": false, ...}`.
+- **A refusal is a return value, not an exception** — raising would eat `TOOL_RETRIES`,
+  and exhausting that ends the run and discards every completed experiment. Being asked
+  to train once more is not a malformed argument.
+- **Escalation:** refusal → (at `max_refusals`) **the harness finalizes the run itself**
+  and returns the bundle → after that, `RuntimeError`. The bundle is the deliverable; a
+  loop that ends without one is the real failure.
+- `finalize_run`'s auto-baseline calls with `enforce_stop=False` — the harness training
+  on its own behalf. Without it, finalizing a stalled run crashes on a missing baseline.
+- **Tests: 134 passed** (8 new in `test_stop.py`, 5 in `test_harness_tools.py`).
+- **Notebook `phase3_harness_step4_stopping.ipynb`** (22 cells, unexecuted, all 8 code
+  cells smoke-tested in order).
+
+**Live comparison, same prompt/model/dataset:**
+
+| | experiments | best | refusals |
+|---|---|---|---|
+| uncapped (step 3) | 11 | 0.2718 | — |
+| stop rule | **8** | 0.2743 | 1 |
+
+Gave up `0.0025` against a fold spread of `0.0209` — i.e. nothing measurable — for three
+fewer experiments. **The agent complied with the first refusal and finalized.**
+
+**Next:**
+- `blend_models` + `predict` — the last two tools.
+- §19 **compaction**: the journal grows without bound and a long run will outlive the
+  context it's read into. This is the remaining half of §19.
+- Exclusive-create id claim (the other half of the concurrency fix).
+- **Ulf's call, now deferred to after a few more runs:** "prefer feature work over
+  hyperparameter tuning" in `SYSTEM_PROMPT`. His decision was to see whether the tuning
+  spiral still happens now the run is capped — keeps the two effects separable. First
+  capped run still spent e5–e8 on tuning, so the answer isn't in yet.
+
+**Gotchas:**
+- The advisory describes the run *after* the experiment just finished; the refusal is
+  decided *before* the next one starts. So a model is always told once before being
+  refused — don't read the off-by-one as a bug.
+- The stop rule says the *search* stopped moving. It knows nothing about whether the
+  features are exhausted, and a leaky run converges fast and stops early, pleased.
+
 ## 2026-07-30 — Harness step 3: `transform_features` tool + the concurrency fix
 
 **Machine:** MacBook Air
