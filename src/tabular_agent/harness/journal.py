@@ -167,6 +167,32 @@ def attribution(journal: dict, table_path: str) -> list[dict]:
     return out
 
 
+def blocks(journal: dict, table_path: str) -> list[dict]:
+    """The columns of ``table_path`` grouped by the tool call that added them.
+
+    A *block* is one tool call's output — already recorded as ``new_columns``, so
+    this is a regrouping rather than new bookkeeping. It is the right unit of
+    credit because it is the unit of *decision*: the agent cannot add half a tool
+    call, so per-column numbers are finer than any move available to it, and
+    inviting per-column conclusions is how an interaction partner gets pruned for
+    scoring zero on its own.
+
+    Oldest first, with the original columns as the ``raw`` block.
+    """
+    by_path = {t["path"]: t for t in journal.get("tables") or []}
+    out = []
+    for path in reversed(ancestry(journal, table_path)):
+        row = by_path.get(path, {})
+        out.append(
+            {
+                "block": path,
+                "method": row.get("method"),
+                "columns": list(row.get("new_columns") or []),
+            }
+        )
+    return out
+
+
 def stop_state(run_dir: str) -> dict:
     """Refusal bookkeeping for the stop rule (§19.3), tolerant of old journals."""
     return load(run_dir).get("stop") or {"refusals": 0, "finalized": False}

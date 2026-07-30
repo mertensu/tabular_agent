@@ -292,6 +292,84 @@ def transform_features(
     }
 
 
+def _block_report(
+    session: RunSession, j: dict, source_table: str, model, feature_names: list[str]
+) -> list[dict]:
+    """Per-block share of the model's split importance (see docs/).
+
+    Grouped by the tool call that produced the columns, never per column. Summing
+    over a block is both more stable than a single column's importance and the
+    only granularity the agent can act on.
+
+    Importance is advisory and known to be biased — high-cardinality columns
+    attract splits. That is acceptable here because the alternative on offer is
+    no feature-level feedback at all, which is what makes the agent generate
+    candidates blind. It is *not* acceptable to phrase it as a verdict: see the
+    wording in the note this feeds.
+    """
+    importances = getattr(model, "feature_importances_", None)
+    if importances is None or len(importances) != len(feature_names):
+        return []
+    weights = {name: float(v) for name, v in zip(feature_names, importances)}
+    total = sum(weights.values()) or 1.0
+
+    used = set()
+    report = []
+    for block in journal.blocks(j, source_table):
+        cols = [c for c in block["columns"] if c in weights]
+        used.update(cols)
+        if not cols:
+            continue
+        share = sum(weights[c] for c in cols) / total
+        report.append(
+            {
+                "block": block["block"],
+                "method": block["method"],
+                "n_columns": len(cols),
+                "importance_share": round(share, 4),
+                "n_columns_unused": sum(1 for c in cols if weights[c] == 0),
+            }
+        )
+    original = [c for c in feature_names if c not in used]
+    if original:
+        report.insert(
+            0,
+            {
+                "block": "original columns",
+                "method": None,
+                "n_columns": len(original),
+                "importance_share": round(
+                    sum(weights[c] for c in original) / total, 4
+                ),
+                "n_columns_unused": sum(1 for c in original if weights[c] == 0),
+            },
+        )
+    return report
+
+
+def _vs_parent(j: dict, source_table: str, cv_score: float, metric: str) -> float | None:
+    """Gain over the best experiment on the table this one was built from.
+
+    ``None`` when the parent was never trained — which is the point: the marginal
+    number only exists if the previous step was measured, so measuring it is
+    worth something to the agent rather than being a rule imposed on it.
+    """
+    parents = {t["path"]: t.get("source_table") for t in j.get("tables") or []}
+    parent = parents.get(source_table)
+    if parent is None:
+        return None
+    scores = [
+        r["cv_score"]
+        for r in j.get("leaderboard") or []
+        if r.get("source_table") == parent and r.get("cv_score") is not None
+    ]
+    if not scores:
+        return None
+    best_parent = max(scores) if greater_is_better(metric) else min(scores)
+    gain = (cv_score - best_parent) if greater_is_better(metric) else (best_parent - cv_score)
+    return round(gain, 6)
+
+
 def _progress(session: RunSession) -> dict:
     """This run's stop status, from the leaderboard as it currently stands."""
     j = journal.load(session.run_dir)
@@ -484,6 +562,12 @@ def train_tabular_model(
         "artifact_path": session.rel(exp_dir),
     }
     journal.append_experiment(session.run_dir, row)
+    j_after = journal.load(session.run_dir)
+    blocks = _block_report(
+        session, j_after, row["source_table"], result.final_model, result.feature_names
+    )
+    vs_parent = _vs_parent(j_after, row["source_table"], cv_score, spec.metric)
+
     status = _progress(session)
     table_state = stop.table_status(
         journal.load(session.run_dir)["leaderboard"],
@@ -512,6 +596,20 @@ def train_tabular_model(
         "since_improvement": status["since_improvement"],
         "since_improvement_on_table": table_state["since_improvement_on_table"],
         "experiments_remaining": status["experiments_remaining"],
+        # Grouped by the tool call that added the columns, because that is the
+        # unit the agent can act on. Never per column: a feature that only pays
+        # off alongside another scores zero alone, and per-column feedback is how
+        # it gets thrown away before its partner is ever built.
+        "feature_blocks": blocks,
+        "vs_parent_table": vs_parent,
+        "how_to_read_blocks": (
+            "importance_share is how much of the model's splitting each tool call's "
+            "columns account for. A low or zero share means no evidence those columns "
+            "helped *in this feature set* — not that they are useless: a feature that "
+            "only pays off next to another scores nothing until that other one exists. "
+            "Nothing is dropped for you. Tables are immutable, so abandoning a branch "
+            "costs nothing and you can extend it again later."
+        ),
         "note": stop.advisory(status, table_state),
     }
 

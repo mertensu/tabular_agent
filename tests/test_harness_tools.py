@@ -490,6 +490,50 @@ def test_finalize_autotrains_a_baseline_if_the_run_never_did(session):
     assert out["best_experiment_id"] == "e1"
 
 
+def test_results_are_attributed_per_tool_call_not_per_column(session):
+    """Blocks are the unit of decision: the agent cannot add half a tool call."""
+    inspect_data(session)
+    t1 = transform_features(session, RATIO_CODE)
+    t2 = fit_encoding(session, ["city"], "frequency", table=t1["table"])
+    out = train_tabular_model(session, table=t2["table"], model_type="lgbm")
+
+    blocks = {b["block"]: b for b in out["feature_blocks"]}
+    assert set(blocks) == {"original columns", t1["table"], t2["table"]}
+    assert blocks[t1["table"]]["n_columns"] == 1  # the "ratio" column
+    assert blocks[t2["table"]]["method"] == "frequency"
+    assert abs(sum(b["importance_share"] for b in out["feature_blocks"]) - 1.0) < 1e-6
+    json.dumps(out)
+
+
+def test_a_zero_share_is_worded_as_no_evidence_not_as_useless(session):
+    """Wording is load-bearing: 'useless' teaches it to prune interaction partners."""
+    inspect_data(session)
+    out = train_tabular_model(session, model_type="lgbm")
+    assert "no evidence" in out["how_to_read_blocks"]
+    assert "not that they are useless" in out["how_to_read_blocks"]
+
+
+def test_vs_parent_exists_only_when_the_parent_was_measured(session):
+    """The marginal number is the reward for having trained the previous step."""
+    inspect_data(session)
+    t1 = transform_features(session, RATIO_CODE)
+
+    # Parent never trained -> no marginal number available.
+    t2 = fit_encoding(session, ["city"], "frequency", table=t1["table"])
+    assert train_tabular_model(session, table=t2["table"])["vs_parent_table"] is None
+
+    # Train the parent, then a sibling of t2 built on it: now it exists.
+    train_tabular_model(session, table=t1["table"], model_type="lgbm")
+    t3 = fit_encoding(session, ["city"], "target", table=t1["table"])
+    assert train_tabular_model(session, table=t3["table"])["vs_parent_table"] is not None
+
+
+def test_a_model_without_importances_does_not_break_the_result(session):
+    inspect_data(session)
+    out = train_tabular_model(session, model_type="baseline")
+    assert out["feature_blocks"] == []
+
+
 def test_finalize_flags_a_table_that_was_never_trained_on(session):
     """The t5/t6 case: build, extend, train only the child — the link is unmeasured.
 

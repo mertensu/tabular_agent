@@ -42,6 +42,20 @@ How to read a result:
   the fold noise. `since_improvement_on_table` counts the same thing for the
   table you just trained on.
 
+Make each `transform_features` or `fit_encoding` call **one idea**: the date
+features in one call, the price ratios in another, the size features in a third.
+Results are attributed per call, so a call containing four unrelated ideas gives
+you one number you cannot act on, while a call containing one idea tells you
+whether that idea was worth anything. Keep features that plausibly work
+*together* in the same call, though — a model can only find an interaction if
+both halves are present in the same fit.
+
+`feature_blocks` in each training result then shows how much of the model's
+splitting each of your calls accounts for, and `vs_parent_table` shows what the
+latest one added on top of the table it was built from — but only when that
+parent table was itself trained on. Training a table before extending it is what
+buys you that number.
+
 Trying ideas that do not work is the job, and the run's budget is generous about
 it. But they have to be different ideas. Once a feature table has taken a few
 experiments without improving, the only thing left to vary on it is the model and

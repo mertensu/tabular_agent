@@ -3,6 +3,63 @@
 > Session log for working across two machines. Newest entry on top.
 > Update before ending a session, then commit & push. Pull and read this first when starting.
 
+## 2026-07-30 (latest+1) — Block-level feedback: what the agent needs to iterate
+
+**Machine:** MacBook Air | **Branch:** master
+
+**Read `docs/feature_attribution_and_agent_iteration.md` first** — it records a long
+discussion with Ulf whose conclusions are not obvious and which *reversed* two earlier
+positions. Summary:
+
+- Measuring every link would still not answer "what is this feature worth": a chain
+  gives marginal-given-everything-before, and credit is order-dependent (redundancy
+  inflates whoever goes first; interaction punishes isolation). That is the Shapley
+  argument, arrived at from the data side → §18 SHAP is the tool for the *explanation*
+  question, and the wrong tool for the *search* question.
+- **Ulf's reframe, which set the direction:** it is less about final credit, more about
+  the agent iterating well. Search guidance only has to beat nothing — and nothing is
+  what it got (one scalar per experiment after adding 16 columns).
+- **Ulf: "it could build a feature on top of parent giving no improvement, but the two
+  together help."** Correct, and it means greedy per-feature measurement actively
+  misleads. **This reverses my earlier "kitchen sink = noise" criticism**: a big batch is
+  the only way interacting pairs arrive in the same fit. Real trade — one-at-a-time is
+  attributable but interaction-blind; batch is the reverse.
+
+**Built:**
+- **`feature_blocks` in every training result** — importance share summed per *tool call*
+  (`journal.blocks` regroups by `new_columns`; no new bookkeeping). Never per column: a
+  feature that only pays off next to another scores zero alone, and per-column feedback
+  is how it gets pruned before its partner exists.
+- **`vs_parent_table`** — gain over the best experiment on the parent table, **`None` if
+  the parent was never trained**. Deliberate: it makes measuring the previous step *pay
+  off* instead of being a rule. Same shape as the advisory that moved the agent off t6
+  without ever refusing it.
+- **`how_to_read_blocks`** ships with every result and the wording is load-bearing: zero
+  share = "no evidence it helped **in this feature set**", explicitly *not* "useless".
+  Nothing auto-prunes. Tables are immutable, so abandoning a branch is free — the agent
+  is told that too.
+- **SYSTEM_PROMPT steer: one tool call = one idea** (dates in one, ratios in another),
+  but keep plausibly-interacting features together. A steer, never enforced — refusing a
+  mixed transform would be wrong.
+- Notebook `step4` extended to 43 cells (new §10), all code cells smoke-tested.
+  **Tests: 156 passed.**
+
+**Verified:** a dates block scores `share=0.298`, a squares block `share=0.000`,
+`unused=2`, `vs_parent_table=0.0` — the exact signal that was missing.
+
+**Next (sequenced, Ulf agreed):**
+1. `blend_models` + `predict`.
+2. **Residual feedback — the missing arc.** Mapped our loop against the CoreWeave post's
+   (inspect → hypothesise → build → train → score(OOF) → decide): five of six arcs exist.
+   The gap is **score(OOF) → hypothesise** — we write `oof.parquet` and never show it to
+   the agent, so it hypothesises from column names alone. That is why it reaches for
+   `price_sq`. Needs a tool + a summary format that does not leak the target back.
+3. §19 compaction; `max_tables`; exclusive-create id claim.
+
+**Caveat worth keeping:** that post's "60 cycles overnight compounds" assumes each cycle
+carries information. Our data: 19 cycles found the same score as 8. Better feedback per
+cycle beats more cycles — which is the argument for (2) above.
+
 ## 2026-07-30 (latest) — Stop rule reworked, attribution gaps, and a real leakage hole
 
 **Machine:** MacBook Air
