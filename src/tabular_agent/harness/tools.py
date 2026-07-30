@@ -27,6 +27,8 @@ from ..metrics import greater_is_better
 from ..models import train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..report import build_report, write_report
+from ..sandbox import SandboxError
+from ..transform import transform_features as _transform_features
 from . import journal
 from .session import RunSession
 
@@ -194,6 +196,96 @@ def fit_encoding(
                 else "The fitted encoder is kept in the table's lineage and replays at "
                 "predict time."
             )
+        ),
+    }
+
+
+def transform_features(
+    session: RunSession,
+    code: str,
+    table: str | None = None,
+    timeout: float = 30.0,
+) -> dict:
+    """Run agent-written ``df -> df`` code to derive new columns (spec §5.1).
+
+    The escape hatch: everything the structured tools cannot express — ratios,
+    distances, date parts, per-row counts — while staying leakage-safe by
+    construction. The sandbox blocks the model and sklearn libraries, so this
+    code *cannot* learn a parameter from the data; anything stateful has to go
+    through ``fit_encoding``, which fits per fold.
+
+    **The target column is not passed to the code.** Two reasons, and the second
+    is the one that would actually bite: a derived column cannot be a function of
+    the target if the target was never in the frame; and at predict time there is
+    no target column, so code that referenced it would either crash or produce
+    different features than it did at training. Same frame in both places or the
+    replay is a lie.
+
+    Writes ``tables/<id>.parquet`` (transformed features + the untouched target)
+    and the lineage sidecar, which stores **the code, not the columns** — the
+    step is re-run at predict, so a stored feature can never drift from the code
+    that made it.
+    """
+    path = session.resolve_table(table)
+    spec = session.resolved()
+    df = load_table(path)
+
+    features = df.drop(columns=[spec.target])
+    try:
+        out_features, summary = _transform_features(features, code, timeout=timeout)
+    except SandboxError as e:
+        # Reaching for the target raises a bare `KeyError: 'y'` from inside the
+        # child — true, but the model will read it as a typo and try again. Say
+        # what actually happened, once, so it stops reaching.
+        if spec.target in str(e):
+            raise SandboxError(
+                f"{e}\n\nNote: the target column {spec.target!r} is deliberately not in the "
+                "frame your code receives — it is not available at predict time either. "
+                "Derive features from the other columns; anything that has to learn from "
+                "the target belongs in fit_encoding(method='target')."
+            ) from e
+        raise
+    if spec.target in out_features.columns:
+        raise ValueError(
+            f"the transform produced a column named {spec.target!r}, which is the target; "
+            "name derived columns something else"
+        )
+
+    out = out_features.join(df[spec.target])
+    table_id = journal.next_table_id(session.run_dir)
+    out_path = session.ctx.path("tables", f"{table_id}.parquet")
+    save_parquet(out, out_path)
+
+    lineage = _load_lineage(path, spec.task_type)
+    lineage.add_transform(code)
+    with open(_lineage_path(out_path), "w") as f:
+        json.dump(lineage.to_dict(), f, indent=2)
+
+    row = {
+        "id": table_id,
+        "path": session.rel(out_path),
+        "source_table": session.rel(path),
+        "method": "transform",
+        # The code is the only record of *what was tried*: an agent resuming
+        # after a context reset can see the idea, not just the column names.
+        "code": code,
+        "new_columns": list(summary["new_columns"]),
+        "n_steps": len(lineage.steps),
+    }
+    journal.append_table(session.run_dir, row)
+
+    _, still_dropped = _feature_frame(out, spec.target)
+    return {
+        "table": row["path"],
+        "new_columns": row["new_columns"],
+        "n_rows": int(summary["n_rows"]),
+        "n_cols": len(out.columns),
+        "source_table": row["source_table"],
+        "non_numeric_columns": still_dropped,
+        "note": (
+            "Pass this table to train_tabular_model to use the new columns. The code "
+            "is stored in the table's lineage and re-runs at predict time; the target "
+            "column was not visible to it."
         ),
     }
 

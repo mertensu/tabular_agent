@@ -120,21 +120,25 @@ def _retryable(call):
     single turn instead, and the message *is* the correction: the validation
     errors are written to say what was wrong and what to pass.
 
-    ``ValueError`` (our own input validation) and ``FileNotFoundError`` (a path
-    the model invented) are both argument problems. Anything else is a bug in the
-    pipeline and should stop the run loudly rather than be handed to the model to
-    guess at.
+    ``ValueError`` (our own input validation), ``FileNotFoundError`` (a path the
+    model invented) and ``SandboxError`` (code the model wrote that raised, timed
+    out, or imported a blocked library) are all argument problems — the argument
+    just happens to be a program in the last case, and those messages are written
+    to teach. Anything else is a bug in the pipeline and should stop the run
+    loudly rather than be handed to the model to guess at.
     """
     from pydantic_ai import ModelRetry
 
+    from ..sandbox import SandboxError
+
     try:
         return call()
-    except (ValueError, FileNotFoundError) as e:
+    except (ValueError, FileNotFoundError, SandboxError) as e:
         raise ModelRetry(str(e)) from e
 
 
 def build_agent(model=DEFAULT_MODEL):
-    """An agent whose *entire* tool surface is the four functions below.
+    """An agent whose *entire* tool surface is the five functions below.
 
     ``model`` is either a PydanticAI model string (``"anthropic:..."``,
     ``"openai:..."``) or a ``Model`` object — e.g. from :func:`gateway_model`,
@@ -153,6 +157,16 @@ def build_agent(model=DEFAULT_MODEL):
         # run and discards every experiment already completed, which is a brutal
         # price for two bad arguments in a run that makes dozens of calls.
         retries=TOOL_RETRIES,
+        # One tool call at a time. A model may put several calls in one message,
+        # and PydanticAI would run them concurrently — but the id claims
+        # (`next_table_id`/`next_experiment_id`) read the journal and write it
+        # back unlocked, so two parallel calls can claim the same `t1` and race
+        # on the same parquet, or the same `e1` and overwrite an experiment's
+        # artifacts silently. Costs parallelism we do not benefit from anyway:
+        # each tool call is seconds of local compute, not a network wait.
+        # This is the cheap half of the fix and it is per-Agent only; two
+        # *processes* on one run dir still need the exclusive-create id claim.
+        max_concurrency=1,
     )
 
     @agent.tool
@@ -198,6 +212,39 @@ def build_agent(model=DEFAULT_MODEL):
                 smoothing=smoothing,
             )
         )
+
+    @agent.tool
+    def transform_features(
+        ctx: RunContext[Deps],
+        code: str,
+        table: str | None = None,
+    ) -> dict:
+        """Derive new columns by running your own pandas/numpy code, into a new table.
+
+        For row-local feature engineering: ratios, differences, distances, date
+        parts, flags. The code runs in a sandbox with pandas, numpy and scipy
+        available; the model and sklearn libraries are blocked, so anything that
+        has to *learn* from the data (a category's target mean, a vocabulary)
+        belongs in `fit_encoding` instead.
+
+        Args:
+            code: Python defining `transform_features(df)`, returning a DataFrame
+                with the **same rows in the same order** (add or replace columns;
+                never drop, add or reorder rows). The target column is **not** in
+                `df` — it is not available to your code, at training or at
+                predict time. Example:
+
+                    import numpy as np
+                    def transform_features(df):
+                        df = df.copy()
+                        df["area"] = df["width"] * df["height"]
+                        df["log_income"] = np.log1p(df["income"])
+                        return df
+
+            table: Path to the source table. Omit to use the run's raw input
+                table; pass a table from an earlier call to stack on top of it.
+        """
+        return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table))
 
     @agent.tool
     def train_tabular_model(

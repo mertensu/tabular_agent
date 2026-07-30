@@ -10,11 +10,13 @@ import pytest
 from tabular_agent.harness import journal
 from tabular_agent.harness.session import RunSession
 from tabular_agent.io import load_table
+from tabular_agent.sandbox import SandboxError
 from tabular_agent.harness.tools import (
     finalize_run,
     fit_encoding,
     inspect_data,
     train_tabular_model,
+    transform_features,
 )
 from tabular_agent.taskspec import TaskSpec
 
@@ -201,6 +203,107 @@ def test_fit_encoding_refuses_to_encode_the_target(session):
     inspect_data(session)
     with pytest.raises(ValueError, match="refusing to encode the target"):
         fit_encoding(session, ["y"], "frequency")
+
+
+RATIO_CODE = """
+import numpy as np
+def transform_features(df):
+    df = df.copy()
+    df["ratio"] = df["x1"] / (np.abs(df["x2"]) + 1.0)
+    return df
+"""
+
+
+def test_transform_features_derives_a_column_and_trains_on_it(session):
+    inspect_data(session)
+    out = transform_features(session, RATIO_CODE)
+
+    assert out["new_columns"] == ["ratio"]
+    json.dumps(out)
+
+    table = load_table(os.path.join(session.run_dir, out["table"]))
+    assert "ratio" in table.columns
+    # The target rides along untouched so the new table is trainable on its own.
+    assert list(table["y"]) == list(load_table(session.data_path)["y"])
+
+    trained = train_tabular_model(session, table=out["table"])
+    assert trained["n_features"] == 3  # x1, x2, ratio
+
+
+def test_transform_code_cannot_see_the_target(session):
+    """No target in the frame at fit time, because there is none at predict time."""
+    inspect_data(session)
+    code = "def transform_features(df):\n    df = df.copy()\n    df['leak'] = df['y']\n    return df\n"
+
+    # And the failure has to *say* so — a bare KeyError reads like a typo.
+    with pytest.raises(SandboxError, match="deliberately not in the frame"):
+        transform_features(session, code)
+
+
+def test_a_transform_may_not_name_a_column_after_the_target(session):
+    inspect_data(session)
+    code = "def transform_features(df):\n    df = df.copy()\n    df['y'] = df['x1']\n    return df\n"
+
+    with pytest.raises(ValueError, match="which is the target"):
+        transform_features(session, code)
+
+
+def test_transform_records_the_code_not_the_columns(session):
+    """The lineage stores the program; the columns are re-derived at predict."""
+    inspect_data(session)
+    out = transform_features(session, RATIO_CODE)
+
+    with open(os.path.join(session.run_dir, "tables", "t1.pipeline.json")) as f:
+        lineage = json.load(f)
+    assert [s["type"] for s in lineage["steps"]] == ["transform"]
+    assert lineage["steps"][0]["code"] == RATIO_CODE
+
+    row = journal.load(session.run_dir)["tables"][0]
+    assert row["method"] == "transform"
+    assert row["code"] == RATIO_CODE
+
+
+def test_transform_stacks_on_an_encoded_table(session):
+    """A run branches: encode, then derive features from the encoded table."""
+    inspect_data(session)
+    enc = fit_encoding(session, ["city"], "frequency")
+    code = (
+        "def transform_features(df):\n"
+        "    df = df.copy()\n"
+        "    df['x1_per_city'] = df['x1'] / df['city_freq']\n"
+        "    return df\n"
+    )
+    out = transform_features(session, code, table=enc["table"])
+
+    assert out["source_table"] == enc["table"]
+    with open(os.path.join(session.run_dir, "tables", "t2.pipeline.json")) as f:
+        lineage = json.load(f)
+    assert [s["type"] for s in lineage["steps"]] == ["encode", "transform"]
+
+
+def test_transformed_features_reach_the_bundle_and_predict_from_raw_rows(session):
+    inspect_data(session)
+    out = transform_features(session, RATIO_CODE)
+    train_tabular_model(session, table=out["table"], model_type="lgbm")
+    final = finalize_run(session)
+
+    from tabular_agent.pipeline import load_bundle, predict_bundle
+
+    bundle = load_bundle(os.path.join(session.run_dir, final["bundle_dir"]))
+    assert "ratio" in bundle["feature_names"]
+
+    # Raw rows, no target column: the stored code must run there unchanged.
+    raw = load_table(session.data_path).drop(columns=["y"])
+    assert len(predict_bundle(bundle, raw)) == 200
+
+
+def test_transform_must_preserve_the_rows(session):
+    """Dropping rows would silently misalign every feature from its label."""
+    inspect_data(session)
+    code = "def transform_features(df):\n    return df.head(10)\n"
+
+    with pytest.raises(SandboxError, match="preserve the row index"):
+        transform_features(session, code)
 
 
 def test_finalize_packages_the_best_experiment(session):

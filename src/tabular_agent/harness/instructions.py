@@ -23,7 +23,12 @@ Workflow:
    cannot tell without the number.
 3. `train_tabular_model` with real models (`lgbm`, `xgb`, `catboost`). Change one
    thing at a time so you can attribute any change in score.
-4. `finalize_run` exactly once, at the very end. It packages the best experiment
+4. Improve the features. `fit_encoding` brings categorical columns in;
+   `transform_features` runs your own pandas code for row-local features
+   (ratios, differences, date parts). Both write a **new** table and leave the
+   old one untouched, so you can branch: build one table, then compare two ideas
+   on top of it by training on each.
+5. `finalize_run` exactly once, at the very end. It packages the best experiment
    into a deployable bundle and writes the report.
 
 How to read a result:

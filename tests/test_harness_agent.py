@@ -12,7 +12,13 @@ pytest.importorskip("pydantic_ai")
 
 from tabular_agent.harness.agent import DEFAULT_MODEL, build_agent  # noqa: E402
 
-EXPECTED_TOOLS = {"inspect_data", "fit_encoding", "train_tabular_model", "finalize_run"}
+EXPECTED_TOOLS = {
+    "inspect_data",
+    "fit_encoding",
+    "transform_features",
+    "train_tabular_model",
+    "finalize_run",
+}
 
 
 def test_the_agent_has_exactly_the_leakage_safe_tools():
@@ -87,6 +93,32 @@ def test_a_bad_argument_is_retryable_not_fatal(tmp_path):
 
     with pytest.raises(ModelRetry, match="no level order given"):
         _retryable(lambda: fit_encoding(s, ["size"], "ordinal", categories={"size": []}))
+
+
+def test_code_the_model_wrote_badly_is_retryable_too(tmp_path):
+    """A sandbox rejection is an argument problem — the argument is a program."""
+    import pandas as pd
+    from pydantic_ai import ModelRetry
+
+    from tabular_agent.harness.agent import _retryable
+    from tabular_agent.harness.session import RunSession
+    from tabular_agent.harness.tools import inspect_data, transform_features
+    from tabular_agent.taskspec import TaskSpec
+
+    path = str(tmp_path / "d.csv")
+    pd.DataFrame({"a": [1.0, 2.0] * 20, "y": [0, 1] * 20}).to_csv(path, index=False)
+    s = RunSession(str(tmp_path / "run"), path, TaskSpec(target="y", n_splits=2))
+    inspect_data(s)
+
+    code = "import sklearn\ndef transform_features(df):\n    return df\n"
+    with pytest.raises(ModelRetry, match="fit_encoding"):
+        _retryable(lambda: transform_features(s, code))
+
+
+def test_tool_calls_are_serialised(tmp_path):
+    """Parallel calls would race on the unlocked next_table_id/next_experiment_id."""
+    agent = build_agent()
+    assert agent._concurrency_limiter.max_running == 1
 
 
 def test_a_real_bug_still_stops_the_run():

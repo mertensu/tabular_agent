@@ -3,6 +3,63 @@
 > Session log for working across two machines. Newest entry on top.
 > Update before ending a session, then commit & push. Pull and read this first when starting.
 
+## 2026-07-30 — Harness step 3: `transform_features` tool + the concurrency fix
+
+**Machine:** MacBook Air
+**Branch:** master
+
+**Done:**
+- **`transform_features` is now a tool** (5th on the surface) —
+  `tools.transform_features(session, code, table, timeout)`. Runs the agent's
+  `df -> df` code in the existing sandbox, writes `tables/<id>.parquet` + the
+  lineage sidecar, records the table in the journal. Chains onto encoded tables
+  (`t3` lineage = `["transform", "encode", "transform"]`, replayed in that order).
+- **The design call: the target column is dropped before the code sees it.** Two
+  reasons and the *second* is the one that decides it: (1) a derived column can't
+  be a function of the target if the target was never in the frame — the sandbox's
+  import block does nothing against `df["cheat"] = df["y"]`, that's pure pandas;
+  (2) **there is no target at predict time**, so code referencing it would crash or
+  silently compute something else when the pipeline replays. Same frame both
+  places or "re-run the code at predict" is a lie. A `KeyError: 'y'` from the child
+  is rewritten into a message that says which of those happened — a bare `'y'`
+  reads like a typo and the model just tries again.
+- **The lineage stores the code, not the columns.** Feature *pipeline*, not feature
+  *store*: a new row goes through identical arithmetic. Journal table rows carry
+  the code too, so a resuming agent sees what was *tried*, not just what landed.
+- **`SandboxError` joined `ValueError`/`FileNotFoundError` as retryable** in
+  `_retryable`. Code the model wrote badly is an argument problem — the argument
+  just happens to be a program, and those sandbox messages are already written to
+  teach ("use fit_encoding instead").
+- **`max_concurrency=1`** (the cheap concurrency fix from the last entry) — asserted
+  in a test via `agent._concurrency_limiter.max_running`. **Still only half a fix:**
+  it's per-`Agent`, so two processes on one run dir need the exclusive-create id claim.
+- **Tests: 121 passed** (+8 tool-layer, +2 agent; tool-surface set now 5).
+- **Notebook `phase3_harness_step3_transforms.ipynb`** (40 cells, ships unexecuted,
+  all 15 smoke-tested code cells run in order + a real deepseek run verified separately).
+
+**Live run** (deepseek via Requesty, apartments dataset): baseline `0.6903` → best
+`0.2718`. It parsed `listed_at` on its own and used the tool hard. **0 fatal errors,
+no parallel tool calls observed in any single message.**
+
+**Next:**
+- `blend_models` and `predict` — the last two tools.
+- §19 compaction + harness-owned stop. The live run did **11 experiments**; the last
+  six moved the score by ~0.003. It doesn't know when to stop, and nothing makes it.
+- Exclusive-create id claim + write-then-rename (the other half of the concurrency fix).
+- Still Ulf's call: put "prefer feature work over hyperparameter tuning" into `SYSTEM_PROMPT`?
+
+**Gotchas:**
+- **A GBDT recovers `price / area` on its own** — the first draft of the notebook was
+  built on "ratios are hard for trees" and the numbers refused to cooperate (raw beat
+  the derived features). Rebuilt around a **datetime column**, where the raw model is
+  level with the baseline because the information is *absent*, not merely awkward.
+  Worth remembering before claiming a feature helps: check it.
+- The model writes **kitchen-sink transforms** — ~20 columns including `price_sq`,
+  `area_sq`, `price_x_rooms`. Free noise for a tree (it can already split anywhere on
+  `price`). Safe, not smart; another argument for the stop rule.
+- The notebooks in the working tree are modified (executed outputs from Ulf's runs) and
+  were **not** committed — the convention is that they ship unexecuted.
+
 ## 2026-07-29 (later) — Live-run hardening: everything the first real agent runs broke
 
 Four live runs on `tensorx/deepseek-v4-flash` (Requesty) found five bugs the unit tests
