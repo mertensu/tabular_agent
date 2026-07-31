@@ -2,6 +2,34 @@
 
 > Session log for working across two machines. Newest entry on top.
 > Update before ending a session, then commit & push. Pull and read this first when starting.
+>
+> **This file is pruned (~2 weeks) and is not the record of *why* anything was
+> decided.** That lives in `docs/decisions/` — see its README for the index and
+> the project vocabulary. When an entry here records a decision, write the
+> decision record too, or the reasoning is deleted with the entry.
+
+## 2026-07-31 — Decision records backfilled
+
+**Machine:** MacBook Air | **Branch:** master
+
+`docs/decisions/` now holds 16 records backfilled from this file and the commit
+log, plus an index that defines the vocabulary (run / table / experiment /
+journal / lineage / bundle) for someone who has never seen the project. Written
+as teaching material: each has the problem, the decision, **what was rejected and
+why**, and the consequences including the bad ones.
+
+Ulf's framing: a wiki describing *how the system works* was rejected — it
+duplicates code and notebooks and rots silently. A decision record is history,
+dated, never edited to match later reality, so it cannot go stale the same way.
+
+Convention added to `CLAUDE.md`. Several records exist mainly because *Ulf's*
+call overrode the initial proposal (0014, 0015, 0016) and the rejected
+alternative would otherwise have been pruned out of existence with the handoff
+entry.
+
+**Next:** unchanged — `blend_models` + `predict`, then residual feedback, then
+§19 compaction. See the entries below.
+
 
 ## 2026-07-30 (latest+1) — Block-level feedback: what the agent needs to iterate
 

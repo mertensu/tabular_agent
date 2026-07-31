@@ -2,6 +2,25 @@
 
 Leakage-safe tabular-ML core library. See `docs/` for Phase-2 requirements.
 
+## Decision records
+
+`docs/decisions/` holds one file per design decision — the problem, what was
+chosen, what was rejected, and what it cost. Start at `docs/decisions/README.md`,
+which also defines the project vocabulary (run, table, experiment, journal,
+lineage, bundle).
+
+- **Read them** when touching an area you did not build: they explain *why* the
+  code has the shape it has, which the code itself cannot.
+- **Add one** when a decision is made that a newcomer would otherwise have to
+  reverse-engineer — especially when an obvious-looking alternative was rejected.
+  Keep it to the existing template and write for a data scientist who has never
+  seen this repo.
+- **Never edit an accepted record to match new reality.** They are history. If a
+  decision is revised, write a new one that says which it supersedes and leave the
+  old reasoning intact — being able to see what we believed and why is the point.
+- They are *not* documentation of how the system currently works. Per-line
+  rationale belongs in docstrings and comments, where it cannot drift.
+
 ## Keep Ulf in the loop (quizzes + notebooks)
 
 Ulf is building this to *understand* it, not just to have it built. Code that lands
