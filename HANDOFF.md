@@ -60,6 +60,26 @@ positions. Summary:
 carries information. Our data: 19 cycles found the same score as 8. Better feedback per
 cycle beats more cycles — which is the argument for (2) above.
 
+**Open tension — measuring a link is taxed by the same counter that protects exploration.**
+`vs_parent_table` was framed as "makes good behaviour rewarding, not mandatory". That is
+only half true. Every training call costs one of `max_experiments=25` *and*, when it does
+not beat the incumbent, one unit of `patience=10`. An agent that trains each table before
+extending it therefore accumulates no-improvement rows **by construction** — not because
+it is failing, but because measurement costs an experiment. So thorough measurement buys
+information and buys fewer ideas.
+
+- **Candidate fix:** do not count a table's *first* training against `patience` — that is
+  the measurement, not an attempt to win. Two lines.
+- **Why not yet:** it loosens the stop rule again, and the loose version already bought 19
+  experiments for the same score as 8 (see the entry below). Do not stack another
+  loosening without a second dataset.
+- **Also probably the wrong worry:** the risk this guards against is an agent *farming*
+  `vs_parent` numbers. An LLM is not optimising a reward signal, and the failure actually
+  observed, repeatedly, is the opposite — under-compliance with guidance until something
+  structural intervenes.
+- **Revisit when:** we run on a second dataset. Same evidence needed for the `patience=10`
+  vs `patience=4` question, so do both at once.
+
 ## 2026-07-30 (latest) — Stop rule reworked, attribution gaps, and a real leakage hole
 
 **Machine:** MacBook Air
