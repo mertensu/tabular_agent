@@ -8,6 +8,76 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-05 — Orientation notebook: the whole agent, one call at a time
+
+**Machine:** MacBook Air | **Branch:** master
+
+Ulf could not hold the agent's shape in his head — "what does the agent call, and
+what do those tools write". Nothing was built; `notebooks/phase3_agent_map.ipynb`
+(109 cells, 47 code, all smoke-tested in order, ships unexecuted) drives all five
+tools by hand and prints the return value **plus a `tree()` of the run dir** after
+every call, so the folder filling up is the spine of the explanation. Sections
+1-11 the happy path, 12 the five structural refusals, 13 stopping, 14-15 bundle +
+`predict_bundle` round trip from raw strings, 16 the recap map, 17 the live LLM.
+
+A wiki page in `docs/` was explicitly **not** written — the anti-wiki decision
+from 2026-07-31 stands, and a notebook breaks loudly when it drifts.
+
+**Three findings, from writing prose against real numbers rather than expected ones.**
+All three are now teaching moments in the notebook, and they are the argument for
+the holdout below:
+
+1. **lgbm on the raw table barely beats the baseline** (0.6903 -> 0.6881) with
+   fold_spread 0.0416 — a gain 20x under the noise. The dataset's signal is locked
+   in the two string columns. Good: it is the state every run starts in.
+2. **`importance_share` and marginal gain point opposite ways, in both directions.**
+   On t1 the date block holds 23% of splits and delivered the entire 0.19
+   improvement, while the 4 original columns hold 77% and delivered ~nothing
+   (continuous columns have more split points). On t3 the reverse: `price_per_m2`
+   took 37% of splits and made the score **worse** (`vs_parent -0.026`) — the model
+   could already approximate the ratio from `price` and `area`.
+3. **The noise floor accepted noise.** `city` is `rng.choice`, independent of the
+   target by construction. Encoding it scored `vs_parent +0.029` against a fold
+   spread of `0.081`. The bar is `min_gain_ratio 0.25 x 0.081 = 0.020`, so it
+   **cleared** it and was recorded as progress — and `finalize_run` then shipped
+   that experiment (e4) as `best`. The stop rule is a defence against *sustained*
+   self-deception, not a per-experiment lie detector. With one comparison at that
+   spread, no threshold can be right.
+
+**Next — sequence changed, and (3) is why.** Ulf's original question was whether
+residual feedback needs fold membership. It does not: `oof.parquet` is
+positionally row-aligned with its source table (`train_cv` resets the index), and
+OOF already absorbs folds by construction, so slices are addressable by row
+position alone. A `fold` column is still worth 2 lines (deterministic from
+`make_folds`) purely to tell a real weak slice from one fold's bad fit.
+
+But the blocker is not folds, it is that `cv_score` is **both** the number the
+agent optimises and the number the report headlines. Five experiments were enough
+for that to ship a noise column. Residual feedback makes it strictly worse: the
+agent would then be *selecting features using out-of-fold errors*, so OOF stops
+being an innocent bystander. Note the leak there is through the model's reasoning,
+not through data — no guard can catch it.
+
+1. **Holdout the agent's tools cannot reach**, scored once at `finalize_run`.
+   `build_report` already takes `holdout_score` and **no caller ever passes one**.
+   Prerequisite for (2), not a follow-up.
+2. **Residual feedback.** Shape: `explore_experiment(exp_id, code)` over
+   `features + oof_pred + residual + fold`, routed through `run_readonly` only.
+   Never into the frame `transform_features` sees, or 0009 breaks both ways.
+   Free by construction — every counter in `stop.py` reads the leaderboard, and
+   only training appends to it. That is also the relief for the
+   measurement-vs-patience tension logged below.
+   - Known hole, judged acceptable: free calls x 200-row cap means the target is
+     reconstructable across calls. There is no path back in — a hardcoded literal
+     is the only route, and per 0010 it is stored as code and dies at predict on a
+     length mismatch. Threat model is careless, not adversarial (`sandbox.py`).
+3. `blend_models` + `predict`; then §19 compaction, `max_tables`, exclusive-create
+   id claim.
+
+**Also noted:** `explore_dataframe` exists in `explore.py` and is **not registered
+in `agent.py`** — the agent has no read-only code path at all today. Tests: 156 passed.
+
+
 ## 2026-07-31 — Decision records backfilled
 
 **Machine:** MacBook Air | **Branch:** master
