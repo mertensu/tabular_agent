@@ -43,9 +43,23 @@ def load(run_dir: str) -> dict:
 
 
 def save(run_dir: str, journal: dict) -> str:
+    """Write the journal atomically.
+
+    ``open(path, "w")`` truncates before it writes, so a crash, OOM or kill
+    between the two leaves an empty or half-written file — and the journal *is*
+    the run state, so that loses the entire run, including trained artifacts that
+    can no longer be attributed. Write a sibling temp file and ``os.replace`` it:
+    the rename is atomic, so a reader sees either the old journal or the new one,
+    never a partial one. ``fsync`` before the rename so the bytes are on disk and
+    not just in the page cache when the machine goes down mid-run.
+    """
     path = journal_path(run_dir)
-    with open(path, "w") as f:
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as f:
         json.dump(journal, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
     return path
 
 
@@ -53,6 +67,21 @@ def set_task(run_dir: str, *, target: str, task_type: str, metric: str) -> dict:
     journal = load(run_dir)
     journal["task"] = {"target": target, "task_type": task_type, "metric": metric}
     save(run_dir, journal)
+    return journal
+
+
+def set_split(run_dir: str, record: dict) -> dict:
+    """Record how the input was divided into work and validation halves.
+
+    Written once and never updated. Two runs over the same file are only
+    comparable if they validated against the same rows, and this is the only
+    place that question can be answered after the fact — the halves themselves
+    are inside a run directory that may be deleted or moved.
+    """
+    journal = load(run_dir)
+    if journal.get("split") is None:
+        journal["split"] = record
+        save(run_dir, journal)
     return journal
 
 
@@ -73,6 +102,26 @@ def append_table(run_dir: str, row: dict) -> dict:
     return journal
 
 
+def update_table(run_dir: str, path: str, fields: dict) -> dict:
+    """Merge ``fields`` into an already-appended table row.
+
+    For facts about a table that are only measurable after it exists — credit
+    costs a fit per contributing table, so it is asked for, not produced on the
+    way past. Keeping it here rather than in the leaderboard makes it survive
+    a context reset: it is a property of the *table*, true regardless of which
+    experiment happened to ask.
+
+    The raw input table has no row (nothing derived it) and is silently ignored.
+    """
+    journal = load(run_dir)
+    for row in journal.get("tables") or []:
+        if row.get("path") == path:
+            row.update(fields)
+            save(run_dir, journal)
+            break
+    return journal
+
+
 def next_experiment_id(run_dir: str) -> str:
     return f"e{len(load(run_dir)['leaderboard']) + 1}"
 
@@ -83,31 +132,66 @@ def append_experiment(run_dir: str, row: dict) -> dict:
     ``best`` is recomputed from the whole leaderboard rather than compared
     against the previous best, so it stays correct even if a row is edited or
     the journal is rebuilt.
+
+    Ranked by ``val_score`` — the held-out half — not by ``cv_score``. Both are
+    on the row, and they disagree: cross-validation is what the search optimises
+    against, so it is the number the search can inflate. A row whose validation
+    score is missing cannot be ranked and so cannot be ``best``; it stays on the
+    leaderboard with its reason, because a missing score is a fact about the run.
     """
     journal = load(run_dir)
     journal["leaderboard"].append(row)
 
     metric = (journal.get("task") or {}).get("metric") or row.get("metric")
     if metric is not None:
-        scored = [r for r in journal["leaderboard"] if r.get("cv_score") is not None]
+        scored = [r for r in journal["leaderboard"] if r.get("val_score") is not None]
         baselines = [r for r in scored if r.get("model_type") == "baseline"]
         candidates = [r for r in scored if r.get("model_type") != "baseline"]
 
         pick = max if greater_is_better(metric) else min
         if baselines:
-            b = pick(baselines, key=lambda r: r["cv_score"])
-            journal["baseline"] = {"experiment_id": b["id"], "cv_score": b["cv_score"]}
+            b = pick(baselines, key=lambda r: r["val_score"])
+            journal["baseline"] = {
+                "experiment_id": b["id"],
+                "val_score": b["val_score"],
+                "cv_score": b.get("cv_score"),
+            }
         # A run whose only experiment is the baseline still needs a `best` for
         # finalize_run to have something to package.
         pool = candidates or baselines
         if pool:
-            top = pick(pool, key=lambda r: r["cv_score"])
+            top = pick(pool, key=lambda r: r["val_score"])
             journal["best"] = {
                 "experiment_id": top["id"],
-                "cv_score": top["cv_score"],
+                "val_score": top["val_score"],
+                "cv_score": top.get("cv_score"),
                 "artifact_path": top["artifact_path"],
             }
 
+    save(run_dir, journal)
+    return journal
+
+
+def update_experiment(run_dir: str, exp_id: str, fields: dict) -> dict:
+    """Merge ``fields`` into an already-appended leaderboard row.
+
+    Exists because the two numbers that say whether an *idea* worked —
+    ``vs_source_table`` and the per-table credit — can only be computed once the
+    row is in the journal, and they are worth keeping. Without them a resuming
+    agent has
+    every score but no attribution: it can see that e54 is the best, and not what
+    made it better than e51.
+
+    Never touches ``best``/``baseline``: those derive from ``val_score``, and this
+    only ever writes fields alongside it.
+    """
+    journal = load(run_dir)
+    for row in journal["leaderboard"]:
+        if row.get("id") == exp_id:
+            row.update(fields)
+            break
+    else:
+        raise KeyError(f"no experiment {exp_id!r} in the leaderboard")
     save(run_dir, journal)
     return journal
 
@@ -118,14 +202,14 @@ def ancestry(journal: dict, table_path: str) -> list[str]:
     Stops at the raw input table, which has no row in ``tables`` because nothing
     derived it.
     """
-    parents = {t["path"]: t.get("source_table") for t in journal.get("tables") or []}
+    sources = {t["path"]: t.get("source_table") for t in journal.get("tables") or []}
     chain = []
     seen = set()
     current = table_path
-    while current in parents and current not in seen:
+    while current in sources and current not in seen:
         seen.add(current)
         chain.append(current)
-        current = parents[current]
+        current = sources[current]
     return chain
 
 
@@ -133,8 +217,8 @@ def attribution(journal: dict, table_path: str) -> list[dict]:
     """Which links in a table's history were actually measured (spec §19.4).
 
     A feature table that was built and then extended without ever being trained
-    on leaves a gap: the score of its child cannot be attributed to the child's
-    columns rather than the parent's, because nothing ever scored the parent. The
+    on leaves a gap: the score of the later table cannot be attributed to its own
+    columns rather than its source's, because nothing ever scored the source. The
     run is still correct — the model that ships is the model that scored best —
     but the *explanation* has a hole in it, and the report should say so rather
     than let the winning table take credit for all of its columns.
@@ -149,7 +233,7 @@ def attribution(journal: dict, table_path: str) -> list[dict]:
     out = []
     for path in ancestry(journal, table_path):
         experiments = [
-            r for r in rows if r.get("source_table") == path and r.get("cv_score") is not None
+            r for r in rows if r.get("source_table") == path and r.get("val_score") is not None
         ]
         table = by_path.get(path, {})
         out.append(
@@ -159,7 +243,7 @@ def attribution(journal: dict, table_path: str) -> list[dict]:
                 "method": table.get("method"),
                 "n_experiments": len(experiments),
                 "best_score": (
-                    pick(r["cv_score"] for r in experiments) if experiments else None
+                    pick(r["val_score"] for r in experiments) if experiments else None
                 ),
                 "measured": bool(experiments),
             }
@@ -167,17 +251,23 @@ def attribution(journal: dict, table_path: str) -> list[dict]:
     return out
 
 
-def blocks(journal: dict, table_path: str) -> list[dict]:
-    """The columns of ``table_path`` grouped by the tool call that added them.
+def columns_by_table(journal: dict, table_path: str) -> list[dict]:
+    """The columns of ``table_path``, grouped by which table in its history added them.
 
-    A *block* is one tool call's output — already recorded as ``new_columns``, so
-    this is a regrouping rather than new bookkeeping. It is the right unit of
-    credit because it is the unit of *decision*: the agent cannot add half a tool
-    call, so per-column numbers are finer than any move available to it, and
-    inviting per-column conclusions is how an interaction partner gets pruned for
-    scoring zero on its own.
+    The grouping is the unit of *decision*, which is why credit is only ever
+    reported this way: `fit_encoding` and `transform_features` each write exactly
+    one table, so a table's ``new_columns`` is precisely one tool call's output.
+    The agent cannot add half a tool call, so per-column numbers are finer than
+    any move available to it, and inviting per-column conclusions is how an
+    interaction partner gets dropped for scoring nothing on its own.
 
-    Oldest first, with the original columns as the ``raw`` block.
+    That one-to-one is also why this needs no vocabulary of its own. An earlier
+    version called each group a *block*, which named something that already had a
+    name — and left the agent holding two words for one thing, next to
+    ``source_table`` and ``parent`` for another.
+
+    Oldest first. The raw input table has no row here, so its own columns are
+    whatever no derived table claims; callers add it.
     """
     by_path = {t["path"]: t for t in journal.get("tables") or []}
     out = []
@@ -185,7 +275,7 @@ def blocks(journal: dict, table_path: str) -> list[dict]:
         row = by_path.get(path, {})
         out.append(
             {
-                "block": path,
+                "table": path,
                 "method": row.get("method"),
                 "columns": list(row.get("new_columns") or []),
             }

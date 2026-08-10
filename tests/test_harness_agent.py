@@ -17,6 +17,9 @@ EXPECTED_TOOLS = {
     "fit_encoding",
     "transform_features",
     "train_tabular_model",
+    # Refits on columns the agent already has, and returns scores. It cannot
+    # reach anything `train_tabular_model` cannot.
+    "explain_table",
     "finalize_run",
 }
 
@@ -35,6 +38,42 @@ def test_every_tool_returns_a_summary_not_a_table():
     for name in EXPECTED_TOOLS:
         sig = _inspect.signature(getattr(tools, name))
         assert sig.return_annotation is dict, f"{name} must return a compact dict"
+
+
+def test_the_prompt_does_not_describe_the_reader_to_itself():
+    """Second person throughout: naming the reader in the third person is wasted words."""
+    from tabular_agent.harness.instructions import SYSTEM_PROMPT
+
+    assert "agent" not in SYSTEM_PROMPT.lower()
+
+
+def test_the_prompt_introduces_no_vocabulary_of_its_own():
+    """Every noun in it must already be one the tools force.
+
+    Words like "block", "parent" and "branch" have each been introduced here at
+    some point and each had to be removed again: they name something that already
+    has a name, and the reader is left holding two words for one thing. The tools
+    speak in tables, columns and `source_table`; so does this.
+    """
+    from tabular_agent.harness.instructions import SYSTEM_PROMPT
+
+    prompt = SYSTEM_PROMPT.lower()
+    for word in ("block", "parent", "branch", "lineage", "node", "step in the chain"):
+        assert word not in prompt, f"{word!r} is vocabulary the tools do not use"
+
+
+def test_the_prompt_does_not_repeat_what_a_tool_docstring_already_says():
+    """Per-tool facts ride along with the tool; the prompt is for what spans tools."""
+    from tabular_agent.harness.instructions import SYSTEM_PROMPT
+
+    agent = build_agent()
+    prompt = " ".join(SYSTEM_PROMPT.lower().split())
+    for name, tool in agent._function_toolset.tools.items():
+        for sentence in (tool.function_schema.description or "").split("."):
+            words = " ".join(sentence.lower().split())
+            if len(words.split()) < 8:
+                continue  # too short to be a meaningful duplicate
+            assert words not in prompt, f"{name}'s docstring is repeated in the prompt"
 
 
 def test_default_model_is_swappable():

@@ -138,7 +138,7 @@ def _retryable(call):
 
 
 def build_agent(model=DEFAULT_MODEL):
-    """An agent whose *entire* tool surface is the five functions below.
+    """An agent whose *entire* tool surface is the six functions below.
 
     ``model`` is either a PydanticAI model string (``"anthropic:..."``,
     ``"openai:..."``) or a ``Model`` object — e.g. from :func:`gateway_model`,
@@ -174,7 +174,7 @@ def build_agent(model=DEFAULT_MODEL):
         """Profile a table: shape, per-column dtype/missing/unique, task type and metric.
 
         Args:
-            table: Path to the table. Omit to use the run's raw input table.
+            table: Path to the table. Omit to use the run's work table.
         """
         return _retryable(lambda: tools.inspect_data(ctx.deps.session, table))
 
@@ -195,7 +195,7 @@ def build_agent(model=DEFAULT_MODEL):
                 categories -> their rank; requires `categories`), or "target"
                 (out-of-fold target mean; strongest, but only worth it for
                 columns with enough rows per category).
-            table: Path to the source table. Omit to use the run's raw input table.
+            table: Path to the source table. Omit to use the run's work table.
             categories: For method="ordinal" only: {column: [level, ...]} in
                 increasing order. State the real order (e.g. small, medium,
                 large) — it is never inferred from the data.
@@ -255,16 +255,51 @@ def build_agent(model=DEFAULT_MODEL):
     ) -> dict:
         """Train a model with k-fold cross-validation and record the experiment.
 
+        `vs_baseline` compares against the trivial constant model.
+        `vs_source_table` compares against the same model and params on this
+        table's `source_table`, so the columns you added are the only difference
+        — it is `null` when you change model and features at once, and
+        `vs_source_basis` then says what would produce it.
+
         Returns `trained: false` instead of an experiment once this run has
         stopped making progress; call `finalize_run` at that point.
 
         Args:
-            table: Path to the feature table. Omit to use the run's raw input table.
+            table: Path to the feature table. Omit to use the run's work table.
             model_type: One of "baseline", "lgbm", "xgb", "catboost".
             params: Optional model hyper-parameters.
         """
         return _retryable(
             lambda: tools.train_tabular_model(
+                ctx.deps.session, table=table, model_type=model_type, params=params
+            )
+        )
+
+    @agent.tool
+    def explain_table(
+        ctx: RunContext[Deps],
+        table: str | None = None,
+        model_type: str = "lgbm",
+        params: dict | None = None,
+    ) -> dict:
+        """Measure what each tool call's columns contributed, by refitting without each.
+
+        Refits holding out one contributing table's columns at a time; each
+        `contribution` in `credit_by_table` is what the score loses without them.
+        Leave-one-out, so each is that table's worth given the rest. Needs no
+        earlier experiment on the columns it scores, which makes it the only way
+        to separate ideas added in different steps.
+
+        Costs one fit per contributing table plus one, records no experiment, and
+        counts against no budget — including on a table training was declined for.
+
+        Args:
+            table: Path to the feature table. Omit to use the run's work table.
+            model_type: One of "baseline", "lgbm", "xgb", "catboost".
+            params: Optional model hyper-parameters.
+        """
+        return _retryable(
+            lambda: tools.explain_table(
                 ctx.deps.session, table=table, model_type=model_type, params=params
             )
         )

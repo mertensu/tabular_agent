@@ -81,7 +81,7 @@ def _attempts(leaderboard: list[dict]) -> list[dict]:
     return [
         r
         for r in leaderboard
-        if r.get("cv_score") is not None and r.get("model_type") != "baseline"
+        if r.get("val_score") is not None and r.get("model_type") != "baseline"
     ]
 
 
@@ -91,7 +91,7 @@ def _since_improvement(rows: list[dict], higher_better: bool, min_gain_ratio: fl
     incumbent_spread = 0.0
     last_progress = -1
     for i, r in enumerate(rows):
-        score = r["cv_score"]
+        score = r["val_score"]
         if incumbent is None:
             progress = True
         else:

@@ -13,7 +13,9 @@ def row(id, score, spread=0.04, model_type="lgbm", source_table="t1.parquet"):
     return {
         "id": id,
         "model_type": model_type,
-        "cv_score": score,
+        # The stop rule reads the leaderboard's ranking score, which is the
+        # validation half (0019) — not the cross-validated one.
+        "val_score": score,
         "fold_spread": spread,
         "source_table": source_table,
     }

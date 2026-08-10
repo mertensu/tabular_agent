@@ -23,8 +23,8 @@ from ..cv import make_folds
 from ..encoders import fit_encoding as _fit_encoding
 from ..inspect import profile_dataframe
 from ..io import load_table, save_parquet
-from ..metrics import greater_is_better
-from ..models import train_cv
+from ..metrics import compute_metric, greater_is_better
+from ..models import predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..report import build_report, write_report
 from ..sandbox import SandboxError
@@ -71,6 +71,52 @@ def _feature_frame(df: pd.DataFrame, target: str) -> tuple[pd.DataFrame, list[st
     return numeric, dropped
 
 
+def _score_on_val(
+    session: RunSession,
+    source_path: str,
+    model,
+    feature_names,
+    spec,
+    y_work: pd.Series,
+) -> tuple[float | None, str | None]:
+    """Score a just-fitted model on the validation half. ``(score, why_not)``.
+
+    The validation rows are **raw**: no tool ever wrote them, so the columns the
+    model expects do not exist on them yet and have to be rebuilt by replaying
+    the lineage of the table it trained on — the same pipeline ``finalize_run``
+    packages into a bundle. Encoders replay their fitted parameters, so nothing
+    learned from validation rows enters the features.
+
+    Returns a reason instead of raising when the replay cannot produce the
+    model's columns: a leaderboard row with a missing validation score is worth
+    more than a training call that dies.
+    """
+    val = load_table(session.val_path)
+    y_val = val[spec.target]
+    pipeline = _load_lineage(source_path, spec.task_type)
+    # The target is dropped before the pipeline sees the rows (0009): a transform
+    # that can read the target is a transform that can leak it.
+    features = pipeline.transform(val.drop(columns=[spec.target]))
+
+    missing = [c for c in feature_names if c not in features.columns]
+    if missing:
+        return None, f"replaying the table's lineage did not produce {missing[:5]}"
+
+    classes = None
+    if spec.task_type in ("binary", "multiclass"):
+        # Union of both halves: a class present in work but absent from
+        # validation (or the reverse) still has to occupy its column, or the
+        # probability matrix silently shifts and logloss scores the wrong class.
+        classes = sorted(set(pd.unique(y_work)) | set(pd.unique(y_val)))
+    preds = predict_model(
+        model,
+        features[list(feature_names)],
+        spec.task_type,
+        classes=classes if spec.task_type == "multiclass" else None,
+    )
+    return float(compute_metric(spec.metric, y_val, preds, labels=classes)), None
+
+
 def inspect_data(session: RunSession, table: str | None = None) -> dict:
     """Profile a table and pin down the task type and selection metric.
 
@@ -87,6 +133,7 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
     journal.set_task(
         session.run_dir, target=spec.target, task_type=spec.task_type, metric=spec.metric
     )
+    journal.set_split(session.run_dir, session.split_record())
 
     columns = prof["columns"]
     truncated = len(columns) > MAX_REPORTED_COLUMNS
@@ -98,6 +145,10 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
         "n_cols": prof["n_cols"],
         "task_type": spec.task_type,
         "metric": spec.metric,
+        # Fixed for the whole run, so it is stated here rather than repeated on
+        # every training result. Every `vs_...` field is already signed as a gain;
+        # this is the direction of `cv_score` itself.
+        "higher_is_better": greater_is_better(spec.metric),
         "n_splits": spec.n_splits,
         "target": prof.get("target"),
         "columns": shown,
@@ -292,82 +343,135 @@ def transform_features(
     }
 
 
-def _block_report(
-    session: RunSession, j: dict, source_table: str, model, feature_names: list[str]
+def _columns_by_table(
+    session: RunSession, j: dict, source_table: str, feature_names: list[str]
 ) -> list[dict]:
-    """Per-block share of the model's split importance (see docs/).
+    """The table's columns, grouped by which table in its history added them.
 
-    Grouped by the tool call that produced the columns, never per column. Summing
-    over a block is both more stable than a single column's importance and the
-    only granularity the agent can act on.
+    One tool call writes one table, so grouping by table *is* grouping by tool
+    call — which is the unit the agent can act on — without needing a second word
+    for it.
 
-    Importance is advisory and known to be biased — high-cardinality columns
-    attract splits. That is acceptable here because the alternative on offer is
-    no feature-level feedback at all, which is what makes the agent generate
-    candidates blind. It is *not* acceptable to phrase it as a verdict: see the
-    wording in the note this feeds.
+    Restricted to columns that actually reached the model: a table whose columns
+    were all dropped as non-numeric contributed nothing to this fit and is left
+    out. Whatever no derived table claims belongs to the raw input, reported
+    first under the name the agent would use for it.
     """
-    importances = getattr(model, "feature_importances_", None)
-    if importances is None or len(importances) != len(feature_names):
-        return []
-    weights = {name: float(v) for name, v in zip(feature_names, importances)}
-    total = sum(weights.values()) or 1.0
-
-    used = set()
-    report = []
-    for block in journal.blocks(j, source_table):
-        cols = [c for c in block["columns"] if c in weights]
-        used.update(cols)
-        if not cols:
-            continue
-        share = sum(weights[c] for c in cols) / total
-        report.append(
-            {
-                "block": block["block"],
-                "method": block["method"],
-                "n_columns": len(cols),
-                "importance_share": round(share, 4),
-                "n_columns_unused": sum(1 for c in cols if weights[c] == 0),
-            }
-        )
-    original = [c for c in feature_names if c not in used]
+    usable = set(feature_names)
+    claimed = set()
+    out = []
+    for row in journal.columns_by_table(j, source_table):
+        cols = [c for c in row["columns"] if c in usable]
+        claimed.update(cols)
+        if cols:
+            out.append({"table": row["table"], "method": row["method"], "columns": cols})
+    original = [c for c in feature_names if c not in claimed]
     if original:
-        report.insert(
+        out.insert(
             0,
             {
-                "block": "original columns",
+                "table": _table_label(session, session.rel(session.data_path)),
                 "method": None,
-                "n_columns": len(original),
-                "importance_share": round(
-                    sum(weights[c] for c in original) / total, 4
-                ),
-                "n_columns_unused": sum(1 for c in original if weights[c] == 0),
+                "columns": original,
             },
         )
-    return report
+    return out
 
 
-def _vs_parent(j: dict, source_table: str, cv_score: float, metric: str) -> float | None:
-    """Gain over the best experiment on the table this one was built from.
+def _gain(cv_score: float, reference: float, metric: str) -> float:
+    """How much better than ``reference`` this score is. Positive is always better.
 
-    ``None`` when the parent was never trained — which is the point: the marginal
-    number only exists if the previous step was measured, so measuring it is
-    worth something to the agent rather than being a rule imposed on it.
+    Every ``vs_*`` field the agent sees goes through here. The raw difference
+    would flip meaning with the metric — an improvement is negative under `rmse`
+    and positive under `auc` — and two such fields sitting side by side in one
+    result, signed differently, is a reading the model gets wrong exactly once
+    before it discards a good branch. One direction, no exceptions.
     """
-    parents = {t["path"]: t.get("source_table") for t in j.get("tables") or []}
-    parent = parents.get(source_table)
-    if parent is None:
-        return None
-    scores = [
-        r["cv_score"]
+    delta = cv_score - reference
+    # `+ 0.0` normalises IEEE negative zero: a change of nothing rounds
+    # to -0.0, which serialises as "-0.0" and reads as a regression.
+    return round(delta if greater_is_better(metric) else -delta, 6) + 0.0
+
+
+def _fit_signature(model_type: str, params: dict | None) -> str:
+    """Identity of *how* a model was fitted, for deciding what compares to what."""
+    return json.dumps([model_type, params or {}], sort_keys=True)
+
+
+def _table_label(session: RunSession, rel_path: str) -> str:
+    """How to *name* a table in a sentence aimed at the agent.
+
+    The raw input lives outside ``run_dir``, so its "relative" path is the
+    absolute one — right for matching journal rows, unreadable in prose, and not
+    what the agent would type anyway: it names that table by passing nothing.
+    """
+    return (
+        "the work table" if rel_path == session.rel(session.data_path) else rel_path
+    )
+
+
+def _vs_source_table(
+    session: RunSession,
+    j: dict,
+    source_table: str,
+    val_score: float,
+    metric: str,
+    model_type: str,
+    params: dict | None,
+) -> tuple[float | None, str]:
+    """Gain over the same model, same params, on this table's ``source_table``.
+
+    Returns the gain and a plain statement of what it is a gain *over* — or, when
+    there is nothing valid to compare against, why not and what would fix it.
+
+    Restricted to an identical fit on purpose. This number exists to answer "did
+    that feature call pay", and the only way it can answer that is if the feature
+    call is the sole difference between the two runs. Comparing against the source
+    table's best score whatever fitted it silently folds a model swap into the
+    features' credit: train lgbm on the source, catboost on what was built from
+    it, and a catboost-shaped gain gets attributed to the columns you just added.
+
+    ``None`` when no such fit exists on the source table — which is the point: the
+    marginal number is the reward for having measured the previous step the same
+    way, so holding the model fixed while iterating on features is worth
+    something rather than being a rule imposed on the agent. When the agent does
+    want to change model and features at once, `explain_table` still separates the
+    contributions, because it refits everything itself.
+    """
+    sources = {t["path"]: t.get("source_table") for t in j.get("tables") or []}
+    source = sources.get(source_table)
+    if source is None:
+        return None, f"{_table_label(session, source_table)} was not derived from another table"
+
+    label = _table_label(session, source)
+    signature = _fit_signature(model_type, params)
+    on_source = [
+        r
         for r in j.get("leaderboard") or []
-        if r.get("source_table") == parent and r.get("cv_score") is not None
+        if r.get("source_table") == source and r.get("val_score") is not None
     ]
-    if not scores:
-        return None
-    best_parent = max(scores) if greater_is_better(metric) else min(scores)
-    gain = (cv_score - best_parent) if greater_is_better(metric) else (best_parent - cv_score)
-    return round(gain, 6)
+    comparable = [
+        r for r in on_source if _fit_signature(r.get("model_type"), r.get("params")) == signature
+    ]
+    if not comparable:
+        detail = (
+            f"{label} has been trained, but not with this exact fit"
+            if on_source
+            else f"{label} has never been trained"
+        )
+        return None, (
+            f"no gain available: {detail}. Train {model_type} with these params on "
+            f"{label} to get one, or call explain_table on "
+            f"{_table_label(session, source_table)} to measure each table's columns "
+            "directly."
+        )
+
+    pick = max if greater_is_better(metric) else min
+    best = pick(comparable, key=lambda r: r["val_score"])
+    return _gain(val_score, best["val_score"], metric), (
+        f"vs {best['id']}: the same {model_type} fit on {label}, so the only "
+        "difference is the columns added since"
+    )
 
 
 def _progress(session: RunSession) -> dict:
@@ -386,10 +490,7 @@ def _refuse_if_table_exhausted(session: RunSession, path: str) -> dict | None:
     is not.
     """
     rel = session.rel(path)
-    # The raw input table lives outside run_dir, so `rel` hands back an absolute
-    # path. Correct for matching leaderboard rows, useless in a sentence aimed at
-    # a model whose way of naming it is to pass nothing at all.
-    label = "the raw input table" if path == session.data_path else rel
+    label = _table_label(session, rel)
     j = journal.load(session.run_dir)
     metric = (j.get("task") or {}).get("metric") or session.resolved().metric
     status = stop.table_status(j["leaderboard"], metric, session.stop_policy, rel, label)
@@ -423,6 +524,15 @@ def _refuse_if_finished(session: RunSession, force: bool = False) -> dict | None
     that is safely on disk does the harness raise and end things outright.
     """
     status = _progress(session)
+    # Checked before the progress gate, not after. A finalized run is over
+    # whatever the stop rule thinks: the bundle is packaged and the winner picked,
+    # so another fit could only add a leaderboard row nothing will ever read, or
+    # tempt a second `finalize_run` against the same validation rows.
+    if journal.stop_state(session.run_dir).get("finalized"):
+        raise RuntimeError(
+            "this run is finished: the harness has already packaged it and will not "
+            "train again"
+        )
     if not status["should_stop"] and not force:
         return None
     if force and status["reason"] is None:
@@ -499,6 +609,7 @@ def train_tabular_model(
             return refusal
 
     spec = session.resolved()
+    journal.set_split(session.run_dir, session.split_record())
     df = load_table(path)
 
     X, dropped = _feature_frame(df, spec.target)
@@ -523,6 +634,9 @@ def train_tabular_model(
 
     cv_score = float(np.mean(result.fold_metrics))
     fold_spread = float(np.std(result.fold_metrics))
+    val_score, val_unavailable = _score_on_val(
+        session, path, result.final_model, result.feature_names, spec, y
+    )
 
     exp_id = journal.next_experiment_id(session.run_dir)
     exp_dir = os.path.dirname(session.ctx.path("experiments", exp_id, "_"))
@@ -538,14 +652,20 @@ def train_tabular_model(
         "task_type": spec.task_type,
         "metric": spec.metric,
         "cv_score": cv_score,
+        "val_score": val_score,
         "fold_metrics": [float(m) for m in result.fold_metrics],
         "feature_names": list(result.feature_names),
+        "target": spec.target,
         "source_table": session.rel(path),
     }
     with open(os.path.join(exp_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
 
-    baseline = (journal.load(session.run_dir).get("baseline") or {}).get("cv_score")
+    # Everything comparative is measured on the validation half, because that is
+    # what the leaderboard ranks by. `cv_score` rides along on the row so the
+    # cv-vs-val gap stays readable — it is the run's own record of how much the
+    # search has been tuning to the folds.
+    baseline = (journal.load(session.run_dir).get("baseline") or {}).get("val_score")
     row = {
         "id": exp_id,
         "model_type": model_type,
@@ -556,17 +676,39 @@ def train_tabular_model(
         # each experiment's meta.json.
         "source_table": session.rel(path),
         "metric": spec.metric,
+        "val_score": val_score,
+        "val_unavailable": val_unavailable,
         "cv_score": cv_score,
         "fold_spread": fold_spread,
-        "vs_baseline": None if baseline is None else round(cv_score - baseline, 6),
+        "vs_baseline": (
+            None
+            if baseline is None or val_score is None
+            else _gain(val_score, baseline, spec.metric)
+        ),
         "artifact_path": session.rel(exp_dir),
     }
     journal.append_experiment(session.run_dir, row)
     j_after = journal.load(session.run_dir)
-    blocks = _block_report(
-        session, j_after, row["source_table"], result.final_model, result.feature_names
+    columns_by_table = [
+        {"table": r["table"], "method": r["method"], "n_columns": len(r["columns"])}
+        for r in _columns_by_table(session, j_after, row["source_table"], result.feature_names)
+    ]
+    vs_source, vs_source_basis = _vs_source_table(
+        session, j_after, row["source_table"], val_score, spec.metric, model_type, params
     )
-    vs_parent = _vs_parent(j_after, row["source_table"], cv_score, spec.metric)
+    # All three are derived from the journal *after* this row lands, so they
+    # cannot be part of the append. Persist them anyway: they are the record of
+    # whether an idea paid off, and a fresh agent that only has the scores cannot
+    # rebuild them. None of them affects `best`/`baseline`.
+    journal.update_experiment(
+        session.run_dir,
+        exp_id,
+        {
+            "vs_source_table": vs_source,
+            "vs_source_basis": vs_source_basis,
+            "columns_by_table": columns_by_table,
+        },
+    )
 
     status = _progress(session)
     table_state = stop.table_status(
@@ -576,41 +718,153 @@ def train_tabular_model(
         session.rel(path),
     )
 
-    return {
+    # What is *not* here is deliberate. This dict ships on every training call, so
+    # anything constant for the whole run (the metric and its direction) is said
+    # once by `inspect_data` instead, anything that only restates another field
+    # (the raw fold scores under `fold_spread`, the stop counters under `note`) is
+    # dropped, and anything that would read the same every time is prompt text,
+    # not payload. A caption repeated on every call buys nothing after the first.
+    out = {
         "trained": True,
         "experiment_id": exp_id,
-        "model_type": model_type,
-        "metric": spec.metric,
+        # First, because it is what the leaderboard ranks by (0019). `cv_score`
+        # follows it rather than being dropped: the two are measured on different
+        # rows and their disagreement is information — a gain that shows up in the
+        # folds and not on the validation half is a gain in the folds only.
+        "val_score": val_score,
         "cv_score": cv_score,
         "fold_spread": fold_spread,
-        "fold_metrics": meta["fold_metrics"],
+        "model_type": model_type,
         "n_features": len(result.feature_names),
         "source_table": row["source_table"],
         "dropped_non_numeric": dropped,
         "vs_baseline": row["vs_baseline"],
-        "higher_is_better": greater_is_better(spec.metric),
+        "vs_source_table": vs_source,
+        # What this table is made of: one entry per table in its history, each
+        # being one tool call's columns. No score attached — which of them earned
+        # the gain takes refits to answer, and that is `explain_table`.
+        "columns_by_table": columns_by_table,
         "artifact_path": row["artifact_path"],
-        # The advisory half of the stop rule (§19.3): the model is told where the
-        # run stands after every experiment, so a cooperative one never has to be
-        # refused at all.
-        "since_improvement": status["since_improvement"],
-        "since_improvement_on_table": table_state["since_improvement_on_table"],
-        "experiments_remaining": status["experiments_remaining"],
-        # Grouped by the tool call that added the columns, because that is the
-        # unit the agent can act on. Never per column: a feature that only pays
-        # off alongside another scores zero alone, and per-column feedback is how
-        # it gets thrown away before its partner is ever built.
-        "feature_blocks": blocks,
-        "vs_parent_table": vs_parent,
-        "how_to_read_blocks": (
-            "importance_share is how much of the model's splitting each tool call's "
-            "columns account for. A low or zero share means no evidence those columns "
-            "helped *in this feature set* — not that they are useless: a feature that "
-            "only pays off next to another scores nothing until that other one exists. "
-            "Nothing is dropped for you. Tables are immutable, so abandoning a branch "
-            "costs nothing and you can extend it again later."
-        ),
+        # The advisory half of the stop rule (§19.3): where the run stands after
+        # every experiment, so a cooperative model never has to be refused at all.
         "note": stop.advisory(status, table_state),
+    }
+    if vs_source is None:
+        # Only when there is no gain. A missing number is a fixable state and the
+        # fix is a call the agent will not think to make unless told; a caption on
+        # a number that is present would just be describing the obvious.
+        out["vs_source_basis"] = vs_source_basis
+    if val_unavailable is not None:
+        # Same rule: say it only when the number is missing, and say what stopped
+        # it. This row cannot win the run, which the agent needs to know now
+        # rather than discovering at finalize.
+        out["val_unavailable"] = val_unavailable
+    return out
+
+
+def explain_table(
+    session: RunSession,
+    table: str | None = None,
+    model_type: str = "lgbm",
+    params: dict | None = None,
+) -> dict:
+    """Which table's columns earned the score, by refitting without each in turn.
+
+    Feature importance cannot answer this and never could. Importance decomposes
+    *one fitted model's attention*; the question is a counterfactual — what would
+    the score be if these columns had never been built — and the two come apart
+    routinely. A column the trees split on constantly can be worth nothing once
+    removed, because something else carries the same signal; a binary column
+    offering a single split point can carry the entire gain.
+
+    So this measures the counterfactual directly. Fit once on everything, then
+    once more per contributing table with that table's columns withheld, same
+    folds, same model, same params. ``contribution`` is the full score minus the
+    score without them, signed as a gain: positive means removing them hurt,
+    which means they helped.
+
+    Grouped by table because one tool call writes one table, so that grouping is
+    already the unit the agent can act on — and per-column numbers would be finer
+    than any move available to it.
+
+    Two properties fall out of leave-one-out that the importance version had to
+    hedge about in prose:
+
+    * **Interaction partners both get credit.** If ``K`` is worthless alone but
+      ``K + L`` is strong, withholding either one costs the score, so both score
+      positive. Nothing needs warning the agent off dropping a partner.
+    * **Redundancy reads as ~0 honestly.** Two tables encoding the same signal
+      each measure as free to remove, and that is the truth about each one *given
+      the other* — the pair still has to be tested as a pair.
+
+    Costs one fit per contributing table plus one. It writes no leaderboard row
+    and counts against no budget: it produces no model to ship, and it is most
+    useful on a table the stop rule has already declined, which is exactly when
+    asking "what happened here" is the right move.
+    """
+    path = session.resolve_table(table)
+    spec = session.resolved()
+    journal.set_split(session.run_dir, session.split_record())
+    df = load_table(path)
+
+    X, dropped = _feature_frame(df, spec.target)
+    if X.shape[1] == 0:
+        raise ValueError(
+            "no numeric feature columns to explain; use transform_features or "
+            "fit_encoding to produce some first"
+        )
+    y = df[spec.target]
+    folds = make_folds(y, spec.task_type, n_splits=spec.n_splits, seed=spec.seed)
+
+    def score(columns: list[str]) -> float:
+        result = train_cv(
+            X[columns],
+            y,
+            folds,
+            spec.task_type,
+            spec.metric,
+            model_type=model_type,
+            params=params,
+            seed=spec.seed,
+        )
+        return float(np.mean(result.fold_metrics))
+
+    all_columns = list(X.columns)
+    # Always refit rather than reusing a leaderboard score for this table: a
+    # stored score may come from other params or another model, and a difference
+    # of protocol would land in the contribution as if it were a difference of
+    # features.
+    full_score = score(all_columns)
+
+    j = journal.load(session.run_dir)
+    report = []
+    for row in _columns_by_table(session, j, session.rel(path), all_columns):
+        remaining = [c for c in all_columns if c not in set(row["columns"])]
+        entry = {
+            "table": row["table"],
+            "method": row["method"],
+            "n_columns": len(row["columns"]),
+        }
+        if not remaining:
+            # Nothing else contributed columns. "Without them" is not a model, and
+            # a contribution of "everything" would be true but useless — that is
+            # what vs_baseline already says.
+            entry["contribution"] = None
+            entry["reason"] = "the only columns on this table; see vs_baseline instead"
+        else:
+            entry["contribution"] = _gain(full_score, score(remaining), spec.metric)
+        report.append(entry)
+
+    journal.update_table(session.run_dir, session.rel(path), {"credit_by_table": report})
+
+    return {
+        "table": session.rel(path),
+        "metric": spec.metric,
+        "model_type": model_type,
+        "cv_score_all_columns": full_score,
+        "dropped_non_numeric": dropped,
+        "n_fits": 1 + sum(1 for r in report if r["contribution"] is not None),
+        "credit_by_table": report,
     }
 
 
@@ -622,6 +876,11 @@ def finalize_run(session: RunSession) -> dict:
     run never did, so the report can always answer "did this beat doing nothing".
     """
     j = journal.load(session.run_dir)
+    if journal.stop_state(session.run_dir).get("finalized"):
+        raise ValueError(
+            "this run has already been finalized: the bundle and report are on disk "
+            "and the winner will not be re-picked"
+        )
     if not j["leaderboard"]:
         raise ValueError("nothing to finalize: no model has been trained yet")
 
@@ -653,11 +912,17 @@ def finalize_run(session: RunSession) -> dict:
         attribution=credit,
         task_type=meta["task_type"],
         metric=meta["metric"],
-        selection_score=meta["cv_score"],
+        # The validation half is what the leaderboard ranked by, so it is what
+        # picked this winner and what the report leads with. `cv_score` follows as
+        # the fold estimate — the gap between them is the run's own record of how
+        # far the search drifted from the folds it was optimising.
+        selection_score=meta["val_score"],
+        cv_score=meta["cv_score"],
         fold_metrics=meta["fold_metrics"],
-        baseline_score=j["baseline"]["cv_score"],
+        baseline_score=j["baseline"]["val_score"],
         model_types=[meta["model_type"]],
         feature_names=meta["feature_names"],
+        split=j.get("split"),
     )
     report_path = write_report(session.ctx, text)
     journal.mark_finalized(session.run_dir)
@@ -666,8 +931,9 @@ def finalize_run(session: RunSession) -> dict:
         "best_experiment_id": best["experiment_id"],
         "model_type": meta["model_type"],
         "metric": meta["metric"],
+        "val_score": meta["val_score"],
         "cv_score": meta["cv_score"],
-        "baseline_score": j["baseline"]["cv_score"],
+        "baseline_score": j["baseline"]["val_score"],
         "n_experiments": len(j["leaderboard"]),
         "bundle_dir": session.rel(bundle_dir),
         "report_path": session.rel(report_path),

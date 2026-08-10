@@ -8,6 +8,379 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-10 — The input is split; the leaderboard is a public leaderboard
+
+**Machine:** MacBook Air | **Branch:** master | **Uncommitted, including the
+2026-08-09 work below, which was never committed.**
+
+Started from "what should we implement next", landed on the holdout — item 3 of
+the sequence in the entry below, and a blocker for running overnight at all.
+Ulf's call on the shape, after the trade was laid out: **two splits, and the
+validation half is what the leaderboard ranks by.**
+
+**Decision record: `0019-the-leaderboard-is-a-public-leaderboard.md`. Read it for
+the reasoning, including the three-way split that was rejected and the two
+reasons it may come back. This entry is only what changed.**
+
+### Done this session
+
+**1. `RunSession` splits the input once, before any tool runs.**
+`run_dir/data/work.parquet` + `data/val.parquet`. `table=None` is the work half.
+Time-ordered on `split_on`, seeded-random otherwise. Idempotent and re-read on
+resume — a fresh process on the same `run_dir` must validate against the same
+rows or the leaderboard compares scores taken on different data.
+
+**2. Every experiment is scored on the validation half, and the leaderboard ranks
+by it.** `_score_on_val` replays the trained table's lineage over the raw
+validation rows — the same pipeline `finalize_run` bundles — so encoders apply
+fitted parameters and nothing learned from validation rows enters the features.
+`best`, `baseline`, `vs_baseline`, `vs_source_table`, `attribution` and the stop
+rule all moved onto `val_score`. `cv_score` stays on every row and every tool
+return: the gap between them is the run's record of a gain that lived only in the
+folds.
+
+**3. `resolve_table` is an allowlist now, not a convention.** It used to accept
+any path that existed, *including absolute ones anywhere on disk* —
+`available_tables()` was a display detail. Now: `None`, `tables/*`, and the work
+table's own path (leaderboard rows name it, so the agent must be able to pass it
+back). Nothing else resolves.
+
+**4. `finalize_run` is genuinely once.** Two holes, both reachable before any of
+this existed: it had no guard against a second call, and the `finalized` check in
+`_refuse_if_finished` sat *after* an early return that fired whenever the stop
+rule said keep going — so finalize early, keep training, finalize again. This is
+**run integrity, not leakage**: with `val_score` on every training result the
+agent queries the validation half continuously anyway. It becomes a leakage guard
+only if a sealed third split is ever added.
+
+**5. Report and prompt.** The report leads with the validation score, prints both,
+states the split, and says in words that this is a public leaderboard. The prompt
+explains the two numbers and what their disagreement means.
+
+### Gotchas / open questions
+
+- **The reported number is the one the agent optimised against.** 150 experiments
+  ranked on the same rows is Kaggle's public leaderboard, and nothing in a run
+  measures how much the search gamed it. Deliberate (0019); the fix if it ever
+  matters is the third split.
+- **`explain_table` stays on CV** — Ulf's call, reasoning in 0019. It ranks
+  nothing and CV is the lower-variance instrument. Watch for the failure it
+  admits: a table can ablate at `+0.10` and move `val_score` not at all, and no
+  field says so.
+- **Every score in the repo moved** (models train on 80%). Notebooks re-executed
+  last session are stale again and still need re-running.
+- **The size floor was wrong on the first pass** — 25 rows a side refused a
+  120-row dataset outright. Now 5 (computability) plus a `val_is_thin` warning
+  under 30. Informativeness is the data owner's judgement, not the library's.
+- **Still blocking the overnight run: episodes.** No compaction, so one `run_sync`
+  over 150 experiments still dies on context. The split makes the answer
+  trustworthy; it does not make the night survivable.
+
+## 2026-08-09 — Credit by ablation; the payload and the prompt cut hard
+
+**Machine:** MacBook Air | **Branch:** master | **170 tests pass. Uncommitted.**
+
+Started from Ulf reading §8 of `phase3_agent_map.ipynb` and not being able to
+follow it. That turned out to be the notebook faithfully reporting a measure that
+answers the wrong question, and everything below followed from chasing it.
+
+**Decision records: `0017-credit-by-ablation.md`, `0018-the-payload-is-a-budget.md`
+(new). `0016` marked superseded — its *unit* of credit survived, its *measure* did
+not. Read those for the reasoning; this entry is only what changed.**
+
+### Done this session
+
+**1. `importance_share` is gone; credit is now measured by refitting.** New tool
+`explain_table` fits once with every column, then once per contributing table with
+that table's columns held out; `contribution` is the difference, signed as a gain.
+Importance decomposes one fitted model's *attention*; the question is a
+counterfactual, and the two come apart routinely. Verified on the motivating case:
+the date columns score `+1.16`, the four original columns `-0.06` — the ones that
+held **77%** of the splitting. Costs a fit per contributing table, writes no
+leaderboard row, spends no budget, and is allowed on a table the stop rule has
+already declined.
+
+**2. One sign convention.** `vs_baseline` was the raw difference and flipped with
+the metric; `vs_parent` was already normalised. A `logloss` run reported the same
+improvement as `-0.19` and `+0.19` **in one result dict**. Everything now goes
+through `_gain`: positive is better, always.
+
+**3. `vs_source_table` (was `vs_parent_table`) compares an identical fit only.**
+It used to compare against the source table's best score whatever model made it,
+so a model swap was credited to the features. Now matched on `(model_type,
+params)`; `null` otherwise, never bare — `vs_source_basis` says what would produce
+it. Affordable only because `explain_table` covers the gap.
+
+**4. Two concepts deleted, not renamed-and-kept.** "Parent" was `source_table`;
+"block" was a table (one tool call writes exactly one). Four names for two things.
+`vs_parent_table`→`vs_source_table`, `feature_blocks`→`columns_by_table`,
+`block_credit`→`credit_by_table`, `journal.blocks`→`journal.columns_by_table`,
+`"original columns"`→`"the raw input table"`.
+
+**5. Training payload 21 → 13 fields, system prompt 924 → 229 words.** Three
+subtractive rules, now in `instructions.py`'s docstring and guarded by tests:
+say only what is *not derivable* (a competent data scientist working it out from
+the tool signatures is not a reason to spend tokens every run), *not tool-specific*
+(PydanticAI ships each docstring as the tool description — verified — so per-tool
+facts belong there), and *not run-specific* (varying wording goes in the payload;
+`note` and `vs_source_basis` are the whole of that category). Removed captions,
+run constants, counters `note` already restated, and every justification whose
+fact stayed. No "agent" in the prompt — it is the reader.
+
+**6. Notebooks re-executed, not just renamed.** `phase3_agent_map` (cells 0–104;
+§17 needs the API key and is untouched), `phase3_harness_step1`,
+`phase3_harness_step4_stopping`. `phase1`/`phase2` needed nothing — their
+`fold_metrics` come from `TrainResult`, which still has it.
+
+### One finding that changed a lesson
+
+`agent_map` §8 used to say the four original columns "contributed ~nothing".
+Ablation says `+0.124`. They tie the baseline **alone** (§6) and are worth `0.124`
+**alongside the date columns** — `price`/`area`/`rooms` say little until the model
+can see *when* the listing went up. So the old framing was wrong in both
+directions: the 77% was misleading and so was "~nothing". §8 now runs three
+questions about the same four columns; §10 pairs it against the ratio branch
+(`-0.026`, genuinely redundant despite being a real driver in the generating rule).
+
+This also **retired 0016's advice to keep interacting features in one call**.
+Tables chain, so both halves land in the same fit anyway, and leave-one-out
+credits both. Verified on a pure XOR split across separate calls: each scores
+`+0.82` (`test_both_halves_of_an_interaction_are_credited_across_separate_calls`).
+
+### Gotchas / open questions
+
+- **Uncommitted, and the renames break any saved journal.** No migration written;
+  runs in flight are abandoned. Fine now, not later.
+- **`nbclient` + `ipykernel` added as dev deps** (`pyproject.toml`, `uv.lock`) to
+  execute notebooks. Drop them if unwanted.
+- **`docs/feature_attribution_and_agent_iteration.md` is stale** — it is the long
+  version behind 0015/0016 and still argues importance share. Flagged in the
+  decisions README, not rewritten.
+- **The prompt guards are keyword-based.** They catch `block`/`parent`/`branch`
+  and verbatim docstring repetition — not paraphrase. The docstring-duplication
+  test did **not** fire on a real paraphrased duplication Ulf caught by reading.
+  This rule still needs a human.
+- **`explain_table` understates every member of a redundant group.** Leave-one-out
+  reports each table *given the others*, so two copies of a signal both read ~0.
+  Documented in 0017; it does not test subsets.
+- **`vs_source_table` is `null` more often now.** Watch a live run: if the agent
+  changes model and features together as a habit, it never sees the number.
+- **Not touched:** the stop rule's interaction with half-built ideas. A table
+  holding one half of an interaction scores nothing and starts burning
+  `table_patience` before its partner exists. The prompt no longer warns about
+  this (cut as derivable); first thing to restore if a run prunes too early.
+
+## 2026-08-06 — Two journal fixes shipped; metadata-kernel + episodes parked
+
+**Machine:** MacBook Air | **Branch:** master
+
+**Context for all of it: Ulf intends to run overnight, 100-200 experiments.**
+Every item below is a consequence of that number. At 5 experiments none of this
+matters; at 150 most of it does. Sequenced at the bottom.
+
+### Done this session
+
+**1. `journal.save` is now atomic.** Was `open(path, "w")` + `json.dump` —
+truncate-then-write, so a crash or kill between the two left a corrupt or empty
+`run_journal.json`, i.e. the whole run's state including hours of trained
+artifacts that could no longer be attributed. Now writes `.tmp`, `fsync`s, and
+`os.replace`s. A reader sees the old journal or the new one, never a partial one.
+
+**2. `vs_parent` and `feature_blocks` are now persisted.** They were computed by
+`train_tabular_model`, *returned to the model*, and then dropped — they never
+reached the leaderboard row. So the two numbers that say whether an **idea**
+worked (as opposed to which experiment scored best) lived only in the model's
+context and died at the next reset. New `journal.update_experiment(run_dir,
+exp_id, fields)` merges them in after the append, because both are derived from
+the journal *including* the new row and so cannot be part of it. Neither affects
+`best`/`baseline`, which still derive from `cv_score` alone.
+
+Correcting an overstatement made while sketching this: `n_features` and
+`fold_metrics` were **not** lost — `features` is on the row already and
+`fold_metrics` is in `experiments/<id>/meta.json`. Only `vs_parent` and
+`feature_blocks` were unrecoverable. 156 tests pass; verified end-to-end that a
+derived table gets a real `vs_parent` and its block credit on disk.
+
+### Parked: a metadata kernel (RLM-style) over the journal, not the rows
+
+Nothing built. This is a parked design idea from reading
+`PrimeIntellect-ai/prime-agent`, whose "RLM" abstraction turns out to be the same
+move as 0003 — its model gets a persistent Python kernel, data lives in kernel
+variables, and only what the model *prints* enters the context. Their sentence for
+it is ours: the store is the state, the context is a view of it. **If this is
+adopted, it needs a decision record — this entry is pruned in two weeks.**
+
+**The observation.** 0003 got the rows out of the context. It did not get the
+*records about the run* out. Every tool return — leaderboard rows, profiles,
+block credit — still lands in context as JSON and stays there. At experiment 20
+the agent is comparing 20 summaries by eye, and each one is re-sent every turn.
+Same failure shape 0003 fixed, one level up: reasoning over data-as-text, with
+the arithmetic done by vibes.
+
+**The shape.** A persistent kernel seeded with the run's records and **no path to
+`tables/`** — it cannot call `load_table`, cannot open a parquet:
+
+    lb        leaderboard as a DataFrame, one row per experiment
+    profiles  per-column profiles from inspect_data
+    tables    table id -> lineage steps
+
+Then `lb.groupby("encoding_method")["cv_score"].mean()` is exact, and the 19
+experiments the agent is not currently thinking about are on disk instead of in
+the window. What stays in context is a constant-size index (names + shapes, ~60
+tokens) plus the result of the call just made — the working set. Context growth
+goes from linear in tool calls to roughly constant.
+
+**Secondary win: the view stops being pre-rendered.** `inspect_data` truncates at
+`MAX_REPORTED_COLUMNS` and sets `columns_truncated`, i.e. the tool author decides
+in advance which slice of the profile the agent gets. With a kernel the agent
+asks its own question — `profiles["t1"].query("missing_frac > 0.3")`.
+
+**Why 0001 survives it.** The guarantee is "our tools are the only path to the
+data", and this touches no data. The kernel cannot create a column; every path
+that produces a feature (`fit_encoding`, `transform_features`,
+`train_tabular_model`) is untouched, still typed, still sandboxed, still
+target-dropped. The kernel's only output is a decision about which tool to call
+next, and that still goes through the same narrow door. 0001 rejected MCP because
+a general client points a shell and an interpreter *at the data*; a kernel with no
+read access to `tables/` is not that.
+
+**The caveat, and it is the same one already logged below.** Split what goes in:
+
+- **Safe:** leaderboard scores. Already out-of-fold — the whole point of
+  `docs/oof_vs_final_encoder.md`.
+- **Not safe:** anything target-conditional computed on the full dataset (e.g. a
+  per-column correlation with the target in the profile). Let the agent compute
+  freely over that to pick features and it is feature selection on all rows —
+  selection leakage arriving through the *metadata* path while every data-path
+  guard holds. This is exactly the hole named in the 2026-08-05 entry for
+  residual feedback: **the leak is through the model's reasoning, not through
+  data, so no guard catches it.** Same class, same answer — gate it at the door
+  by not exposing it, or compute it per-fold.
+
+So the profile has to be split: distributional facts about features (dtype,
+cardinality, missingness) are kernel-visible; target-conditional statistics are
+not.
+
+**Cheap because it is already half-planned.** `explore_experiment(exp_id, code)`
+over `features + oof_pred + residual + fold` routed through `run_readonly` is the
+same machinery pointed at one experiment's rows instead of at run history. If
+both are built, they should share the sandbox and the read-only routing — and
+note that `explore_experiment` is the one that actually needs the leakage
+argument, because it does see rows. The metadata kernel does not.
+
+### Parked: episodes, the mechanism that makes a 150-experiment run possible
+
+There is no compaction, so one `run_sync` driving 150 experiments simply hits the
+model's context limit and dies. The fix is not a bigger context — it is a driver
+loop where each iteration is a **fresh agent on the same `run_dir`**:
+
+    while not journal.load(run_dir)["stop"]["finalized"]:
+        run(session, EPISODE_PROMPT, model)     # new context every time
+
+`RunSession` already holds only pointers, and its docstring already promises
+this ("a fresh agent after a context reset can be handed the same `run_dir`").
+What is missing is that the fresh agent currently wakes up knowing *nothing*.
+Three pieces:
+
+1. **A derived brief** — task, counts, baseline, best, `since_improvement`,
+   not-finalized, plus how to query history. ~120 tokens, and *flat forever*
+   because it is rendered from the journal rather than accumulated. Hook is
+   PydanticAI's dynamic system prompt (`@agent.system_prompt`, gets `ctx.deps`).
+2. **`explore_journal`** as above, so history is queried rather than recited. At
+   150 experiments the journal is 60-120KB — reloading it as *text* costs
+   15-30k tokens and stops being viable, which is what turns the kernel from an
+   optimisation into the thing holding "resumable memory" up.
+3. **`SYSTEM_PROMPT` says "no way to run free-form code"** — already loose
+   (`transform_features` runs pandas) and would become wrong. A model told it
+   cannot run code will not think to query.
+
+**Episode length is a seam, not a count.** An idea spans several experiments
+(build table -> train -> extend -> train), and cutting mid-idea makes the next
+episode re-derive it and possibly repeat it. Soft target 10-15, hard cap ~25, and
+let the agent end early when an idea resolves. Clean split available: the *run*
+stop is a correctness concern so 0012 rightly gives it to the harness; the
+*episode* stop is only context hygiene, cheap and reversible, so the agent can
+own it. Add an `episode` column to experiments — it powers the loop guard
+(experiments must increase per episode, else the loop spins and bills all night)
+and answers "did that episode accomplish anything".
+
+### Parked: 150 experiments breaks `best` — the holdout is now a blocker
+
+`city` is `rng.choice`, independent of the target by construction, and it cleared
+the bar and shipped as `best` with **five** experiments (2026-08-05 finding 3).
+Keeping the max over 150 noisy draws is a 150-way maximum: with fold_spread
+~0.08 a spurious winner is not a risk, it is a certainty. The final `cv_score`
+stops being an estimate of generalisation and becomes "the luckiest of 150".
+
+That promotes the already-planned holdout from prerequisite to **blocker**:
+`build_report` takes `holdout_score` and no caller passes one. Do not run
+overnight before it is wired, or the morning's leaderboard is confident and
+uncheckable. Also confirm the two-level stop budgets (0014) are sized for 150 —
+they are designed to *end* runs and may halt at ~30.
+
+### Parked: SQLite for the journal — sketch
+
+Deferred deliberately: it is a refactor of something that works, so it is the
+*least* urgent item here. Recorded because the shape is decided. Note the
+readability argument for JSON does not survive 150 rows, `sqlite3` is stdlib, and
+run dirs are not in git so diffability was never real. Keep **one DB per
+`run_dir`** (0003 self-containment; runs stay movable), and do cross-run analysis
+by `ATTACH`ing many — that is where it really pays.
+
+    run             singleton, CHECK (id = 1): schema_version, data_path, target,
+                    task_type, metric, n_splits, higher_is_better, finalized,
+                    refusals, created_at
+    tables          table_id PK AUTOINCREMENT  <- kills the 0008 t3/t3 race
+                    name GENERATED 't'||table_id, path UNIQUE,
+                    parent_id -> tables.table_id (NULL = raw; ancestry() becomes
+                    a recursive CTE), method ('frequency'|'target'|'ordinal'|
+                    'transform'), code (0010: the code IS the artifact),
+                    input_columns JSON, new_columns JSON, created_at
+    experiments     exp_id PK AUTOINCREMENT, name GENERATED 'e'||exp_id,
+                    table_id -> tables, episode, model_type, params JSON,
+                    cv_score, fold_spread, fold_metrics JSON, n_features,
+                    vs_baseline, vs_parent, artifact_path, created_at
+    feature_blocks  (exp_id, block_table_id) PK -> experiments, tables;
+                    importance_share, n_columns   -- 0016 credit, joined to the
+                    tool call that produced the block
+    notes           note_id PK, exp_id, episode, hypothesis, rationale,
+                    next_ideas, created_at   -- the append_note layer
+
+Four things the schema buys, beyond storage:
+
+- **`best`/`baseline` become VIEWs, not columns.** `append_experiment` already
+  recomputes them from the whole leaderboard "so it stays correct even if a row
+  is edited" — that intent *is* a view, and as a view it cannot drift.
+- **Metric direction handled once.** Put `cv_score * (CASE WHEN
+  higher_is_better THEN 1 ELSE -1 END) AS score_signed` in the leaderboard view
+  so every query is `ORDER BY score_signed DESC`.
+- **`method` on `tables`** (already true in the row construction) makes the
+  question worth asking one hop: `SELECT method, COUNT(*), AVG(vs_parent) FROM
+  leaderboard GROUP BY method` — did target encoding ever actually help.
+- **`parent_id`** replaces `ancestry()` and makes "all descendants of t3"
+  expressible.
+
+Migration cost is the test suite (asserts on journal dict shape), plus a
+migration story or an explicit "runs before schema v2 are unreadable" — the
+latter is fine for disposable research runs. `explore_journal` is unaffected
+either way: it hands a DataFrame to `run_readonly` and does not care where the
+frame came from, so the storage decision stays decoupled.
+
+**If a `profiles` table is ever added, target-conditional statistics stay out or
+get marked** — otherwise the metadata path becomes a selection-leakage route
+while every data-path guard holds.
+
+### Sequence
+
+1. ~~atomic write~~, 2. ~~persist `vs_parent`/`feature_blocks`~~ — both done, and
+   both were the *irreversible* ones: a field not written tonight cannot be
+   recovered tomorrow.
+3. **Holdout** — blocks trusting any overnight result at all.
+4. **`explore_journal` + episodes** — makes the long run mechanically possible.
+5. **SQLite** — any time; nothing depends on it.
+
+The temptation is to start at 5 because it is the most interesting.
+
 ## 2026-08-05 — Orientation notebook: the whole agent, one call at a time
 
 **Machine:** MacBook Air | **Branch:** master

@@ -34,19 +34,41 @@ def test_report_flags_when_baseline_not_beaten():
     assert "WARNING" in text
 
 
-def test_holdout_line_present_when_given():
+def test_both_scores_are_reported_so_the_gap_is_visible():
+    """The validation score picked the winner; the CV score says what the folds
+    thought. Reporting only one of them hides how far the search drifted."""
     text = build_report(
         task_type="binary",
         metric="auc",
         selection_score=0.9,
-        fold_metrics=[0.9],
+        cv_score=0.94,
+        fold_metrics=[0.94],
         baseline_score=0.5,
         model_types=["lgbm"],
         feature_names=["a"],
-        holdout_score=0.88,
     )
-    assert "0.88" in text
-    assert "holdout" in text.lower()
+    assert "0.900" in text
+    assert "0.940" in text
+    assert "validation" in text.lower()
+
+
+def test_the_split_line_says_the_score_is_a_public_leaderboard():
+    """Every experiment was ranked against these rows, so the number the report
+    leads with is the one the search was steering towards. Say so, or it reads as
+    an independent check on the winner."""
+    text = build_report(
+        task_type="binary",
+        metric="auc",
+        selection_score=0.9,
+        cv_score=0.94,
+        fold_metrics=[0.94],
+        baseline_score=0.5,
+        model_types=["lgbm"],
+        feature_names=["a"],
+        split={"n_work": 160, "n_val": 40, "split_on": None},
+    )
+    assert "160 work / 40 validation" in text
+    assert "public leaderboard" in text.lower()
 
 
 def test_write_report_creates_file(tmp_path):

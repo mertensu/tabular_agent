@@ -70,6 +70,12 @@ Vocabulary used throughout:
 - [0014 — Exploration is cheap; tuning one table is not](0014-two-level-stop.md)
 - [0015 — Attribution gaps are reported, not prevented](0015-report-attribution-gaps.md)
 - [0016 — Feature credit per tool call, not per column](0016-block-level-credit.md)
+  *(superseded by 0017)*
+- [0017 — Credit is measured by refitting without the columns, not by importance](0017-credit-by-ablation.md)
+
+### Keeping the agent's surface small
+
+- [0018 — The result payload is a budget, and so is the vocabulary](0018-the-payload-is-a-budget.md)
 
 ## Related reading
 
@@ -81,7 +87,8 @@ Longer-form notes that are not decisions:
 - `docs/target_encoding_leakage_insight.md` — who gets lied to by leakage, the
   model or the metric.
 - `docs/feature_attribution_and_agent_iteration.md` — the long version behind
-  decisions 0015 and 0016.
+  decisions 0015 and 0016. Predates 0017: its importance-share reasoning was
+  superseded, and it has not been rewritten.
 - `docs/superpowers/specs/2026-07-21-tabular-agent-mcp-design.md` — the original
   design spec. Its title is stale (see 0001); revisions are dated in place.
 - `notebooks/` — hands-on walkthroughs, one per slice of the system, each

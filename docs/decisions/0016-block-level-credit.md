@@ -1,7 +1,10 @@
 # 0016 — Feature credit per tool call, not per column
 
 - **Date:** 2026-07-30
-- **Status:** accepted
+- **Status:** superseded by [0017](0017-credit-by-ablation.md) — the *unit* of
+  credit decided here survived; the *measure* did not. Everything below stands as
+  written: the objection in "Why the obvious fix is a trap" is the reason 0017
+  exists, and the bias admitted under "Bad" is what eventually forced it.
 - **Decided by:** Ulf (the reframe that set the direction, and the objection that
   shaped the answer)
 - **Commit:** `0f332a8`

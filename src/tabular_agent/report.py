@@ -20,7 +20,8 @@ def build_report(
     baseline_score: float,
     model_types: list[str],
     feature_names: list[str],
-    holdout_score: float | None = None,
+    cv_score: float | None = None,
+    split: dict | None = None,
     attribution: list[dict] | None = None,
 ) -> str:
     fold_std = float(np.std(fold_metrics))
@@ -29,13 +30,33 @@ def build_report(
         "",
         f"- **Task type:** {task_type}",
         f"- **Selection metric:** {metric}",
-        f"- **CV score:** {selection_score:.3f} (fold std {fold_std:.3f})",
+        f"- **Validation score:** {selection_score:.3f}",
         f"- **Baseline score:** {baseline_score:.3f}",
         f"- **Models:** {', '.join(model_types)}",
         f"- **Features ({len(feature_names)}):** {', '.join(feature_names)}",
     ]
-    if holdout_score is not None:
-        lines.append(f"- **Holdout score:** {holdout_score:.3f}")
+    if cv_score is not None:
+        lines.insert(5, f"- **CV score:** {cv_score:.3f} (fold std {fold_std:.3f})")
+    if split:
+        where = f"ordered by `{split['split_on']}`" if split.get("split_on") else "random"
+        lines.append(
+            f"- **Split:** {split['n_work']} work / {split['n_val']} validation ({where})"
+        )
+        lines += [
+            "",
+            "> **Read the validation score as a public leaderboard.** Every experiment in "
+            "this run was ranked against these same rows, so the winner is the best of "
+            f"{split['n_val']} rows seen many times over — the score is the one the search "
+            "was steering towards, not an independent check on it. The gap to the CV score "
+            "says how far the two came apart.",
+        ]
+        if split.get("val_is_thin"):
+            lines += [
+                "",
+                f"> **WARNING:** {split['n_val']} validation rows is thin enough that the "
+                "ranking is largely noise. Differences between the top experiments here "
+                "should not be believed.",
+            ]
     if not _beats_baseline(metric, selection_score, baseline_score):
         lines += [
             "",
