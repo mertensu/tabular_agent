@@ -27,7 +27,7 @@ from ..metrics import compute_metric, greater_is_better
 from ..models import predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..report import build_report, write_report
-from ..sandbox import SandboxError
+from ..sandbox import SandboxError, run_readonly
 from ..transform import transform_features as _transform_features
 from . import journal, stop
 from .session import RunSession
@@ -866,6 +866,114 @@ def explain_table(
         "n_fits": 1 + sum(1 for r in report if r["contribution"] is not None),
         "credit_by_table": report,
     }
+
+
+def _experiment_row(run_dir: str, exp_id: str) -> dict:
+    """The leaderboard row for ``exp_id``, or a ValueError naming the real ones."""
+    rows = journal.load(run_dir)["leaderboard"]
+    for row in rows:
+        if row["id"] == exp_id:
+            return row
+    raise ValueError(
+        f"no such experiment: {exp_id!r}. Available: "
+        + (", ".join(repr(r["id"]) for r in rows) or "none — nothing has been trained yet")
+    )
+
+
+def _residual_frame(df: pd.DataFrame, oof: pd.DataFrame, y: pd.Series, task_type: str,
+                    n_splits: int, seed: int) -> pd.DataFrame:
+    """The source table, plus what the model predicted for each row and its error.
+
+    Row alignment is positional and holds by construction: ``train_cv`` resets
+    the index before it fills the out-of-fold array, and ``oof.parquet`` is
+    written in that order from the same table this reloads. Nothing here joins on
+    a key, so nothing here can silently mismatch.
+
+    ``fold`` is recomputed rather than stored — ``make_folds`` is deterministic in
+    ``(y, task_type, n_splits, seed)``, all four of which are fixed for the run.
+    It is worth the two lines because without it a "weak slice" and "one fold fit
+    badly" look identical.
+    """
+    out = df.copy()
+    values = oof.to_numpy()
+
+    if task_type == "regression":
+        out["oof_pred"] = values[:, 0]
+        out["residual"] = y.to_numpy() - out["oof_pred"]
+    elif task_type == "binary":
+        # The OOF column is P(positive class), so the residual is the same
+        # quantity as in regression: truth minus what was predicted, signed, so
+        # the two directions of being wrong stay distinguishable.
+        classes = sorted(pd.unique(y))
+        out["oof_pred"] = values[:, 0]
+        out["residual"] = (y.to_numpy() == classes[-1]).astype(float) - out["oof_pred"]
+    else:
+        # Multiclass has a probability per class and no signed error. The useful
+        # scalar is how much mass landed on the truth, which reduces to the same
+        # "how wrong, per row" question the other branches answer.
+        classes = sorted(pd.unique(y))
+        for i, cls in enumerate(classes):
+            out[f"oof_pred_{cls}"] = values[:, i]
+        out["oof_pred_label"] = [classes[i] for i in values.argmax(axis=1)]
+        out["p_true"] = [values[r, classes.index(c)] for r, c in enumerate(y)]
+        out["correct"] = out["oof_pred_label"].to_numpy() == y.to_numpy()
+
+    fold = np.empty(len(out), dtype=int)
+    for i, (_, va) in enumerate(make_folds(y, task_type, n_splits=n_splits, seed=seed)):
+        fold[va] = i
+    out["fold"] = fold
+    return out
+
+
+def explore_experiment(
+    session: RunSession,
+    exp_id: str,
+    code: str,
+    timeout: float = 10.0,
+) -> dict:
+    """Read-only code over one experiment's rows and its out-of-fold errors.
+
+    This closes the one arc of the loop that was missing. The agent could
+    inspect, build, train and score, but the step from a score back to the next
+    hypothesis had nothing to work with: it saw a single number per experiment
+    and had to guess which feature to try next from column names alone. Here it
+    can ask *where* the model is wrong — which fold, which segment, which end of
+    which distribution — and let the answer pick the next feature.
+
+    The frame is the **whole source table**, not just the numeric columns the
+    model trained on. Deliberate: the string columns a model cannot consume are
+    exactly the ones worth grouping residuals by, and "the error is concentrated
+    in one city" is how the agent discovers that a column is worth encoding at
+    all. They cost nothing here because nothing here becomes a feature.
+
+    Nothing it computes can be persisted. That is the whole guard, and it is the
+    same one :mod:`~tabular_agent.explore` documents: the result is shown and
+    discarded, so a per-segment target mean read here has no route back into the
+    model except `fit_encoding`, which fits per fold. The target and the residual
+    are both in the frame and the row cap does not pretend otherwise — the
+    protection is the absence of a persistence path, not the absence of the
+    number.
+
+    Free, like `explain_table`: no leaderboard row, no budget, and allowed on an
+    experiment whose table the stop rule has already declined. Understanding why
+    a table failed is most valuable exactly then.
+    """
+    row = _experiment_row(session.run_dir, exp_id)
+    spec = session.resolved()
+    path = session.resolve_table(row["source_table"])
+    df = load_table(path)
+    oof = pd.read_parquet(os.path.join(session.run_dir, row["artifact_path"], "oof.parquet"))
+    frame = _residual_frame(
+        df, oof, df[spec.target], spec.task_type, spec.n_splits, spec.seed
+    )
+
+    out = run_readonly({"df": frame}, code, func_name="explore", timeout=timeout)
+    result = {"experiment_id": exp_id, "result": out["result"]}
+    if out["stdout"]:
+        # Only when there is something to say. An empty field on every call is
+        # the kind of constant caption 0018 spent a prompt rewrite removing.
+        result["stdout"] = out["stdout"]
+    return result
 
 
 def finalize_run(session: RunSession) -> dict:

@@ -40,6 +40,12 @@ def explore_dataframe(df, code, *, timeout=10.0, max_rows=200):
         explore_dataframe(df, code)
 
     Raises :class:`SandboxError` on blocked imports, timeout, or user errors.
+
+    Returns the summary alone. :func:`~tabular_agent.sandbox.run_readonly` also
+    hands back whatever the code printed, which matters when the caller is a
+    model writing code against a frame it cannot see; this is the library-level
+    entry point, where the caller wrote the code and is holding the frame, so the
+    summary is the whole of what it asked for.
     """
-    return run_readonly(df, code, func_name="explore", timeout=timeout,
-                        max_rows=max_rows)
+    return run_readonly({"df": df}, code, func_name="explore", timeout=timeout,
+                        max_rows=max_rows)["result"]

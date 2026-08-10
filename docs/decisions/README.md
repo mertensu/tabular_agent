@@ -49,6 +49,7 @@ Vocabulary used throughout:
 - [0002 — PydanticAI as the harness framework](0002-pydantic-ai.md)
 - [0003 — Tools take file paths, not DataFrames](0003-file-based-tools.md)
 - [0004 — The tools write the journal, not the agent](0004-tools-write-the-journal.md)
+- [0020 — The read-only sandbox has no kernel; the run dir is the state](0020-the-sandbox-has-no-kernel.md)
 
 ### Keeping features honest
 
@@ -72,6 +73,7 @@ Vocabulary used throughout:
 - [0016 — Feature credit per tool call, not per column](0016-block-level-credit.md)
   *(superseded by 0017)*
 - [0017 — Credit is measured by refitting without the columns, not by importance](0017-credit-by-ablation.md)
+- [0019 — The leaderboard is a public leaderboard](0019-the-leaderboard-is-a-public-leaderboard.md)
 
 ### Keeping the agent's surface small
 

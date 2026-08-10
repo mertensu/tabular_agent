@@ -25,6 +25,14 @@ the sandbox:
   pickle) to become a persisted, replayed-at-predict pipeline step
   (``transform_features``, §5.1). The contract requires ``df -> df`` that
   preserves the row index, so it stays a row-local, stateless transform.
+
+Both take a **namespace**: a dict of named frames pickled into the child, of
+which the agent's function receives only the ones its signature asks for. That
+is what lets one sandbox serve a tool handing over a single ``df`` and a tool
+handing over several run-record frames, without the agent having to unpack a
+container. It is *per call* — nothing survives between calls, because a live
+kernel would be run state that is not in ``run_dir`` and so could not be resumed
+(``docs/decisions/0020``).
 """
 
 import json
@@ -33,6 +41,12 @@ import pickle
 import subprocess
 import sys
 import tempfile
+
+#: Characters of captured stdout returned to the caller. Prints are a debugging
+#: channel, not a second result path, so this is well under the row cap: enough
+#: for a `describe()` or the trail leading to an exception, not enough to walk a
+#: full-length column out of the sandbox a chunk at a time.
+MAX_STDOUT_CHARS = 2000
 
 # Extra third-party roots allowed on top of the standard library. pandas pulls
 # some of these in lazily at call time (dateutil/pytz for datetimes, the
@@ -64,7 +78,7 @@ class SandboxError(RuntimeError):
 # import of tabular_agent) and config-driven via config.json so nothing needs
 # to be interpolated into this source.
 _RUNNER = r'''
-import builtins, json, pickle, sys
+import builtins, contextlib, inspect, io, json, pickle, sys
 
 try:
     import resource
@@ -93,8 +107,8 @@ if resource is not None:
 import pandas as pd
 import numpy as np
 
-with open("df.pkl", "rb") as f:
-    df = pickle.load(f)
+with open("frames.pkl", "rb") as f:
+    frames = pickle.load(f)
 
 ALLOWED = set(sys.stdlib_module_names) | set(cfg["extra_allowed"])
 TRAINING = cfg["training_libs"]
@@ -150,6 +164,31 @@ def _to_jsonable(x, max_rows):
         return x
     return str(x)
 
+def _bind(fn, frames):
+    """Call `fn` with the frames its signature names, and only those.
+
+    The alternative — passing every frame positionally — would force the agent
+    to declare parameters it does not use and to get their *order* right, which
+    is a rule it cannot check and we would have to state in a docstring. A name
+    it asks for and we do not have is a typo or an invented frame, so the error
+    lists what exists rather than failing on a KeyError deeper in.
+    """
+    params = [
+        p for p in inspect.signature(fn).parameters.values()
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+    ]
+    unknown = [p.name for p in params if p.name not in frames]
+    if unknown:
+        raise ValueError(
+            "%s() asked for %s, which is not available here. The frames in this "
+            "call are: %s." % (fn.__name__, ", ".join(repr(u) for u in unknown),
+                               ", ".join(sorted(frames)))
+        )
+    args = [frames[p.name] for p in params if p.kind is not p.KEYWORD_ONLY]
+    kwargs = {p.name: frames[p.name] for p in params if p.kind is p.KEYWORD_ONLY}
+    return fn(*args, **kwargs)
+
+
 def _run_transform(fn, df):
     result = fn(df)
     if not isinstance(result, pd.DataFrame):
@@ -171,20 +210,37 @@ def _run_transform(fn, df):
             "columns": [str(c) for c in result.columns], "new_columns": new_cols}
 
 
+# Everything the code prints is captured rather than going to the pipe and
+# being dropped. A model writes `print(...)` in exploration code by reflex, and
+# silently discarding it is the same trap as a profile that omits the categories
+# an ordinal encoding needs: the agent behaves reasonably and nothing tells it
+# why it saw nothing back.
+printed = io.StringIO()
 try:
-    ns = {}
-    exec(cfg["code"], ns)
-    fn = ns.get(cfg["func_name"])
-    if not callable(fn):
-        raise ValueError(
-            "define a function `%s(df)`" % cfg["func_name"]
-        )
-    if cfg["mode"] == "transform":
-        out = _run_transform(fn, df)
-    else:
-        out = {"ok": True, "result": _to_jsonable(fn(df), cfg["max_rows"])}
+    with contextlib.redirect_stdout(printed):
+        ns = {}
+        exec(cfg["code"], ns)
+        fn = ns.get(cfg["func_name"])
+        if not callable(fn):
+            raise ValueError(
+                "define a function `%s(df)`" % cfg["func_name"]
+            )
+        if cfg["mode"] == "transform":
+            out = _run_transform(fn, frames["df"])
+        else:
+            out = {"ok": True,
+                   "result": _to_jsonable(_bind(fn, frames), cfg["max_rows"])}
 except BaseException as e:  # includes the CPU-limit SIGXCPU-turned-exception
     out = {"ok": False, "etype": type(e).__name__, "error": str(e)}
+
+# Attached in both outcomes on purpose. On the failure path it is the only
+# record of what the code computed before it raised, which is most of what a
+# model needs to fix code written against a frame it has never seen.
+text = printed.getvalue()
+cap = cfg["max_stdout_chars"]
+if len(text) > cap:
+    text = text[:cap] + "\n... [stdout truncated]"
+out["stdout"] = text
 
 builtins.__import__ = _real_import
 with open("result.json", "w") as f:
@@ -192,18 +248,19 @@ with open("result.json", "w") as f:
 '''
 
 
-def _run(df, code, *, mode, func_name, timeout, mem_mb, max_rows, load_out):
+def _run(frames, code, *, mode, func_name, timeout, mem_mb, max_rows, load_out):
     """Shared subprocess driver. ``load_out(work, out)`` reads whatever the
     child wrote for this mode and produces the caller's return value."""
     with tempfile.TemporaryDirectory(prefix="tabular_sandbox_") as work:
-        with open(os.path.join(work, "df.pkl"), "wb") as f:
-            pickle.dump(df, f)
+        with open(os.path.join(work, "frames.pkl"), "wb") as f:
+            pickle.dump(frames, f)
         with open(os.path.join(work, "config.json"), "w") as f:
             json.dump({
                 "mode": mode,
                 "code": code,
                 "func_name": func_name,
                 "max_rows": int(max_rows),
+                "max_stdout_chars": int(MAX_STDOUT_CHARS),
                 "cpu_s": max(1, int(timeout) + 1),
                 "mem_bytes": int(mem_mb) * 1024 * 1024,
                 "extra_allowed": _EXTRA_ALLOWED,
@@ -234,25 +291,37 @@ def _run(df, code, *, mode, func_name, timeout, mem_mb, max_rows, load_out):
         with open(result_path) as f:
             out = json.load(f)
         if not out.get("ok"):
-            raise SandboxError(out.get("error", "sandboxed code failed"))
+            message = out.get("error", "sandboxed code failed")
+            printed = (out.get("stdout") or "").strip()
+            if printed:
+                # The prints are part of the error report, not a separate
+                # channel: code that fell over on line 8 is fixed with what
+                # lines 1-7 printed, and the exception alone does not have it.
+                message = f"{message}\n--- printed before the error ---\n{printed}"
+            raise SandboxError(message)
         return load_out(work, out)
 
 
-def run_readonly(df, code, *, func_name="explore", timeout=10.0,
+def run_readonly(frames, code, *, func_name="explore", timeout=10.0,
                  mem_mb=2048, max_rows=200):
-    """Run read-only exploration ``code`` in the sandbox; return a summary.
+    """Run read-only exploration ``code`` over ``frames``; return result + stdout.
 
-    ``code`` must define ``func_name(df)`` (default ``explore``) returning a
-    JSON-serializable summary — a scalar, dict, or a (capped) Series/DataFrame.
-    The result is returned to the caller but never persisted and never wired
-    into the model.
+    ``frames`` is a ``{name: object}`` namespace. ``code`` must define
+    ``func_name`` (default ``explore``) taking any subset of those names as
+    parameters and returning a JSON-serializable summary — a scalar, dict, or a
+    (capped) Series/DataFrame.
 
-    Raises :class:`SandboxError` on blocked imports, timeouts, or exceptions in
-    the user code; the message carries any teaching hint.
+    Returns ``{"result": ..., "stdout": str}``. Both are capped; neither is
+    persisted or wired into the model.
+
+    Raises :class:`SandboxError` on blocked imports, timeouts, an unknown frame
+    name, or exceptions in the user code. The message carries any teaching hint
+    and whatever the code printed before it failed.
     """
-    return _run(df, code, mode="readonly", func_name=func_name, timeout=timeout,
+    return _run(frames, code, mode="readonly", func_name=func_name, timeout=timeout,
                 mem_mb=mem_mb, max_rows=max_rows,
-                load_out=lambda work, out: out["result"])
+                load_out=lambda work, out: {"result": out["result"],
+                                            "stdout": out.get("stdout", "")})
 
 
 def run_transform(df, code, *, func_name="transform_features", timeout=30.0,
@@ -274,5 +343,5 @@ def run_transform(df, code, *, func_name="transform_features", timeout=30.0,
             transformed = pickle.load(f)
         return transformed, {k: out[k] for k in ("n_rows", "columns", "new_columns")}
 
-    return _run(df, code, mode="transform", func_name=func_name, timeout=timeout,
-                mem_mb=mem_mb, max_rows=0, load_out=load_out)
+    return _run({"df": df}, code, mode="transform", func_name=func_name,
+                timeout=timeout, mem_mb=mem_mb, max_rows=0, load_out=load_out)

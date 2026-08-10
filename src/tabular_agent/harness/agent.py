@@ -138,7 +138,7 @@ def _retryable(call):
 
 
 def build_agent(model=DEFAULT_MODEL):
-    """An agent whose *entire* tool surface is the six functions below.
+    """An agent whose *entire* tool surface is the seven functions below.
 
     ``model`` is either a PydanticAI model string (``"anthropic:..."``,
     ``"openai:..."``) or a ``Model`` object — e.g. from :func:`gateway_model`,
@@ -302,6 +302,47 @@ def build_agent(model=DEFAULT_MODEL):
             lambda: tools.explain_table(
                 ctx.deps.session, table=table, model_type=model_type, params=params
             )
+        )
+
+    @agent.tool
+    def explore_experiment(
+        ctx: RunContext[Deps],
+        exp_id: str,
+        code: str,
+    ) -> dict:
+        """Look at where a trained model was wrong, by running your own code on its rows.
+
+        Answers "which rows is this model failing on", which is the question a
+        score cannot answer and the fastest route to the next feature worth
+        building. Nothing computed here is kept or can become a feature — the
+        result is shown to you and discarded — so group by the target freely.
+
+        Costs nothing and records no experiment, including on a table training
+        was declined for.
+
+        Args:
+            exp_id: The `experiment_id` of an earlier `train_tabular_model` call.
+            code: Python defining `explore(df)`, returning a small summary — a
+                number, a dict, or a DataFrame/Series (capped at 200 rows).
+                Anything printed comes back too. `df` is the experiment's whole
+                source table — including the string columns the model could not
+                use — plus:
+
+                    oof_pred    the out-of-fold prediction for that row
+                                (multiclass: `oof_pred_<class>` per class,
+                                `oof_pred_label`, `p_true`, `correct`)
+                    residual    target - oof_pred, signed (regression/binary)
+                    fold        which CV fold the row was held out in
+
+                Example:
+
+                    def explore(df):
+                        by_city = df.groupby("city")["residual"].agg(["mean", "size"])
+                        print(df["residual"].describe())
+                        return by_city.round(3).to_dict("index")
+        """
+        return _retryable(
+            lambda: tools.explore_experiment(ctx.deps.session, exp_id=exp_id, code=code)
         )
 
     @agent.tool

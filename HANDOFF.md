@@ -8,6 +8,88 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-10 (later) — The agent can see its own mistakes; the RLM kernel was declined
+
+**Machine:** MacBook Air | **Branch:** master | **197 tests pass.**
+
+Started from "we should tackle the readonly python sandbox, not sure how we
+handle the RLM part". The RLM part turned out to be two things bundled, and
+separating them was most of the work.
+
+**Decision record: `0020-the-sandbox-has-no-kernel.md`. Read it for the
+reasoning, especially the kernel rejection. This entry is only what changed.**
+
+### Done this session
+
+**1. The read-only sandbox was already built** (`explore.py` + `run_readonly`,
+tested since phase 2) and simply never registered in `agent.py`. The work was
+never the sandbox — it was deciding what to point it at.
+
+**2. `explore_experiment(exp_id, code)` is the seventh tool.** Read-only code
+over one experiment's rows: the **whole source table** (including string columns
+the model could not train on) plus `oof_pred`, `residual`, `fold`. This closes
+the `score → hypothesise` arc that has been called the missing arc since
+2026-07-30. Free like `explain_table` — no leaderboard row, no budget, works
+after `finalize_run`.
+
+**3. No persistent kernel — the rejection is the real decision.** RLM's context
+economics come from the *sandbox boundary*, which we already had; a live kernel
+adds only names surviving between calls. That is run state not in `run_dir`
+(against 0003/0004/0010 and `RunSession`'s resume promise), it dies at the
+episode seam anyway, and it saves re-pickling a ~100KB frame. Declined, with a
+test (`test_nothing_survives_between_calls`) holding the line.
+
+**4. `run_readonly` takes a namespace,** `{name: frame}`, and passes the agent's
+function only the frames its signature names. This is `explore_journal`'s whole
+prerequisite, built now because `explore_experiment` needed the same call.
+
+**5. stdout is captured** (2000 chars) and returned beside the result —
+**including on the error path**, so prints before a crash come back in the
+message. Fixes a silent trap: models `print()` by reflex and got nothing.
+
+**6. Two docstrings that claimed "no free-form code"** (`SYSTEM_PROMPT`,
+`harness/__init__`) were already false since `transform_features` and are now
+accurate: two tools run agent code, and what happens to the output is the
+difference.
+
+**7. `notebooks/phase3_harness_step5_residuals.ipynb`** — 42 cells, 20 code, 19
+smoke-tested in order (§7 is the live LLM). Also: 0019 was missing from the
+decisions README index; both it and 0020 are in now.
+
+### The demonstration, on a purpose-built fixture
+
+Apartment prices with a per-district price level, `district` left as a string so
+training drops it. Mean residual **−47** on prices in the hundreds of thousands —
+the aggregate says "unbiased, just noisy". One `groupby("district")`:
+`altstadt +76,855`, `gruenau −61,825`. Biases cancelling. The fold breakdown is
+flat (47k–52k), so it is a slice and not an unlucky split. Encode `district` →
+`rmsle` **0.485 → 0.221**, `vs_source_table` `+0.264` against a fold spread of
+`0.048`, and the per-district bias collapses to `+1,226` / `−5`.
+
+### Gotchas / open questions
+
+- **The leak that remains is through the agent's reasoning.** An agent picking
+  features by staring at out-of-fold errors is doing selection informed by
+  held-out predictions. Every data-path guard holds; no guard catches this. Named
+  as hypothetical on 2026-08-05 — it is **live** now. That is the price of 0020.
+- **The target is in the frame, deliberately.** `residual = y - oof_pred`, so
+  omitting `y` would be decoration, not a guard. Protection is the absence of a
+  persistence path (0010: code is stored, so a hardcoded literal dies at predict
+  on a length mismatch), plus the 200-row cap. Careless threat model, not
+  adversarial.
+- **Unverified on a live run.** The open question is behavioural: does a model
+  actually *reach* for `explore_experiment` after a bad score, or keep reaching
+  for `price_squared`? Everything here is hand-driven and unit-tested. The
+  docstring is the only place it learns what is in the frame.
+- **Two output contracts now.** `run_readonly` returns `{"result", "stdout"}`;
+  `explore_dataframe` still returns the summary alone, so the phase-2 notebook
+  stays valid. Deliberate but worth knowing before touching either.
+- **`explore_journal` is still unbuilt** and the namespace plumbing is waiting
+  for it. Not skipped — deferred: its justification is a 150-experiment run, and
+  that needs episodes. **Episodes are now the single thing blocking the overnight
+  run.**
+- Notebooks from earlier phases are still stale from the 0019 score shift.
+
 ## 2026-08-10 — The input is split; the leaderboard is a public leaderboard
 
 **Machine:** MacBook Air | **Branch:** master | **Uncommitted, including the

@@ -20,6 +20,10 @@ EXPECTED_TOOLS = {
     # Refits on columns the agent already has, and returns scores. It cannot
     # reach anything `train_tabular_model` cannot.
     "explain_table",
+    # Runs agent-written code, but read-only: the frame it builds comes from an
+    # experiment that already exists, and its result has no persistence path, so
+    # it cannot produce a feature or reach a row training could not.
+    "explore_experiment",
     "finalize_run",
 }
 

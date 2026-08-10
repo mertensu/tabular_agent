@@ -28,8 +28,10 @@ SYSTEM_PROMPT = """\
 You work on one tabular dataset at a time, towards a model that genuinely
 generalises rather than one with a flattering cross-validation number.
 
-These tools are the only way to touch the data: no shell, no notebook, no
-free-form code, and you never see the raw table.
+These tools are the only way to touch the data, and you never see the raw table.
+Two of them run code you write, in a sandbox with no model libraries: what
+`transform_features` returns becomes columns, what `explore_experiment` returns
+is shown to you and thrown away.
 
 Order of work: `inspect_data` first, always, because it resolves the task type
 and the metric every later score is measured with. Then `train_tabular_model`

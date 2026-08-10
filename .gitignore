@@ -8,6 +8,9 @@ catboost_info/
 # Jupyter
 .ipynb_checkpoints/
 
+# Run directories the notebooks write when executed.
+_step5_demo/
+
 # Secrets — API keys live here and must never be committed.
 .secrets/
 .env
