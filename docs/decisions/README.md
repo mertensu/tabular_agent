@@ -50,6 +50,8 @@ Vocabulary used throughout:
 - [0003 — Tools take file paths, not DataFrames](0003-file-based-tools.md)
 - [0004 — The tools write the journal, not the agent](0004-tools-write-the-journal.md)
 - [0020 — The read-only sandbox has no kernel; the run dir is the state](0020-the-sandbox-has-no-kernel.md)
+- [0024 — The episode stop is structural, and the brief is not optional](0024-the-episode-stop-is-structural.md)
+  *(accepted, not yet implemented)*
 
 ### Keeping features honest
 

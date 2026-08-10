@@ -8,7 +8,68 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-10 (latest) — Three live Kaggle runs measured the leaderboard problem
+## 2026-08-10 (latest) — Episodes work; the agent will not end one by itself
+
+**Machine:** MacBook Air | **Branch:** master | **214 tests pass** (no library
+code changed — this was an experiment).
+
+**Decision record: `0024`. Accepted, not yet implemented: the loop lives in
+`scripts/run_house_v5_episodes.py`, not in `harness/`.**
+
+### Two runs, two answers
+
+**v4 — the agent does NOT end its own episode.** Asked in plain terms to follow
+one idea then stop, it ran all **25 experiments** in a single episode and
+finalized. No second episode. This refutes the parked design's allocation ("the
+episode stop is cheap and reversible, so the agent can own it") — it may own it,
+it will not exercise it. Same under-compliance pattern as every other advisory
+steer since July.
+
+**v5 — with a structural cap (`UsageLimits(tool_calls_limit=6)`,
+`max_experiments=12`), episodes work.** Peak context per episode
+**9,170 / 11,170 / 12,274 / 9,971** against v3's single climb to **43,691**:
+linear becomes sawtooth, 3.6x lower peak, and it does not grow with run length.
+That is the RLM double-check, measured on both sides with `harness/usage.py`.
+
+**A resumed agent orients itself, unprompted.** The resume prompt said only
+"earlier episodes did things you have no memory of" — no counts, no scores, **no
+mention of `explore_journal`**. Every resumed episode opened
+`inspect_data -> explore_journal -> explore_journal`. The tool is discoverable
+from its docstring alone.
+
+### The catch, which reverses something I predicted
+
+Orientation works but is **not free**, and I had guessed the brief might become
+unnecessary. Wrong:
+
+| ep | calls | orienting | new experiments |
+|---|---|---|---|
+| 1 | 7 | 0 | 2 |
+| 2 | 7 | 3 | 2 |
+| 3 | 11 | 3 | 1 |
+| 4 | 9 | **8** | **0** |
+
+Episode 4 called `explore_journal` **seven times and trained nothing** — a
+degenerate mode where orientation eats the episode; only the loop guard stopped
+it. The tax is a fixed ~2-3 calls, so it scales as `1/episode_length` and hurts
+most exactly where short episodes are wanted. **The brief and the tool are
+complementary, not alternatives.**
+
+### Gotchas / open questions
+
+- **`SYSTEM_PROMPT`'s "`inspect_data` first, always" is a run-level rule obeyed
+  per-episode.** Every episode opened with a redundant `inspect_data` — the task
+  and metric are already in the journal. One wasted call per episode, and it is
+  the prompt's fault. Fix when the brief lands.
+- **The seam cost was not isolated.** At cap=6 orientation overhead dominated, so
+  we still do not know what cutting mid-idea costs on its own.
+- **v5 scored 0.12873 vs v3's 0.11354** — from 5 experiments against 24. This
+  measured orientation and context, not model quality. Do not read it as evidence
+  against episodes.
+- **Next:** re-run with higher caps so episodes do real work after orienting;
+  then the brief; then move the loop into `harness/`.
+
+## 2026-08-10 (earlier) — Three live Kaggle runs measured the leaderboard problem
 
 **Machine:** MacBook Air | **Branch:** master | **214 tests pass.**
 
