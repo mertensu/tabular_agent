@@ -66,8 +66,34 @@ complementary, not alternatives.**
 - **v5 scored 0.12873 vs v3's 0.11354** — from 5 experiments against 24. This
   measured orientation and context, not model quality. Do not read it as evidence
   against episodes.
-- **Next:** re-run with higher caps so episodes do real work after orienting;
-  then the brief; then move the loop into `harness/`.
+### v6 (cap 16, max_experiments 30) — episodes do real work, and two of my own
+### claims from 0024 did not survive it
+
+**Decision record `0025` supersedes those two claims. 0024's decisions all
+stand.** 5 episodes, 18 experiments, 12.9 min; 2-6 experiments per episode
+against v5's 0-2. Peaks 18k/21k/23k/28k/19k — bounded, and ep5 *falling* shows
+peak tracks what happens **inside** an episode, not run position. Episode 5 ended
+by the agent, calling `finalize_run` — so the agent ends an episode only when the
+*run* is done, never for context hygiene.
+
+**Correction 1 — the orientation tax is ~1/3 of every episode at BOTH caps**
+(v5: 43/27/89%, v6: 26/50/26/43%), counting `explore_journal` plus repeat
+`inspect_data`. 0024 called it "a fixed 2-3 calls" that a longer episode would
+dilute; wrong — given room the agent orients *more*. A bigger cap is not the fix;
+**the brief is**, which is 0024's conclusion for a reason that actually holds.
+
+**Correction 2 — episodes cost MORE per experiment at this scale**: 66,455 vs
+v3's 45,650 input tokens/experiment (1.20M over 90 requests vs 1.10M over 48).
+Episodes buy **feasibility, not cost**. The model `total ≈ ½·slope·turns²`
+predicts v3 to within 6%, giving: crossover ~35 experiments, single-run
+impossible ~60-80, and at 150 it is ~40M tokens/270k peak (dead) vs ~10M/28k.
+**So: episodes on for long runs, off for short ones — not the default path.**
+
+**Not claimed:** v6 best 0.12525 vs v3 0.11354 is ~1 standard error given
+`val_se` ~0.010 (0022). Whether episodes cost quality is **unmeasured**.
+
+- **Next:** the derived brief (now the primary lever, not a nicety); then move
+  the loop into `harness/`; then `val_se` (0022).
 
 ## 2026-08-10 (earlier) — Three live Kaggle runs measured the leaderboard problem
 

@@ -51,6 +51,8 @@ Vocabulary used throughout:
 - [0004 — The tools write the journal, not the agent](0004-tools-write-the-journal.md)
 - [0020 — The read-only sandbox has no kernel; the run dir is the state](0020-the-sandbox-has-no-kernel.md)
 - [0024 — The episode stop is structural, and the brief is not optional](0024-the-episode-stop-is-structural.md)
+  *(accepted, not yet implemented; two supporting claims superseded by 0025)*
+- [0025 — Episodes buy feasibility, not cost](0025-episodes-buy-feasibility-not-cost.md)
   *(accepted, not yet implemented)*
 
 ### Keeping features honest
