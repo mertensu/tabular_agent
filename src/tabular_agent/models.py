@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from .metrics import compute_metric
+from .target import apply_target, check_target_domain, invert_target
 
 
 class _Baseline:
@@ -121,11 +122,26 @@ class TrainResult:
     final_model: object
     feature_names: list[str]
     model_type: str
+    target_transform: str = "none"
 
 
-def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, seed=42) -> TrainResult:
+def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, seed=42,
+             target_transform="none") -> TrainResult:
+    """Cross-validated fit. ``target_transform`` changes what the model is fitted
+    on; it never changes what is *reported*.
+
+    The models see ``f(y)``, but predictions are inverted before a metric touches
+    them and before they are stored as out-of-fold values. So `fold_metrics` and
+    `oof` are on the original scale for every experiment, transformed or not,
+    which is what keeps a leaderboard mixing the two comparable — and what keeps
+    a residual denominated in the units the agent asked about.
+    """
+    check_target_domain(target_transform, y, task_type)
     X = X.reset_index(drop=True)
     y = pd.Series(np.asarray(y)).reset_index(drop=True)
+    # What the models are fitted on. Stateless, so a fold's transform carries no
+    # information about the rows held out of it.
+    y_fit = pd.Series(apply_target(target_transform, y)) if target_transform != "none" else y
     n = len(X)
     classes = None
     if task_type in ("binary", "multiclass"):
@@ -140,8 +156,10 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
     fold_metrics = []
     for tr, va in folds:
         model = _make_model(model_type, task_type, params, seed)
-        model.fit(X.iloc[tr], y.iloc[tr])
+        model.fit(X.iloc[tr], y_fit.iloc[tr])
         preds = predict_model(model, X.iloc[va], task_type, classes=classes)
+        if target_transform != "none":
+            preds = invert_target(target_transform, preds)
         oof[va] = preds
         # `labels` is only consumed by the logloss branch of compute_metric; it's a harmless no-op for other metrics.
         metric_kwargs = {"labels": list(classes)} if classes is not None else {}
@@ -149,5 +167,6 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
         models.append(model)
 
     final = _make_model(model_type, task_type, params, seed)
-    final.fit(X, y)
-    return TrainResult(oof, fold_metrics, models, final, list(X.columns), model_type)
+    final.fit(X, y_fit)
+    return TrainResult(oof, fold_metrics, models, final, list(X.columns), model_type,
+                       target_transform)

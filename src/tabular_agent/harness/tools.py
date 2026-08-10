@@ -28,6 +28,7 @@ from ..models import predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..report import build_report, write_report
 from ..sandbox import SandboxError, run_readonly
+from ..target import TARGET_TRANSFORMS, invert_target
 from ..transform import transform_features as _transform_features
 from . import journal, stop
 from .session import RunSession
@@ -78,6 +79,7 @@ def _score_on_val(
     feature_names,
     spec,
     y_work: pd.Series,
+    target_transform: str = "none",
 ) -> tuple[float | None, str | None]:
     """Score a just-fitted model on the validation half. ``(score, why_not)``.
 
@@ -114,6 +116,12 @@ def _score_on_val(
         spec.task_type,
         classes=classes if spec.task_type == "multiclass" else None,
     )
+    # The model was fitted on f(y), so its predictions are on that scale. Scoring
+    # them against raw validation targets without inverting would not merely be
+    # wrong, it would be *flatteringly* wrong for `rmsle` — which is why this
+    # inversion is tested rather than trusted.
+    if target_transform != "none":
+        preds = invert_target(target_transform, preds)
     return float(compute_metric(spec.metric, y_val, preds, labels=classes)), None
 
 
@@ -393,9 +401,16 @@ def _gain(cv_score: float, reference: float, metric: str) -> float:
     return round(delta if greater_is_better(metric) else -delta, 6) + 0.0
 
 
-def _fit_signature(model_type: str, params: dict | None) -> str:
-    """Identity of *how* a model was fitted, for deciding what compares to what."""
-    return json.dumps([model_type, params or {}], sort_keys=True)
+def _fit_signature(model_type: str, params: dict | None,
+                   target_transform: str = "none") -> str:
+    """Identity of *how* a model was fitted, for deciding what compares to what.
+
+    The target scale belongs in here for the same reason the params do: two
+    experiments that differ by it differ by more than their features, and 0017's
+    rule is that a comparison must differ by exactly one thing or it is not
+    evidence about that thing.
+    """
+    return json.dumps([model_type, params or {}, target_transform], sort_keys=True)
 
 
 def _table_label(session: RunSession, rel_path: str) -> str:
@@ -418,8 +433,9 @@ def _vs_source_table(
     metric: str,
     model_type: str,
     params: dict | None,
+    target_transform: str = "none",
 ) -> tuple[float | None, str]:
-    """Gain over the same model, same params, on this table's ``source_table``.
+    """Gain over the same model, same params, same target scale, on the source table.
 
     Returns the gain and a plain statement of what it is a gain *over* — or, when
     there is nothing valid to compare against, why not and what would fix it.
@@ -444,14 +460,19 @@ def _vs_source_table(
         return None, f"{_table_label(session, source_table)} was not derived from another table"
 
     label = _table_label(session, source)
-    signature = _fit_signature(model_type, params)
+    signature = _fit_signature(model_type, params, target_transform)
     on_source = [
         r
         for r in j.get("leaderboard") or []
         if r.get("source_table") == source and r.get("val_score") is not None
     ]
     comparable = [
-        r for r in on_source if _fit_signature(r.get("model_type"), r.get("params")) == signature
+        r
+        for r in on_source
+        if _fit_signature(
+            r.get("model_type"), r.get("params"), r.get("target_transform", "none")
+        )
+        == signature
     ]
     if not comparable:
         detail = (
@@ -576,6 +597,7 @@ def train_tabular_model(
     table: str | None = None,
     model_type: str = "lgbm",
     params: dict | None = None,
+    target_transform: str = "none",
     enforce_stop: bool = True,
 ) -> dict:
     """Cross-validated training — the only way to fit a model in this harness.
@@ -630,12 +652,13 @@ def train_tabular_model(
         model_type=model_type,
         params=params,
         seed=spec.seed,
+        target_transform=target_transform,
     )
 
     cv_score = float(np.mean(result.fold_metrics))
     fold_spread = float(np.std(result.fold_metrics))
     val_score, val_unavailable = _score_on_val(
-        session, path, result.final_model, result.feature_names, spec, y
+        session, path, result.final_model, result.feature_names, spec, y, target_transform
     )
 
     exp_id = journal.next_experiment_id(session.run_dir)
@@ -649,6 +672,7 @@ def train_tabular_model(
         "id": exp_id,
         "model_type": model_type,
         "params": params or {},
+        "target_transform": target_transform,
         "task_type": spec.task_type,
         "metric": spec.metric,
         "cv_score": cv_score,
@@ -670,6 +694,10 @@ def train_tabular_model(
         "id": exp_id,
         "model_type": model_type,
         "params": params or {},
+        # On the row, not just in meta.json: it is a dimension an experiment can
+        # differ by, so `vs_source_table`'s "differ by exactly one thing" rule
+        # (0017) has to be able to see it.
+        "target_transform": target_transform,
         "features": list(result.feature_names),
         # Which feature table this was trained on, so a resuming agent can read
         # the leaderboard alone and know what to reuse or beat — without opening
@@ -694,7 +722,8 @@ def train_tabular_model(
         for r in _columns_by_table(session, j_after, row["source_table"], result.feature_names)
     ]
     vs_source, vs_source_basis = _vs_source_table(
-        session, j_after, row["source_table"], val_score, spec.metric, model_type, params
+        session, j_after, row["source_table"], val_score, spec.metric, model_type, params,
+        target_transform,
     )
     # All three are derived from the journal *after* this row lands, so they
     # cannot be part of the append. Persist them anyway: they are the record of
@@ -767,6 +796,7 @@ def explain_table(
     table: str | None = None,
     model_type: str = "lgbm",
     params: dict | None = None,
+    target_transform: str = "none",
 ) -> dict:
     """Which table's columns earned the score, by refitting without each in turn.
 
@@ -826,6 +856,7 @@ def explain_table(
             model_type=model_type,
             params=params,
             seed=spec.seed,
+            target_transform=target_transform,
         )
         return float(np.mean(result.fold_metrics))
 
@@ -866,6 +897,108 @@ def explain_table(
         "n_fits": 1 + sum(1 for r in report if r["contribution"] is not None),
         "credit_by_table": report,
     }
+
+
+#: Columns of the `lb` frame, declared rather than inferred from whatever rows
+#: happen to exist. An empty run must hand over a *well-formed* empty frame:
+#: `lb[lb.val_score < 0.2]` should return nothing, not raise KeyError, or the
+#: agent's first call on a fresh run fails for a reason that has nothing to do
+#: with what it asked.
+_LB_COLUMNS = [
+    "id", "model_type", "params", "target_transform", "source_table", "metric",
+    "val_score", "cv_score", "fold_spread", "vs_baseline", "vs_source_table",
+    "n_features",
+]
+
+_TABLE_COLUMNS = ["id", "path", "method", "source_table", "n_columns", "columns", "code"]
+
+
+def _journal_frames(session: RunSession) -> dict:
+    """The run's own records as frames: what happened, not what it happened to.
+
+    Deliberately **no data**. Every value here was either produced by a tool the
+    agent called or written by the agent itself, so there is nothing to gate: no
+    rows, no target values, and no per-column statistic conditioned on the
+    target. That is what makes this the cheap sibling of `explore_experiment` —
+    it needs no leakage argument at all, because it never touches the table.
+
+    ``params`` is a JSON *string* rather than a dict. A dict cell is unhashable,
+    so `lb.groupby("params")` — one of the two or three things worth doing with
+    this frame — would raise; as a string it groups, sorts, and is still one
+    `json.loads` away from the values.
+    """
+    j = journal.load(session.run_dir)
+
+    lb = pd.DataFrame([
+        {
+            "id": r.get("id"),
+            "model_type": r.get("model_type"),
+            "params": json.dumps(r.get("params") or {}, sort_keys=True),
+            "target_transform": r.get("target_transform", "none"),
+            "source_table": r.get("source_table"),
+            "metric": r.get("metric"),
+            "val_score": r.get("val_score"),
+            "cv_score": r.get("cv_score"),
+            "fold_spread": r.get("fold_spread"),
+            "vs_baseline": r.get("vs_baseline"),
+            "vs_source_table": r.get("vs_source_table"),
+            "n_features": len(r.get("features") or []),
+        }
+        for r in j.get("leaderboard") or []
+    ], columns=_LB_COLUMNS)
+
+    tables = pd.DataFrame([
+        {
+            "id": t.get("id"),
+            "path": t.get("path"),
+            "method": t.get("method"),
+            "source_table": t.get("source_table"),
+            "n_columns": len(t.get("columns") or []),
+            "columns": t.get("columns") or [],
+            "code": t.get("code"),
+        }
+        for t in j.get("tables") or []
+    ], columns=_TABLE_COLUMNS)
+
+    notes = pd.DataFrame(j.get("log") or [])
+
+    # Scalars the frames cannot express, and which decide how to read them —
+    # notably the metric's direction, without which every comparison is a guess.
+    run = {
+        "task": j.get("task"),
+        "split": j.get("split"),
+        "stop": j.get("stop"),
+        "best": j.get("best"),
+        "baseline": j.get("baseline"),
+        "higher_is_better": (
+            greater_is_better(j["task"]["metric"]) if j.get("task") else None
+        ),
+    }
+    return {"lb": lb, "tables": tables, "notes": notes, "run": run}
+
+
+def explore_journal(session: RunSession, code: str, timeout: float = 10.0) -> dict:
+    """Read-only code over the run's own records — the leaderboard, not the rows.
+
+    The problem this solves is arithmetic by eye. By experiment 20 the agent is
+    comparing twenty summaries it has read one at a time, each still sitting in
+    its context, and answering "did target encoding ever actually help" by
+    impression. ``lb.groupby("method")["val_score"].mean()`` answers it exactly,
+    and the nineteen experiments not currently being thought about stay on disk.
+
+    Needs no leakage argument, unlike `explore_experiment`: it never sees a row.
+    Everything in these frames was produced by a tool the agent called or written
+    by the agent itself.
+
+    Free — no leaderboard row, no budget — and available after `finalize_run`,
+    which is when "what did this run actually learn" is the whole question.
+    """
+    frames = _journal_frames(session)
+    out = run_readonly(frames, code, func_name="explore", timeout=timeout)
+    result = {"result": out["result"]}
+    if out["stdout"]:
+        result["stdout"] = out["stdout"]
+    return result
 
 
 def _experiment_row(run_dir: str, exp_id: str) -> dict:
@@ -1013,6 +1146,7 @@ def finalize_run(session: RunSession) -> dict:
         np.array([1.0]),
         meta["feature_names"],
         meta["task_type"],
+        meta.get("target_transform", "none"),
     )
 
     credit = journal.attribution(j, meta["source_table"])

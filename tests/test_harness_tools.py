@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tabular_agent.harness import journal
+from tabular_agent.harness import journal, tools
 from tabular_agent.harness.session import RunSession
 from tabular_agent.io import load_table
 from tabular_agent.sandbox import SandboxError
@@ -1220,3 +1220,167 @@ def test_exploration_cannot_train_a_model(session):
 
     with pytest.raises(SandboxError, match="train_tabular_model"):
         _explore(session, exp["experiment_id"], "    import lightgbm\n    return 1")
+
+
+# ------------------------------------------------------------ target transforms
+
+
+@pytest.fixture
+def priced_session(tmp_path):
+    """A strictly positive, right-skewed target — the shape where fitting on the
+    log scale is the point, and the only shape log1p/sqrt are defined on."""
+    rng = np.random.default_rng(5)
+    n = 300
+    area = rng.uniform(30, 160, n)
+    grade = rng.choice(["low", "mid", "high"], n)
+    level = {"low": 700, "mid": 1400, "high": 2400}
+    price = area * np.array([level[g] for g in grade]) * rng.lognormal(0, 0.25, n)
+    df = pd.DataFrame({"area": area, "grade": grade, "y": price})
+    path = str(tmp_path / "priced.csv")
+    df.to_csv(path, index=False)
+    return RunSession(str(tmp_path / "run"), path, TaskSpec(target="y", n_splits=3))
+
+
+def test_the_transform_is_recorded_and_the_scores_stay_comparable(priced_session):
+    """Two experiments differing only by target scale must land on one leaderboard
+    with scores that mean the same thing, or the run cannot choose between them."""
+    inspect_data(priced_session)
+    raw = train_tabular_model(priced_session, model_type="lgbm")
+    log = train_tabular_model(priced_session, model_type="lgbm", target_transform="log1p")
+
+    rows = journal.load(priced_session.run_dir)["leaderboard"]
+    assert [r["target_transform"] for r in rows] == ["none", "log1p"]
+    # Same metric, same rows, same units — within a factor of a few of each other
+    # rather than the ~10x gap a log-scale score would show.
+    assert 0.2 < raw["val_score"] / log["val_score"] < 5
+
+
+def test_an_impossible_transform_is_a_correction_not_a_dead_run(session):
+    """`session`'s target is a 0/1 class label. The message has to name the fix,
+    because it arrives as a ModelRetry and is all the agent gets."""
+    inspect_data(session)
+    with pytest.raises(ValueError, match="regression only"):
+        train_tabular_model(session, model_type="lgbm", target_transform="log1p")
+
+
+def test_vs_source_table_does_not_compare_across_target_scales(priced_session):
+    """0017's rule: a comparison must differ by exactly one thing. A log fit on a
+    child table measured against a raw fit on its source would credit the
+    transform to the columns."""
+    inspect_data(priced_session)
+    enc = fit_encoding(priced_session, ["grade"], "frequency")
+    train_tabular_model(priced_session, model_type="lgbm")  # raw, on the source
+    child = train_tabular_model(
+        priced_session, table=enc["table"], model_type="lgbm", target_transform="log1p"
+    )
+    assert child["vs_source_table"] is None
+    assert "not with this exact fit" in child["vs_source_basis"]
+
+
+def test_the_bundle_predicts_in_the_original_units(priced_session):
+    """The silent failure: a bundle that forgets the inverse returns log-dollars,
+    and every value still looks like a plausible number."""
+    from tabular_agent.pipeline import load_bundle, predict_bundle
+
+    inspect_data(priced_session)
+    train_tabular_model(priced_session, model_type="lgbm", target_transform="log1p")
+    out = finalize_run(priced_session)
+
+    raw_rows = load_table(priced_session.source_path).drop(columns=["y"])
+    preds = predict_bundle(
+        load_bundle(os.path.join(priced_session.run_dir, out["bundle_dir"])), raw_rows
+    )
+    truth = load_table(priced_session.source_path)["y"]
+    assert preds.mean() > 0.3 * truth.mean()
+    assert np.corrcoef(preds, truth)[0, 1] > 0.5
+
+
+# -------------------------------------------------------------- explore_journal
+
+
+def _journal_code(body):
+    return f"def explore(lb, tables, run):\n{body}"
+
+
+def test_the_leaderboard_arrives_as_a_frame(session):
+    inspect_data(session)
+    train_tabular_model(session, model_type="baseline")
+    enc = fit_encoding(session, ["city"], "frequency")
+    train_tabular_model(session, table=enc["table"], model_type="lgbm")
+
+    out = tools.explore_journal(session, _journal_code(
+        "    return {'n': len(lb), 'models': sorted(lb['model_type']),\n"
+        "            'tables': sorted(tables['method']), 'metric': run['task']['metric']}"
+    ))
+    assert out["result"]["n"] == 2
+    assert out["result"]["models"] == ["baseline", "lgbm"]
+    assert out["result"]["tables"] == ["frequency"]
+
+
+def test_an_empty_run_hands_over_a_well_formed_frame(session):
+    """A fresh run must not fail on a KeyError for a column that exists — the
+    first question an agent asks is often asked before it has trained anything."""
+    inspect_data(session)
+    out = tools.explore_journal(session, _journal_code(
+        "    return {'rows': len(lb), 'has_col': 'val_score' in lb.columns,\n"
+        "            'filtered': len(lb[lb['val_score'] < 1])}"
+    ))
+    assert out["result"] == {"rows": 0, "has_col": True, "filtered": 0}
+
+
+def test_params_group_instead_of_raising(session):
+    """A dict cell is unhashable, so a params column of dicts would make the
+    obvious query — group by hyper-parameters — an error rather than an answer."""
+    inspect_data(session)
+    train_tabular_model(session, model_type="lgbm", params={"n_estimators": 30})
+    train_tabular_model(session, model_type="lgbm", params={"n_estimators": 30})
+    train_tabular_model(session, model_type="lgbm", params={"n_estimators": 60})
+
+    out = tools.explore_journal(session, _journal_code(
+        "    return {k: int(v) for k, v in lb.groupby('params').size().to_dict().items()}"
+    ))
+    assert sorted(out["result"].values()) == [1, 2]
+
+
+def test_it_answers_the_question_no_single_result_can(session):
+    """Which encoding method actually paid — a question spanning every experiment,
+    which is the reason this tool exists rather than reading rows one at a time."""
+    inspect_data(session)
+    freq = fit_encoding(session, ["city"], "frequency")
+    tgt = fit_encoding(session, ["city"], "target")
+    train_tabular_model(session, table=freq["table"], model_type="lgbm")
+    train_tabular_model(session, table=tgt["table"], model_type="lgbm")
+
+    out = tools.explore_journal(session, _journal_code(
+        "    m = lb.merge(tables, left_on='source_table', right_on='path', how='left')\n"
+        "    return m.groupby('method')['val_score'].mean().round(4).to_dict()"
+    ))
+    assert set(out["result"]) == {"frequency", "target"}
+
+
+def test_it_sees_no_data_at_all(session):
+    """The whole reason it needs no leakage argument. There is no frame here
+    carrying a row of the dataset, and no name that could reach one."""
+    inspect_data(session)
+    train_tabular_model(session, model_type="lgbm")
+
+    with pytest.raises(SandboxError) as exc:
+        tools.explore_journal(session, "def explore(df):\n    return len(df)")
+    msg = str(exc.value)
+    assert "'df'" in msg and "lb" in msg and "tables" in msg
+
+
+def test_it_costs_nothing_and_works_after_finalize(session):
+    inspect_data(session)
+    train_tabular_model(session, model_type="baseline")
+    train_tabular_model(session, model_type="lgbm")
+    finalize_run(session)
+    before = journal.load(session.run_dir)
+
+    out = tools.explore_journal(session, _journal_code(
+        "    print('best is', run['best']['experiment_id'])\n"
+        "    return len(lb)"
+    ))
+    assert out["result"] == 2
+    assert "best is e2" in out["stdout"]
+    assert journal.load(session.run_dir) == before

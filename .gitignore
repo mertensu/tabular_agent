@@ -11,6 +11,15 @@ catboost_info/
 # Run directories the notebooks write when executed.
 _step5_demo/
 
+# Agent run output: journals, transcripts and fitted models (100s of MB).
+# The runners in `scripts/` reproduce them; findings go in HANDOFF/decisions.
+_runs/
+
+# Kaggle competition data — downloaded, not ours to redistribute.
+# `house_prices/`: train.csv + test.csv from the house-prices-advanced-regression
+# competition; `train_no_id.csv` is train.csv minus the Id column.
+house_prices/
+
 # Secrets — API keys live here and must never be committed.
 .secrets/
 .env

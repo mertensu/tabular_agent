@@ -58,6 +58,7 @@ Vocabulary used throughout:
 - [0009 — The target column is invisible to agent-written code](0009-target-hidden-from-transforms.md)
 - [0010 — Store the transform code, not the columns it produced](0010-store-code-not-columns.md)
 - [0011 — Statelessness is tested as a property, not blacklisted](0011-stability-check.md)
+- [0021 — The agent picks the target scale, from a fixed menu](0021-the-agent-picks-the-target-scale.md)
 
 ### Surviving a real agent
 
@@ -74,6 +75,10 @@ Vocabulary used throughout:
   *(superseded by 0017)*
 - [0017 — Credit is measured by refitting without the columns, not by importance](0017-credit-by-ablation.md)
 - [0019 — The leaderboard is a public leaderboard](0019-the-leaderboard-is-a-public-leaderboard.md)
+- [0022 — The yardstick must measure the quantity being ranked](0022-the-yardstick-must-measure-the-ranked-quantity.md)
+  *(accepted, not yet implemented)*
+- [0023 — The third split has evidence now](0023-the-third-split-has-evidence-now.md)
+  *(accepted, not yet implemented)*
 
 ### Keeping the agent's surface small
 

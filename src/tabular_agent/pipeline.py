@@ -11,6 +11,7 @@ import pandas as pd
 from .blend import apply_blend
 from .encoders import ENCODER_CLASSES
 from .models import predict_model
+from .target import invert_target
 
 
 class Pipeline:
@@ -54,7 +55,8 @@ class Pipeline:
         return p
 
 
-def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_names, task_type) -> str:
+def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_names, task_type,
+                target_transform: str = "none") -> str:
     bundle_dir = run_ctx.path("bundle", "_")
     bundle_dir = os.path.dirname(bundle_dir)
     model_paths = []
@@ -68,6 +70,9 @@ def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_name
         "weights": np.asarray(weights, dtype=float).tolist(),
         "feature_names": list(feature_names),
         "task_type": task_type,
+        # The models were fitted on f(y); without this the bundle would predict
+        # in log-dollars and look plausible doing it.
+        "target_transform": target_transform,
     }
     with open(os.path.join(bundle_dir, "pipeline.json"), "w") as f:
         json.dump(manifest, f, indent=2)
@@ -84,6 +89,9 @@ def load_bundle(bundle_dir: str) -> dict:
         "weights": np.asarray(manifest["weights"], dtype=float),
         "feature_names": manifest["feature_names"],
         "task_type": manifest["task_type"],
+        # Bundles written before target transforms existed have no such key and
+        # must keep predicting exactly as they did.
+        "target_transform": manifest.get("target_transform", "none"),
     }
 
 
@@ -92,4 +100,11 @@ def predict_bundle(bundle: dict, raw_df: pd.DataFrame) -> np.ndarray:
     X = features[bundle["feature_names"]]
     task_type = bundle["task_type"]
     preds = [predict_model(m, X, task_type) for m in bundle["models"]]
-    return apply_blend(preds, bundle["weights"])
+    blended = apply_blend(preds, bundle["weights"])
+    # Inverted after blending, not before: the models all share one target scale,
+    # so averaging on that scale and inverting once is the same operation the
+    # cross-validated scores were computed with.
+    transform = bundle.get("target_transform", "none")
+    if transform != "none":
+        blended = invert_target(transform, blended)
+    return blended

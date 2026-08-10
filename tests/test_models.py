@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from tabular_agent.cv import make_folds
 from tabular_agent.models import train_cv, predict_model, TrainResult
@@ -171,3 +172,117 @@ def test_catboost_aliases_replace_the_default_spelling():
     assert p["iterations"] == 5 and "n_estimators" not in p
     assert p["depth"] == 3 and "max_depth" not in p
     m.fit(pd.DataFrame({"a": [0.0, 1.0] * 10}), pd.Series([0, 1] * 10))  # actually builds
+
+
+# ------------------------------------------------------------ target transforms
+
+
+def _skewed_regression(n=200, seed=3):
+    rng = np.random.default_rng(seed)
+    x = rng.uniform(1, 10, n)
+    # Multiplicative noise on an exponential response: the shape where fitting on
+    # the log scale is the right move and squared error on the raw scale is not.
+    y = np.exp(0.5 * x) * rng.lognormal(0, 0.3, n)
+    return pd.DataFrame({"x": x}), pd.Series(y)
+
+
+def test_scores_stay_on_the_original_scale():
+    """The rule the whole feature rests on. If a transformed experiment reported
+    its metric on the transformed scale, the leaderboard would rank numbers in
+    different units and every comparison in the run would be void."""
+    from tabular_agent.cv import make_folds
+
+    X, y = _skewed_regression()
+    folds = make_folds(y, "regression", n_splits=3)
+    res = train_cv(X, y, folds, "regression", "rmsle", model_type="lgbm",
+                   target_transform="log1p")
+
+    # An rmsle computed on log1p(y) would be a small number near 0.3; on the
+    # original scale it is comparable to the raw-fit score below.
+    raw = train_cv(X, y, folds, "regression", "rmsle", model_type="lgbm")
+    assert res.oof.min() > 0                      # dollars, not log-dollars
+    assert abs(res.oof.mean() - y.mean()) < 0.5 * y.mean()
+    assert abs(raw.oof.mean() - y.mean()) < 0.5 * y.mean()
+    # Both metrics are on the same scale, so the comparison is meaningful at all.
+    assert 0 < np.mean(res.fold_metrics) < 2
+    assert 0 < np.mean(raw.fold_metrics) < 2
+
+
+def test_fitting_on_the_log_scale_helps_when_the_metric_is_rmsle():
+    from tabular_agent.cv import make_folds
+
+    X, y = _skewed_regression()
+    folds = make_folds(y, "regression", n_splits=3)
+    raw = np.mean(train_cv(X, y, folds, "regression", "rmsle", model_type="lgbm").fold_metrics)
+    log = np.mean(train_cv(X, y, folds, "regression", "rmsle", model_type="lgbm",
+                           target_transform="log1p").fold_metrics)
+    assert log < raw
+
+
+def test_oof_is_stored_on_the_original_scale():
+    """`explore_experiment` computes `residual = y - oof_pred`. Out-of-fold values
+    in log-dollars would silently redefine what a residual means."""
+    from tabular_agent.cv import make_folds
+
+    X, y = _skewed_regression()
+    folds = make_folds(y, "regression", n_splits=3)
+    res = train_cv(X, y, folds, "regression", "rmsle", model_type="lgbm",
+                   target_transform="log1p")
+    assert np.corrcoef(res.oof, y.to_numpy())[0, 1] > 0.8
+    assert res.oof.max() > 10  # log1p of this target maxes out around 5
+
+
+def test_transform_round_trips_through_the_bundle():
+    """The failure this guards against is silent: a bundle that forgets the
+    inverse predicts log-dollars and every number still looks like a number."""
+    import numpy as _np
+
+    from tabular_agent.pipeline import Pipeline, load_bundle, predict_bundle, save_bundle
+    from tabular_agent.runctx import RunContext
+    import tempfile
+
+    from tabular_agent.cv import make_folds
+
+    X, y = _skewed_regression()
+    folds = make_folds(y, "regression", n_splits=3)
+    res = train_cv(X, y, folds, "regression", "rmsle", model_type="lgbm",
+                   target_transform="log1p")
+
+    with tempfile.TemporaryDirectory() as d:
+        ctx = RunContext(d)
+        save_bundle(ctx, Pipeline("regression"), [res.final_model], _np.array([1.0]),
+                    list(X.columns), "regression", "log1p")
+        preds = predict_bundle(load_bundle(ctx.path("bundle", "_").rsplit("/", 1)[0]), X)
+
+    assert preds.mean() > 0.3 * y.mean()  # dollars
+    assert _np.corrcoef(preds, y.to_numpy())[0, 1] > 0.9
+
+
+def test_a_transform_outside_its_domain_is_refused_with_a_fix():
+    from tabular_agent.cv import make_folds
+
+    X, y = _skewed_regression()
+    y = y - y.mean()  # now has negatives
+    folds = make_folds(y, "regression", n_splits=3)
+    with pytest.raises(ValueError, match="requires values >= 0"):
+        train_cv(X, y, folds, "regression", "rmse", target_transform="log1p")
+
+
+def test_classification_targets_are_never_transformed():
+    from tabular_agent.cv import make_folds
+
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame({"x": rng.normal(size=80)})
+    y = pd.Series((X["x"] > 0).astype(int))
+    folds = make_folds(y, "binary", n_splits=2)
+    with pytest.raises(ValueError, match="regression only"):
+        train_cv(X, y, folds, "binary", "logloss", target_transform="log1p")
+
+
+def test_unknown_transform_lists_the_real_ones():
+    from tabular_agent.cv import make_folds
+
+    X, y = _skewed_regression()
+    folds = make_folds(y, "regression", n_splits=2)
+    with pytest.raises(ValueError, match="unknown target_transform"):
+        train_cv(X, y, folds, "regression", "rmse", target_transform="boxcox")

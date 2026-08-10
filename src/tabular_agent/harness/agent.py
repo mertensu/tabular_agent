@@ -138,7 +138,7 @@ def _retryable(call):
 
 
 def build_agent(model=DEFAULT_MODEL):
-    """An agent whose *entire* tool surface is the seven functions below.
+    """An agent whose *entire* tool surface is the eight functions below.
 
     ``model`` is either a PydanticAI model string (``"anthropic:..."``,
     ``"openai:..."``) or a ``Model`` object — e.g. from :func:`gateway_model`,
@@ -252,14 +252,16 @@ def build_agent(model=DEFAULT_MODEL):
         table: str | None = None,
         model_type: str = "lgbm",
         params: dict | None = None,
+        target_transform: str = "none",
     ) -> dict:
         """Train a model with k-fold cross-validation and record the experiment.
 
         `vs_baseline` compares against the trivial constant model.
-        `vs_source_table` compares against the same model and params on this
-        table's `source_table`, so the columns you added are the only difference
-        — it is `null` when you change model and features at once, and
-        `vs_source_basis` then says what would produce it.
+        `vs_source_table` compares against the same model, params and
+        `target_transform` on this table's `source_table`, so the columns you
+        added are the only difference — it is `null` when you change more than
+        one of those at once, and `vs_source_basis` then says what would
+        produce it.
 
         Returns `trained: false` instead of an experiment once this run has
         stopped making progress; call `finalize_run` at that point.
@@ -268,10 +270,23 @@ def build_agent(model=DEFAULT_MODEL):
             table: Path to the feature table. Omit to use the run's work table.
             model_type: One of "baseline", "lgbm", "xgb", "catboost".
             params: Optional model hyper-parameters.
+            target_transform: What the model is fitted on — "none" (the target
+                as-is), "log1p", or "sqrt". Regression only, and "log1p"/"sqrt"
+                need a non-negative target. Changes only what is *fitted*: every
+                score is still reported on the original scale, so a transformed
+                and an untransformed experiment stay directly comparable. Worth
+                an experiment when the target is strongly skewed, or when the
+                metric already works on a compressed scale — fitting on the
+                scale the metric measures makes the model optimise the thing it
+                is judged on.
         """
         return _retryable(
             lambda: tools.train_tabular_model(
-                ctx.deps.session, table=table, model_type=model_type, params=params
+                ctx.deps.session,
+                table=table,
+                model_type=model_type,
+                params=params,
+                target_transform=target_transform,
             )
         )
 
@@ -281,6 +296,7 @@ def build_agent(model=DEFAULT_MODEL):
         table: str | None = None,
         model_type: str = "lgbm",
         params: dict | None = None,
+        target_transform: str = "none",
     ) -> dict:
         """Measure what each tool call's columns contributed, by refitting without each.
 
@@ -297,10 +313,16 @@ def build_agent(model=DEFAULT_MODEL):
             table: Path to the feature table. Omit to use the run's work table.
             model_type: One of "baseline", "lgbm", "xgb", "catboost".
             params: Optional model hyper-parameters.
+            target_transform: Match the experiment you are explaining, or the
+                contributions describe a fit you never ran.
         """
         return _retryable(
             lambda: tools.explain_table(
-                ctx.deps.session, table=table, model_type=model_type, params=params
+                ctx.deps.session,
+                table=table,
+                model_type=model_type,
+                params=params,
+                target_transform=target_transform,
             )
         )
 
@@ -344,6 +366,41 @@ def build_agent(model=DEFAULT_MODEL):
         return _retryable(
             lambda: tools.explore_experiment(ctx.deps.session, exp_id=exp_id, code=code)
         )
+
+    @agent.tool
+    def explore_journal(ctx: RunContext[Deps], code: str) -> dict:
+        """Query this run's own history — every experiment and table so far — with code.
+
+        Use instead of comparing results by eye. It answers questions across the
+        whole run: which encoding method actually paid, whether a model type is
+        better once the feature table is held constant, which tables have never
+        been trained on. Costs nothing and records nothing.
+
+        Args:
+            code: Python defining `explore(...)`, taking any of the frames below
+                by name and returning a small summary (capped at 200 rows).
+                Anything printed comes back too.
+
+                    lb      one row per experiment: id, model_type, params (a
+                            JSON string), target_transform, source_table, metric,
+                            val_score, cv_score, fold_spread, vs_baseline,
+                            vs_source_table, n_features
+                    tables  one row per feature table: id, path, method,
+                            source_table, n_columns, columns, code
+                    notes   whatever has been appended to the run log
+                    run     dict: task, split, stop, best, baseline,
+                            higher_is_better
+
+                Remember `higher_is_better` when ranking — for most metrics here
+                the better score is the lower one. Example:
+
+                    def explore(lb, tables):
+                        m = lb.merge(tables, left_on="source_table",
+                                     right_on="path", how="left")
+                        return m.groupby("method")["val_score"].agg(
+                            ["mean", "min", "size"]).round(4).to_dict("index")
+        """
+        return _retryable(lambda: tools.explore_journal(ctx.deps.session, code))
 
     @agent.tool
     def finalize_run(ctx: RunContext[Deps]) -> dict:

@@ -8,6 +8,103 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-10 (latest) — Three live Kaggle runs measured the leaderboard problem
+
+**Machine:** MacBook Air | **Branch:** master | **214 tests pass.**
+
+**Decision records: `0021` (target scale), `0022` (the yardstick), `0023` (the
+third split). 0022 and 0023 are `accepted, not yet implemented` — read them
+before trusting any `val_score` in this repo.**
+
+### Done this session (after the entry below)
+
+**1. `explore_journal` — the eighth tool.** Read-only code over the run's own
+records: `lb` (one row per experiment), `tables`, `notes`, `run` (task, split,
+stop, best, baseline, `higher_is_better`). No rows at all, so unlike
+`explore_experiment` it needs no leakage argument. Free, works after finalize.
+Two calls worth knowing: `params` is a **JSON string** (a dict cell is
+unhashable, so `groupby("params")` would raise), and columns are **declared**
+so an empty run hands over a well-formed frame instead of a `KeyError`.
+
+**2. Target transforms (0021).** `train_tabular_model(target_transform=...)` over
+a fixed menu — `none`/`log1p`/`sqrt`. Ulf's framing, and it is the point: a
+per-experiment argument makes it an *experiment*, not a project assumption. The
+agent immediately ran a controlled pair (e2 `none` 0.1366 vs e4 `log1p` 0.1287,
+same table and model) and switched. Every score is reported on the **original
+scale** — five call sites had to learn the inverse and each fails silently if
+missed.
+
+**3. `harness/usage.py`** — context growth per run, from the `input_tokens` each
+response already records. This is the baseline for judging RLM-style changes.
+Both earlier runs profiled retroactively; curve is **linear**, ~830–990
+tokens/turn, peak 29k–44k. Linear context means quadratic cost, which is what
+makes 150 experiments unaffordable rather than merely impossible.
+
+**4. Logfire works fully offline.** `logfire.configure(send_to_logfire=False)` +
+`logfire.instrument_pydantic_ai()` + an OTel span processor writing local JSONL.
+103 spans on a real run. Note `local=True` does **not** mean local dashboard (it
+returns a non-global instance); there is no bundled UI — point
+`additional_span_processors` at a local OTLP collector if you want traces.
+
+### The three runs, and what they proved
+
+Kaggle house-prices, `tensorx/deepseek-v4-flash-0731`, same four-sentence prompt
+every time. Runners in `scripts/`. **`_runs/` is gitignored** (128MB of fitted models) and so
+is **`house_prices/`** (Kaggle data, not ours to redistribute) — download
+train.csv/test.csv from the competition and `train_no_id.csv` is train.csv minus
+the `Id` column.
+
+| run | data | exp | our val | Kaggle | rank |
+|---|---|---|---|---|---|
+| 1 | with `Id` | 15 | 0.12095 | not submitted | — |
+| 2 | no `Id` | 17 | 0.12162 | **0.12368** | ~831/3739 (top 22%) |
+| 3 | no `Id` + transforms | 24 | 0.11354 | **0.12298** | ~730/3739 (top 20%) |
+
+**`Id` was a feature in run 1** (train 1–1460, test 1461–2919 — entirely
+disjoint). Dropping it moved `val_score` by 0.0007, i.e. nothing: random folds
+and a random val split make it inert in-sample, and the damage is serve-time
+only. No CV, no holdout drawn our way, and no ablation can see this.
+
+**The big one: our val said the target transform bought 0.00808. Kaggle says
+0.00070.** 91% was optimism, and optimism grew **4.6x** (0.00206 → 0.00944) for
+**1.4x** the experiments (17 → 24). Bootstrapping `val_score` over its own 292
+rows: **sd ~0.010**, CIs of the two runs almost fully overlapping. The gain was
+smaller than one standard error of the instrument that measured it.
+
+That is 0022: **0019 moved ranking onto `val_score` and left the yardstick on
+`fold_spread`.** The bar is `0.25 x fold_spread ≈ 0.0025`; the noise in the
+compared number is `≈ 0.0098`. Four times too small, and the two happening to be
+numerically close on this dataset is why it hid.
+
+### Gotchas / open questions
+
+- **Correcting myself:** after run 2 I wrote that the third split "isn't urgent"
+  and the premium exceeded the risk. Run 3 refutes that. One optimism measurement
+  at n=17 was one point on a curve that climbs steeply. 0023 records it.
+- **0022 first, it is much cheaper.** `val_se` by bootstrap costs milliseconds
+  and tells a run *while it is running* that a gain is inside the noise. The
+  third split only tells the reader afterwards. Both are wanted; neither
+  substitutes.
+- **Nothing warns that a feature's range at predict time is disjoint from
+  training.** Proposed and not built: flag near-unique **and** monotonic columns
+  at `inspect_data` — advisory, two branches (drop it if an identifier, pass
+  `split_on=` if it is time). Note `split_on` already solves this and defaults to
+  `None` on purpose; the detector's job is to make the mechanism discoverable.
+- **Still missing vs a 0.11775 Kaggle notebook:** linear models + `blend_models`
+  (`blend.py` is written and unregistered since 2026-07-29), a `fit_*` family for
+  learned imputation/clipping/scaling (currently guarded by 0011 with **no
+  sanctioned path**), and `onehot` in `fit_encoding` (`get_dummies` is
+  batch-dependent by construction).
+- **No data dictionary reaches the agent** — there is no channel for it. It cost
+  less than expected here: the model recovered every ordinal order
+  (`Po<Fa<TA<Gd<Ex`, `Unf<LwQ<Rec<BLQ<ALQ<GLQ`) from pretraining. Ulf has said
+  adding the channel is fine; not built.
+- **Free tools leave no journal trace.** `explore_experiment`/`explore_journal`
+  write nothing, so the only record of what the agent *looked at* is the
+  transcript. Fine for one run, a hole for studying behaviour across runs.
+- **No notebook for this chunk yet** — `explore_journal` and target transforms
+  are untaught. Step 5's notebook covers `explore_experiment` only.
+
 ## 2026-08-10 (later) — The agent can see its own mistakes; the RLM kernel was declined
 
 **Machine:** MacBook Air | **Branch:** master | **197 tests pass.**

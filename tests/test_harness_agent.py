@@ -24,6 +24,8 @@ EXPECTED_TOOLS = {
     # experiment that already exists, and its result has no persistence path, so
     # it cannot produce a feature or reach a row training could not.
     "explore_experiment",
+    # Sees the run's records only — no rows at all, so nothing to gate.
+    "explore_journal",
     "finalize_run",
 }
 
