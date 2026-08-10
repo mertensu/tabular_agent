@@ -1358,6 +1358,21 @@ def test_it_answers_the_question_no_single_result_can(session):
     assert set(out["result"]) == {"frequency", "target"}
 
 
+def test_a_table_reports_the_columns_it_added(session):
+    """The `tables` frame read a `columns` key that journal rows never carry, so
+    every table reported zero columns added — a wrong answer, not an error, to
+    the one question the frame exists to answer."""
+    inspect_data(session)
+    enc = fit_encoding(session, ["city"], "frequency")
+
+    out = tools.explore_journal(session, "def explore(tables):\n"
+                                "    r = tables.iloc[0]\n"
+                                "    return {'n': int(r['n_columns']), 'cols': list(r['columns'])}")
+    assert out["result"]["n"] > 0
+    assert out["result"]["cols"] == journal.load(session.run_dir)["tables"][0]["new_columns"]
+    assert enc["table"] == journal.load(session.run_dir)["tables"][0]["path"]
+
+
 def test_it_sees_no_data_at_all(session):
     """The whole reason it needs no leakage argument. There is no frame here
     carrying a row of the dataset, and no name that could reach one."""

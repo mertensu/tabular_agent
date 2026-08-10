@@ -953,8 +953,11 @@ def _journal_frames(session: RunSession) -> dict:
             "path": t.get("path"),
             "method": t.get("method"),
             "source_table": t.get("source_table"),
-            "n_columns": len(t.get("columns") or []),
-            "columns": t.get("columns") or [],
+            # `new_columns` is what the table row actually carries — one tool
+            # call produces one table, so this is precisely that call's output.
+            # Reading a `columns` key here silently yielded [] for every table.
+            "n_columns": len(t.get("new_columns") or []),
+            "columns": t.get("new_columns") or [],
             "code": t.get("code"),
         }
         for t in j.get("tables") or []

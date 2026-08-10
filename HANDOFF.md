@@ -8,6 +8,71 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-10 (latest+1) — `explore_journal` is taught, and writing it found a bug
+
+**Machine:** MacBook Air | **Branch:** master | **215 tests pass** (214 + one new).
+
+**No decision record** — nothing was decided, one thing was fixed and one thing was
+written down. The design records this teaches from are `0020`, `0021`, `0022`, `0024`,
+`0025`.
+
+### Done this session
+
+**`notebooks/phase3_harness_step6_journal.ipynb`** — 46 cells, 19 code, 18
+smoke-tested in order (§11 is the live LLM). Clears the "no notebook for this chunk"
+item logged two entries down. Demo run: 800 apartments, multiplicative target
+(skew 1.64), 10 experiments over 5 tables — three encodings, a ratio transform, both
+target transforms, two model sizes — so every query has a real answer.
+
+Sections: the empty-run query first (declared columns, §2), then the cross-run
+questions (§4 encoding method, §5 target transform, §6 params), the two traps (§7
+metric direction, cv-vs-val), the no-leakage argument (§8), free/silent/after-finalize
+(§9), and episodes as the actual justification (§10).
+
+**Target transforms are taught here too**, via §5 rather than in their own notebook:
+`target_transform` is a column in `lb`, so "did log1p pay" *is* a journal query. That
+was the cheaper way to close the other half of the untaught chunk, and it makes `0021`'s
+argument from the far end — a per-experiment argument leaves a column to group by; a
+project-level setting would leave nothing and the question would be unanswerable.
+
+### The bug the notebook found
+
+**`explore_journal`'s `tables` frame reported zero columns added, for every table, in
+every run since it was written.** `_journal_frames` read `t.get("columns")`; journal
+table rows carry **`new_columns`** and have never had a `columns` key. Not a crash — a
+confident `0`, to the one question that frame exists to answer, on a field the
+agent-facing docstring advertises. One-word fix plus
+`test_a_table_reports_the_columns_it_added`.
+
+Worth noticing *how* it surfaced: six unit tests cover this tool and all of them pass
+either way, because none asserted a column count it had no independent reason to
+expect. The notebook asked "which tables were built and never trained on, and how big
+were they" with the answer known in advance. That is the argument for the notebook
+convention, and this is the first time it has paid in a bug rather than in prose.
+
+### Gotchas / open questions
+
+- **`notes` is dead weight, and unsafely so.** It comes from `journal["log"]`, which
+  **no agent-facing tool writes** — `journal.append_note` exists and nothing calls it.
+  Worse, unlike `lb` and `tables` its columns are *not* declared, so it is a `(0, 0)`
+  frame and `notes["hypothesis"]` raises `KeyError` — exactly the failure the declared
+  columns on `lb` were written to avoid. Harmless while always empty; a trap the day a
+  note tool lands. Either declare its columns or drop it from the namespace.
+- **The optimism number is queryable now, and it is bigger than the yardstick.** In
+  this demo every strong model has `val_score - cv_score` of 0.010–0.019 against a
+  `fold_spread` of ~0.008–0.012 — on all six. That is `0022` reproduced on a second,
+  synthetic dataset without touching Kaggle, and it is cheap to re-check anywhere.
+- **It does not sort by "did the encoder see the target".** The largest gap belongs to
+  a *frequency*-encoded table. The pattern that fits is "the better the fit on the work
+  half, the more of it fails to transfer" — worth remembering before blaming target
+  encoding for a val/cv gap.
+- **Notebooks from earlier phases are still stale** from the 0019 score shift. Step 6
+  is current; steps 1–5 and the phase-1/2 notebooks are not.
+- **Next is unchanged and now better motivated:** the derived brief. §10 states the
+  case in the notebook — the tool is discoverable from its docstring alone, but
+  orientation still eats ~1/3 of an episode, so the brief is complementary, not
+  optional.
+
 ## 2026-08-10 (latest) — Episodes work; the agent will not end one by itself
 
 **Machine:** MacBook Air | **Branch:** master | **214 tests pass** (no library
