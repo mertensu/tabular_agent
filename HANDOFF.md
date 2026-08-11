@@ -8,6 +8,66 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-11 (latest+2) — Rossmann: the data dictionary now has a channel
+
+**Machine:** MacBook Air | **Branch:** master | **236 tests pass.**
+
+**No decision record yet** — the channel is small and 0018-shaped, but if
+Rossmann becomes a real second dataset the `Customers` finding below deserves
+one. Flagging rather than deciding.
+
+### The finding, which matters more than the feature
+
+**`Customers` in Rossmann is a leak this harness cannot see.** It correlates
+**0.895** with `Sales` and **does not exist in `test.csv`** — you cannot know
+today's customer count when forecasting tomorrow's sales. Our validation half is
+drawn from `train.csv`, so the column is present there too: the agent trains on
+it, `val_score` improves, and **the leaderboard confirms the leak**. No fold
+boundary crossed, no encoder misfitted, every guard holding.
+
+This is the `Id` failure from run 1 (0019's gotcha) with a much bigger number.
+Nothing computable from the training file reveals it — the only evidence is the
+competition's data dictionary plus a test-set column list the harness never sees.
+
+### Done this session
+
+**1. The data dictionary channel.** `TaskSpec` gains `column_notes={col: text}`
+beside the `notes` field that has existed and reached nobody since phase 1.
+Per-column descriptions ride *on their column* inside `inspect_data`'s profile —
+next to dtype and cardinality, where the reader already is — and run-level
+`notes` comes back as `about_this_data`. A column nobody described carries no
+`description` key, so an undocumented dataset costs exactly nothing.
+
+**2. One line in the brief.** Since the prompt now tells a resumed episode to skip
+`inspect_data`, a fresh agent would never see the dictionary. The brief says it
+exists and where; it does not repeat it (O(columns) text in an O(1) brief, 0026).
+
+**3. `scripts/prep_rossmann.py`** — joins `store.csv` on `Store` (1017209 x 17),
+drops `Customers` with the reason recorded, settles `StateHoliday`'s mixed
+`"0"`/`0` typing, writes `train_joined.parquet`. Carries the full 17-column
+dictionary and an `ABOUT` blurb. **`rossmann_store_sales/` is now gitignored** —
+Kaggle data, same as `house_prices/`.
+
+### Gotchas / open questions — read before running this dataset
+
+- **The metric is wrong.** Kaggle scores RMSPE; `metrics.py` has no such metric,
+  so a run defaults to `rmsle`. Not implemented — it was your call to leave it.
+- **RMSPE ignores zero-sales rows; we do not.** 17% of rows, every one a closed
+  store (`Open == 0`). Dropping them changes what the model is *for*, so it is a
+  decision, not a cleanup.
+- **`split_on="Date"` is mandatory here** and has never been exercised before.
+  Verified working: `mode: ordered`, 813,767 work / 203,442 validation.
+- **`val_se` will understate uncertainty on this dataset** — the bootstrap assumes
+  i.i.d. validation rows and an ordered split is exactly not that (0028's caveat,
+  now with a dataset that triggers it).
+- **1M rows.** Every experiment costs far more than house-prices' 1460, and no
+  run has been attempted at this size.
+- **This is the second dataset 0028 needs** for the `min_gain_ratio` question, and
+  a good one: it has a genuine forward-in-time test set, so Kaggle can supply
+  ground truth the way it did for house-prices.
+- **`Date` is dropped before training** as non-numeric — date parts have to be
+  derived with `transform_features`. The column note says so.
+
 ## 2026-08-11 (latest+1) — `val_se` shipped; the bar it gates is deliberately still open
 
 **Machine:** MacBook Air | **Branch:** master | **233 tests pass.**

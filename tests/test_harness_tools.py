@@ -1363,6 +1363,82 @@ def test_it_answers_the_question_no_single_result_can(session):
     assert set(out["result"]) == {"frequency", "target"}
 
 
+def test_the_data_dictionary_reaches_the_agent(tmp_path):
+    """The only channel by which the *meaning* of a column reaches the agent.
+
+    Motivated by Rossmann: `Customers` correlates 0.895 with the target, is
+    absent from the competition's test set, and is therefore unusable at predict
+    time. Every guard in this harness holds while a model trains on it, and the
+    validation half — drawn from the same file — confirms the gain. Nothing
+    computable from the training data says otherwise; only the data's owner does.
+    """
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.default_rng(0)
+    n = 200
+    df = pd.DataFrame({
+        "store": rng.integers(1, 20, n),
+        "customers": rng.integers(50, 500, n),
+        "promo": rng.integers(0, 2, n),
+    })
+    df["sales"] = df["customers"] * 8 + df["promo"] * 300
+    path = tmp_path / "rossmann_like.csv"
+    df.to_csv(path, index=False)
+
+    spec = TaskSpec(
+        target="sales",
+        notes="One row per store per day. Rows where the store was closed score 0 "
+              "and are excluded from the real metric.",
+        column_notes={
+            "customers": "Number of customers that day. NOT available at predict "
+                         "time — it is not in the test set.",
+            "store": "Store identifier, 1115 of them. A real categorical, not a row number.",
+        },
+    )
+    out = inspect_data(RunSession(str(tmp_path / "run"), str(path), spec))
+
+    # Per-column, beside the dtype and cardinality the reader is already looking at.
+    assert "NOT available at predict time" in out["columns"]["customers"]["description"]
+    assert "not a row number" in out["columns"]["store"]["description"]
+    # A column nobody described carries no description key at all — an empty one
+    # would be a line of payload per column saying nothing.
+    assert "description" not in out["columns"]["promo"]
+    # And what has no column to attach to.
+    assert "excluded from the real metric" in out["about_this_data"]
+
+
+def test_no_dictionary_means_no_extra_payload(session):
+    """The common case is a dataset nobody documented, and it must cost nothing."""
+    out = inspect_data(session)
+    assert "about_this_data" not in out
+    assert all("description" not in c for c in out["columns"].values())
+
+
+def test_a_resumed_agent_is_told_the_documentation_exists(tmp_path):
+    """The prompt now tells a resumed episode to skip `inspect_data`, so without
+    this line the data dictionary is unreachable by an agent that was not there."""
+    import numpy as np
+    import pandas as pd
+    from tabular_agent.harness.brief import render_brief
+
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200)})
+    df["y"] = df["a"] * 3 + rng.normal(0, 0.1, 200)
+    path = tmp_path / "d.csv"
+    df.to_csv(path, index=False)
+
+    plain = RunSession(str(tmp_path / "r1"), str(path), TaskSpec(target="y"))
+    documented = RunSession(str(tmp_path / "r2"), str(path),
+                            TaskSpec(target="y", column_notes={"a": "the useful one"}))
+    for s in (plain, documented):
+        inspect_data(s)
+        train_tabular_model(s, model_type="baseline")
+
+    assert "documentation" not in render_brief(plain)
+    assert "documentation" in render_brief(documented)
+
+
 def test_every_experiment_carries_the_uncertainty_of_its_own_score(session):
     """0022's fix: the yardstick has to measure the quantity being ranked, and
     that quantity is `val_score`, so its standard error has to be on the row."""

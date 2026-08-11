@@ -19,6 +19,10 @@ _runs/
 # `house_prices/`: train.csv + test.csv from the house-prices-advanced-regression
 # competition; `train_no_id.csv` is train.csv minus the Id column.
 house_prices/
+# `rossmann_store_sales/`: train.csv + test.csv + store.csv from the
+# rossmann-store-sales competition. `train_joined.parquet` is built from them by
+# `scripts/prep_rossmann.py` — regenerate it rather than looking for it here.
+rossmann_store_sales/
 
 # Secrets — API keys live here and must never be committed.
 .secrets/

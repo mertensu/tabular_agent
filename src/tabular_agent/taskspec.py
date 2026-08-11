@@ -7,11 +7,33 @@ import pandas as pd
 
 @dataclass
 class TaskSpec:
+    """What the data's owner knows and the harness cannot work out for itself.
+
+    ``notes`` and ``column_notes`` are the data dictionary — the one channel by
+    which facts about the *meaning* of the data reach the agent. Everything else
+    here can be detected from the target; these two cannot be detected from
+    anything, which is exactly why they are worth carrying.
+
+    The failure they exist to prevent is not obscurity, it is a column that looks
+    usable and is not. A profile can say a column holds 1115 distinct integers; it
+    cannot say whether those are store identifiers worth encoding or row numbers
+    to discard, and it cannot say that a column present in training will simply
+    not exist at predict time. Both of those are facts about the world, and both
+    have already cost this project a run.
+    """
+
     target: str
     task_type: str | None = None
     metric: str | None = None
     positive_class: object | None = None
+    #: Free text about the dataset as a whole: how it was collected, what a row
+    #: is, which rows the real scoring ignores. For anything column-shaped use
+    #: `column_notes`, where it reaches the reader beside the column.
     notes: str | None = None
+    #: ``{column: what it means}``. Partial by design — describe the columns whose
+    #: meaning is not obvious and leave the rest alone; an entry that only restates
+    #: the column name is tokens spent on every run for nothing.
+    column_notes: dict[str, str] | None = None
     n_splits: int = 5
     seed: int = 42
 
@@ -23,6 +45,7 @@ class ResolvedSpec:
     metric: str
     positive_class: object | None
     notes: str | None
+    column_notes: dict[str, str] | None
     n_splits: int
     seed: int
 
@@ -55,6 +78,7 @@ def resolve_taskspec(spec: TaskSpec, y: pd.Series) -> ResolvedSpec:
         metric=metric,
         positive_class=spec.positive_class,
         notes=spec.notes,
+        column_notes=spec.column_notes,
         n_splits=spec.n_splits,
         seed=spec.seed,
     )

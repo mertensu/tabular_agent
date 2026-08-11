@@ -119,6 +119,20 @@ def render_brief(session: RunSession) -> str | None:
             f"(the run ends at {status['patience']})."
         )
 
+    # Read off the raw spec rather than `session.resolved()`, which would parse
+    # the source table to detect the task type — a file read at the top of every
+    # episode, on a dataset that may be hundreds of megabytes.
+    spec = session.spec
+    if spec.notes or spec.column_notes:
+        # A pointer, not the dictionary itself: it is O(columns) and the brief is
+        # O(1) by construction (0026). Worth the line because the prompt now tells
+        # a resumed agent to *skip* `inspect_data`, so without this the data's own
+        # documentation is unreachable by an agent that was not there for it.
+        lines.append(
+            "This dataset came with documentation — per-column descriptions and "
+            "what the data is — which `inspect_data` returns and nothing else has."
+        )
+
     idle = _never_trained(j)
     if idle:
         shown = ", ".join(idle[:MAX_LISTED_TABLES])

@@ -187,7 +187,7 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
     path = session.resolve_table(table)
     df = load_table(path)
     spec = session.resolved()
-    prof = profile_dataframe(df, target=spec.target)
+    prof = profile_dataframe(df, target=spec.target, column_notes=spec.column_notes)
 
     _, dropped = _feature_frame(df, spec.target)
     journal.set_task(
@@ -214,6 +214,11 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
         "columns": shown,
         "columns_truncated": truncated,
         "non_numeric_columns": dropped,
+        # Present only when the data's owner supplied it. Facts about the dataset
+        # as a whole — what a row is, which rows the real scoring ignores, how it
+        # was collected — that have no single column to attach to. Per-column
+        # descriptions ride on their columns in `columns` above instead.
+        **({"about_this_data": spec.notes} if spec.notes else {}),
         "note": (
             "Non-numeric columns are not usable by the models as-is; encode them "
             "with fit_encoding to bring them in — method='ordinal' (stating the "
