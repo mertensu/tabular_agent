@@ -33,11 +33,14 @@ Two of them run code you write, in a sandbox with no model libraries: what
 `transform_features` returns becomes columns, what `explore_experiment` returns
 is shown to you and thrown away.
 
-Order of work: `inspect_data` first, always, because it resolves the task type
-and the metric every later score is measured with. Then `train_tabular_model`
-with `model_type="baseline"`, before any real model. Then real models and the
-features to feed them, in whatever order the results argue for. `finalize_run`
-last.
+Order of work on a run that has not started: `inspect_data` first, because it
+resolves the task type and the metric every later score is measured with. Then
+`train_tabular_model` with `model_type="baseline"`, before any real model. Then
+real models and the features to feed them, in whatever order the results argue
+for. `finalize_run` last.
+
+If a run state follows, those first steps already happened and repeating them
+buys nothing. Start from the position it describes.
 
 `fit_encoding` and `transform_features` leave the table they read untouched, so
 every table you build stays available to extend or train on again, however it

@@ -82,6 +82,51 @@ def test_the_prompt_does_not_repeat_what_a_tool_docstring_already_says():
             assert words not in prompt, f"{name}'s docstring is repeated in the prompt"
 
 
+def test_the_run_state_reaches_the_model_only_once_there_is_a_run(tmp_path):
+    """The brief is wired as a *dynamic* system prompt, so it is rendered when the
+    episode starts rather than baked in when the agent is built.
+
+    Driven through `TestModel` because the wiring is the thing under test, not the
+    model: what matters is that a fresh agent on an existing `run_dir` is handed
+    the position, and that a run which has done nothing is handed nothing.
+    """
+    import numpy as np
+    import pandas as pd
+    from pydantic_ai.models.test import TestModel
+
+    from tabular_agent.harness.agent import Deps
+    from tabular_agent.harness.session import RunSession
+    from tabular_agent.harness.tools import inspect_data, train_tabular_model
+    from tabular_agent.taskspec import TaskSpec
+
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"area": rng.uniform(30, 160, 200), "rooms": rng.integers(1, 6, 200)})
+    df["price"] = df["area"] * 1000 + rng.normal(0, 5000, 200)
+    data = tmp_path / "d.csv"
+    df.to_csv(data, index=False)
+    session = RunSession(str(tmp_path / "run"), str(data), TaskSpec(target="price"))
+
+    def system_text(sess):
+        agent = build_agent(TestModel(call_tools=[]))
+        result = agent.run_sync("go", deps=Deps(session=sess))
+        return "\n".join(
+            part.content
+            for message in result.all_messages()
+            for part in message.parts
+            if part.__class__.__name__ == "SystemPromptPart"
+        )
+
+    assert "RUN STATE" not in system_text(session)
+
+    inspect_data(session)
+    train_tabular_model(session, model_type="baseline")
+
+    # A *fresh agent* on the same run dir: the episode boundary, in one call.
+    resumed = RunSession(session.run_dir, session.source_path, TaskSpec(target="price"))
+    text = system_text(resumed)
+    assert "RUN STATE" in text and "rmsle" in text and "Baseline: e1" in text
+
+
 def test_default_model_is_swappable():
     # Nothing about the harness is provider-specific; the model is one string.
     assert DEFAULT_MODEL.startswith("anthropic:")

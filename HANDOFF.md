@@ -8,6 +8,78 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-11 — The derived brief is built; it is not yet measured
+
+**Machine:** MacBook Air | **Branch:** master | **226 tests pass** (215 + 11).
+
+**Decision record: `0026-the-brief-is-rendered-not-remembered.md`. Accepted and
+implemented — the first record in a while that is not "not yet implemented" — but
+read the "What it costs" section before trusting it: the thing it claims is
+unmeasured.**
+
+### Done this session
+
+**1. `harness/brief.py` — `render_brief(session)`.** A `RUN STATE` block rendered
+from the journal: task, target, metric **and its direction**, the split, counts,
+baseline, best (plus the table it was trained on, looked up from the leaderboard
+row because `journal["best"]` is a pointer that does not carry it), the stop state,
+and tables built but never trained on. ~170 tokens, 9 lines.
+
+**2. Wired as a *dynamic* system prompt** (`@agent.system_prompt(dynamic=True)`),
+so it is rendered when the episode starts rather than when the agent is built.
+Returns `None` on a run where nothing has happened — deliberately, so a first
+episode is byte-identical to a run that never had episodes, which is what makes
+v6 and v7 comparable.
+
+**3. `SYSTEM_PROMPT`'s "`inspect_data` first, always" is scoped now.** It was a
+run-level rule obeyed *per episode* — one wasted call every time, flagged in
+0024 as the prompt's fault. It now applies to a run that has not started, and
+points at the run state for the rest. **No test can catch a regression here**; the
+only check is a live run's opening call.
+
+**4. `scripts/run_house_v7_brief.py`** — the experiment, written and **not run**.
+Controlled repeat of v6: same dataset, model, cap, budget, and prompts, including
+the resume prompt that still says "earlier episodes did things you have no memory
+of" even though the brief now contradicts it. Rewriting that sentence would improve
+the prompt and forfeit the comparison.
+
+**5. `notebooks/phase3_harness_step7_brief.ipynb`** — 29 cells, 13 code, 12
+smoke-tested in order (§9 is the live LLM).
+
+### The number this is all for, and it is still v6's
+
+    orientation per episode, v6 (no brief):   26%  50%  26%  43%
+
+That is what v7 has to move. **Three outcomes and the middle one is likeliest:**
+the share falls and the freed calls become experiments (the brief works); the share
+falls and the episode just ends sooner (cheaper, no more productive); or the share
+does not move, in which case **0026 is a well-argued no-op and the record should be
+marked as one** rather than quietly left standing.
+
+### Gotchas / open questions
+
+- **Running v7 costs API budget and has not been run.** It needs `config.env` and
+  roughly what v6 cost (~13 min, 90 requests). Nothing else in this session needs
+  it; the code and its tests stand on their own.
+- **The flatness test is the load-bearing one.** `test_the_brief_does_not_grow_with_the_run`
+  fakes 151 leaderboard rows and asserts the brief moves by <20 chars. It is the
+  only thing standing between this design and someone adding "recent experiments",
+  which is the natural next request and the thing that breaks it.
+- **An empty system-prompt part is still sent on a fresh run.** `render_brief`
+  returns `None` → the hook returns `""` → PydanticAI adds a zero-length
+  `SystemPromptPart`. Harmless with every provider tried; noted because it is
+  visible in transcripts and looks like a bug.
+- **Two things now describe the run's state** — the brief and `note` on every
+  training result. Deliberate (one is for a fresh agent, one for a working one) and
+  the first place to look if a run starts contradicting itself.
+- **0018's three prompt rules do not cover the brief**, which is entirely
+  run-specific and names a tool. 0026 argues that is a missing category rather than
+  a violation — `SYSTEM_PROMPT` is the rules of the game, the brief is the
+  position — but if that distinction stops holding, this is where the rot starts.
+- **Next:** run v7 and record the answer. Then the episode loop into `harness/`,
+  which per 0025 also means deciding where the "episodes on above ~35 experiments"
+  switch lives. Then `val_se` (0022).
+
 ## 2026-08-10 (latest+1) — `explore_journal` is taught, and writing it found a bug
 
 **Machine:** MacBook Air | **Branch:** master | **215 tests pass** (214 + one new).

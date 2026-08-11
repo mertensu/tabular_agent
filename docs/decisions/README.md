@@ -54,6 +54,8 @@ Vocabulary used throughout:
   *(accepted, not yet implemented; two supporting claims superseded by 0025)*
 - [0025 — Episodes buy feasibility, not cost](0025-episodes-buy-feasibility-not-cost.md)
   *(accepted, not yet implemented)*
+- [0026 — The brief is rendered, never accumulated](0026-the-brief-is-rendered-not-remembered.md)
+  *(accepted and implemented; unmeasured on a live run)*
 
 ### Keeping features honest
 

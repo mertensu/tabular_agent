@@ -13,6 +13,7 @@ import os
 from dataclasses import dataclass
 
 from . import tools
+from .brief import render_brief
 from .instructions import SYSTEM_PROMPT
 from .session import RunSession
 
@@ -168,6 +169,18 @@ def build_agent(model=DEFAULT_MODEL):
         # *processes* on one run dir still need the exclusive-create id claim.
         max_concurrency=1,
     )
+
+    @agent.system_prompt(dynamic=True)
+    def run_state(ctx: RunContext[Deps]) -> str:
+        """Where this run currently stands, for an agent that was not here for it.
+
+        Dynamic rather than baked into `SYSTEM_PROMPT` because it is a function of
+        the journal at the moment the episode starts, and an episode is a fresh
+        agent on a run it has no memory of (0024). Returns "" on a run where
+        nothing has happened, so a first episode is byte-identical to a run that
+        never had episodes at all.
+        """
+        return render_brief(ctx.deps.session) or ""
 
     @agent.tool
     def inspect_data(ctx: RunContext[Deps], table: str | None = None) -> dict:
