@@ -8,6 +8,109 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-11 (latest+6) — A decorative guard, a corrupted run, and the tool the agent keeps asking for
+
+**Machine:** MacBook Air | **Branch:** master | **255 tests pass.**
+
+**Decision record `0031`.** Runs v3/v4 are in `_runs/` (gitignored). **v4 was
+stopped by hand mid-run** at 3 experiments — nothing is in flight.
+
+### Read this first if you are picking up the next chunk
+
+Ulf's next step: **the `fit_*` family and/or row filtering.** Both are designed
+below. Everything else here is context for why.
+
+### 0031 — the guard that never guarded
+
+v3 died at experiment 8 holding **val 0.12344**, the best servable model any run
+has produced, on `OSError: Corrupt snappy compressed data`. The journal had four
+duplicate table ids (`t3`, `t7`, `t10`, `t13`), because two `fit_encoding` calls
+computed the same id and wrote the same parquet at once.
+
+**0008 set `max_concurrency=1` to prevent exactly this. That parameter limits
+concurrent agent *runs*, not tool calls.** It never did anything. It survived
+because models used to emit one tool call per message — and because
+`test_tool_calls_are_serialised` asserted the constructor argument had been
+passed rather than the property it was named for. Green throughout.
+
+Fixed in the primitives, where no framework setting can undo it and which also
+covers two processes on one run dir: `next_table_id` claims via
+`O_CREAT|O_EXCL`, `next_experiment_id` via `os.mkdir`, `save_parquet` writes
+tmp → fsync → `os.replace`. **Validated on v4: 0 duplicate ids.**
+
+### The cheapest open win: the agent is not using `log1p`
+
+| run | target transforms |
+|---|---|
+| v1 | `none` x16 — never once |
+| v2 | `none` x12 — never once |
+| v3 | `none` x4, `log1p` x3 — **and v3 scored best** |
+
+`rmspe` is a *relative* error metric; squared error on `log(Sales)` approximates
+it and is what every serious Rossmann solution does. Training on raw `Sales`
+optimises absolute error — the wrong objective. **The tool has existed since
+0021 and mostly goes unused.**
+
+Compounding it: models train on squared error over **all** rows including the 17%
+closed days with `Sales == 0`, while `rmspe` scores **only** non-zero rows. Wrong
+error type, and fitted on rows nobody grades.
+
+### What the agent actually asked for, and could not have
+
+v4's first attempt died in 2.5 minutes with zero experiments. It tried to build
+**`store_open_rate` and `store_promo_rate`** — per-store aggregates, the winner's
+main feature family. 0011's stability check refused them (correctly: they are
+batch-dependent), three refusals exhausted `transform_features`' retry budget, and
+`UnexpectedModelBehavior` killed the run.
+
+Two weaknesses, both fixed: the refusal message pointed at `fit_encoding`, **which
+cannot do this** — `fit_encoding` gives per-group statistics of the *target*, and
+these are per-group statistics of another column. And the driver now restarts a
+fresh agent on an `error` ending, as it already did for provider errors.
+
+Neither touches the gap. **The agent reaches for this unprompted and there is no
+tool.**
+
+### Design notes for the next chunk
+
+**A `fit_*` group-statistics tool.** The key simplification, and it is a big one:
+a per-group statistic of a **non-target** column needs *no out-of-fold discipline
+at all*. `store_open_rate` never touches `Sales`, so there is nothing to leak —
+fit it on the work half, store the mapping in the lineage, look it up at predict.
+Far simpler than `fit_encoding`. Sketch:
+
+    fit_group_stats(by=["Store"], value="Open", stat="mean")   -> Store_Open_mean
+
+Only the **time-windowed** variant is hard, and only when the value is the target:
+"last quarter's mean sales for this store" needs a cutoff, per-fold discipline,
+and a frozen version for predict (test rows have no history). Ship the easy half
+first; it covers what v4 asked for.
+
+**Row filtering.** `Open == 0` is 17% of rows, unscored by `rmspe`, and cannot be
+dropped today. The design point that makes this a decision rather than a patch:
+**a row filter would be the first pipeline step that is NOT replayed at predict
+time.** Every existing step is replayed — and it must not be here, because
+`_score_on_val` replays lineage over the validation rows and a filter would drop
+some, misaligning predictions from `y_val`; and at serve time every test row needs
+a prediction. So a filter is a *train-time-only* step and the lineage needs to
+know the difference. Nothing in `Pipeline` expresses that yet.
+
+Note this stays inside 0029's line: filtering *training* rows is modelling, and
+the validation half is untouched, so the exam does not move.
+
+### Gotchas
+
+- **v3's numbers are sound but its journal is not** — a losing write took its
+  lineage sidecar with it, so what was scored was self-consistent, but the journal
+  records a column living in a file that does not contain it.
+- **A claimed id is never released**, so ids stay unique and stop being
+  contiguous, and a crash between claim and write leaves a zero-byte parquet.
+- **Best servable result so far is v3's 0.12344**, against a Kaggle median of
+  0.11677 — but that median is each team's best of months of submissions (winner:
+  289), not one 20-minute run. Realistic ceiling with today's tools is ~0.12-0.13.
+- **No run has yet produced a `submission.csv`.** v1 shipped an unservable model,
+  v2 ran out of calls, v3 crashed, v4 was stopped by hand.
+
 ## 2026-08-11 (latest+5) — Rossmann ran three times; the leak is now refused, and we audited what we cannot express
 
 **Machine:** MacBook Air | **Branch:** master | **254 tests pass.**
