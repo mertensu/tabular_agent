@@ -205,10 +205,62 @@ def test_code_the_model_wrote_badly_is_retryable_too(tmp_path):
         _retryable(lambda: transform_features(s, code))
 
 
-def test_tool_calls_are_serialised(tmp_path):
-    """Parallel calls would race on the unlocked next_table_id/next_experiment_id."""
-    agent = build_agent()
-    assert agent._concurrency_limiter.max_running == 1
+def test_concurrent_id_claims_never_collide(tmp_path):
+    """The invariant the old test *named* and did not check.
+
+    It asserted `agent._concurrency_limiter.max_running == 1` — that a constructor
+    argument had been passed. The argument limits concurrent agent *runs*, not
+    concurrent tool calls, so the property in the test's name was false the whole
+    time it was green. Rossmann v3 paid for it: four duplicate table ids, a
+    parquet corrupted mid-write, and a dead run.
+
+    So this exercises the claim directly, from threads, and asserts what actually
+    has to hold — no two callers get the same id, whoever runs when.
+    """
+    import threading
+
+    from tabular_agent.harness import journal
+
+    run_dir = str(tmp_path / "run")
+    journal.load(run_dir)  # materialise an empty journal
+
+    for claim, prefix in ((journal.next_table_id, "t"), (journal.next_experiment_id, "e")):
+        got: list[str] = []
+        lock = threading.Lock()
+
+        def worker():
+            claimed = claim(run_dir)
+            with lock:
+                got.append(claimed)
+
+        threads = [threading.Thread(target=worker) for _ in range(12)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(set(got)) == len(got), f"{prefix} ids collided: {sorted(got)}"
+        assert all(g.startswith(prefix) for g in got)
+
+
+def test_a_table_write_is_all_or_nothing(tmp_path):
+    """A reader must see the old file or the new one, never a half-written one.
+
+    `journal.save` became atomic in August; the parquet files it *describes* did
+    not, and that is what corrupted a run — `OSError: Corrupt snappy compressed
+    data` on the next read.
+    """
+    import pandas as pd
+
+    from tabular_agent.io import load_table, save_parquet
+
+    path = str(tmp_path / "t1.parquet")
+    save_parquet(pd.DataFrame({"a": range(50)}), path)
+    save_parquet(pd.DataFrame({"a": range(50, 100)}), path)
+
+    assert load_table(path)["a"].tolist() == list(range(50, 100))
+    # No temporary files left behind to be mistaken for tables.
+    assert [p.name for p in tmp_path.iterdir()] == ["t1.parquet"]
 
 
 def test_a_real_bug_still_stops_the_run():

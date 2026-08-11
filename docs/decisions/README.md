@@ -72,6 +72,8 @@ Vocabulary used throughout:
 
 - [0007 — A bad argument is a correction, not the end of the run](0007-retryable-arguments.md)
 - [0008 — One tool call at a time](0008-serialise-tool-calls.md)
+  *(the danger is real; its mechanism was decorative — see 0031)*
+- [0031 — The serialisation guard was decorative; correctness moves into the primitives](0031-the-guard-was-decorative.md)
 - [0013 — A refusal is a return value, not an exception](0013-refusal-as-return-value.md)
 
 ### Knowing when to stop, and what worked

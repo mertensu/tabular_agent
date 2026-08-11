@@ -86,7 +86,37 @@ def set_split(run_dir: str, record: dict) -> dict:
 
 
 def next_table_id(run_dir: str) -> str:
-    return f"t{len(load(run_dir).get('tables', [])) + 1}"
+    """Claim the next free table id, atomically, by creating its file first.
+
+    Read-then-write is what this used to be, and it collided. Two `fit_encoding`
+    calls running at once each read ``len(tables)``, each computed the same `t7`,
+    each wrote `tables/t7.parquet`, and the second silently replaced the first —
+    four times in one Rossmann run, with the journal left claiming a column lives
+    in a file that does not contain it.
+
+    ``O_CREAT | O_EXCL`` makes the claim the same operation as the check: the
+    filesystem refuses the second creator, so the loser takes the next id instead
+    of sharing one. It holds across *processes* too, which no in-process lock and
+    no framework setting can — and the framework setting we were relying on
+    turned out to limit concurrent agent runs, not concurrent tool calls.
+
+    The empty placeholder is harmless: every writer goes through
+    :func:`io.save_parquet`, which replaces the path atomically.
+    """
+    tables_dir = os.path.join(run_dir, "tables")
+    os.makedirs(tables_dir, exist_ok=True)
+    n = len(load(run_dir).get("tables", [])) + 1
+    while True:
+        try:
+            fd = os.open(
+                os.path.join(tables_dir, f"t{n}.parquet"),
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            )
+        except FileExistsError:
+            n += 1
+            continue
+        os.close(fd)
+        return f"t{n}"
 
 
 def append_table(run_dir: str, row: dict) -> dict:
@@ -123,7 +153,27 @@ def update_table(run_dir: str, path: str, fields: dict) -> dict:
 
 
 def next_experiment_id(run_dir: str) -> str:
-    return f"e{len(load(run_dir)['leaderboard']) + 1}"
+    """Claim the next free experiment id by creating its directory, atomically.
+
+    Same race as :func:`next_table_id` and a worse outcome: two concurrent
+    training calls computing the same `e7` would write their fold models, OOF
+    predictions and `meta.json` into one directory, so the artifacts backing a
+    leaderboard row would belong to a different experiment than the row does —
+    and `finalize_run` bundles from those artifacts.
+
+    ``os.mkdir`` raises if the directory exists, which makes the claim and the
+    check the same operation.
+    """
+    experiments_dir = os.path.join(run_dir, "experiments")
+    os.makedirs(experiments_dir, exist_ok=True)
+    n = len(load(run_dir)["leaderboard"]) + 1
+    while True:
+        try:
+            os.mkdir(os.path.join(experiments_dir, f"e{n}"))
+        except FileExistsError:
+            n += 1
+            continue
+        return f"e{n}"
 
 
 def append_experiment(run_dir: str, row: dict) -> dict:

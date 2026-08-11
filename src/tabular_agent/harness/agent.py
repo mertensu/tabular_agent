@@ -158,17 +158,26 @@ def build_agent(model=DEFAULT_MODEL):
         # run and discards every experiment already completed, which is a brutal
         # price for two bad arguments in a run that makes dozens of calls.
         retries=TOOL_RETRIES,
-        # One tool call at a time. A model may put several calls in one message,
-        # and PydanticAI would run them concurrently — but the id claims
-        # (`next_table_id`/`next_experiment_id`) read the journal and write it
-        # back unlocked, so two parallel calls can claim the same `t1` and race
-        # on the same parquet, or the same `e1` and overwrite an experiment's
-        # artifacts silently. Costs parallelism we do not benefit from anyway:
-        # each tool call is seconds of local compute, not a network wait.
-        # This is the cheap half of the fix and it is per-Agent only; two
-        # *processes* on one run dir still need the exclusive-create id claim.
-        max_concurrency=1,
     )
+    # NOTE ON CONCURRENT TOOL CALLS (0031). A model may put several calls in one
+    # message, and PydanticAI runs those concurrently by default.
+    #
+    # This constructor used to pass `max_concurrency=1` with a comment claiming it
+    # meant "one tool call at a time". It does not — it limits concurrent agent
+    # *runs*. The error was invisible for months because earlier models emitted
+    # one call per message, and Rossmann v3 found it: four duplicate table ids and
+    # a parquet corrupted mid-write, killing a run that held the best model any
+    # run had produced.
+    #
+    # The fix is deliberately *not* a setting here. Correctness now lives in the
+    # primitives — `journal.next_table_id` and `next_experiment_id` claim by
+    # exclusive create, `io.save_parquet` replaces atomically — so concurrent
+    # calls are safe rather than merely unlikely. That also covers two *processes*
+    # sharing a run dir, which no in-process setting can.
+    #
+    # A driver that wants ordering as well can wrap its run in
+    # `agent.parallel_tool_call_execution_mode("sequential")`; nothing depends on
+    # it for correctness.
 
     @agent.system_prompt(dynamic=True)
     def run_state(ctx: RunContext[Deps]) -> str:
