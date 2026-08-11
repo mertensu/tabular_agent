@@ -175,10 +175,160 @@ class OrdinalEncoder:
         return enc
 
 
+#: Separator joining a multi-column group key into the single string a JSON
+#: object can use as a name. A control character rather than ``"_"`` or ``"|"``
+#: because it cannot appear in a category label, so ``("a_b", "c")`` and
+#: ``("a", "b_c")`` stay distinct keys instead of colliding into one group.
+_KEY_SEP = "\x1f"
+
+#: The statistics a group may be summarised by. A fixed menu rather than an
+#: arbitrary callable: the encoder is serialized and replayed at predict time, so
+#: whatever computes the number has to survive a round trip through JSON, and a
+#: name does while a lambda does not.
+GROUP_STATS = ("mean", "median", "std", "min", "max", "sum", "count", "nunique")
+
+#: Statistics that scale with the size of the group. For a group the fit never
+#: saw, zero is the honest answer to "how much of it was there" — the same
+#: reasoning as :class:`FrequencyEncoder`'s unseen-means-zero. The remaining
+#: (intensive) statistics have no such answer, so they fall back to the
+#: population value instead.
+_EXTENSIVE_STATS = frozenset({"sum", "count", "nunique"})
+
+
+class GroupStatsEncoder:
+    """Per-group summary of *another column*, learned once and looked up later.
+
+    The missing third case. :class:`TargetEncoder` learns a per-group statistic
+    of the **target**; :func:`~tabular_agent.transform.transform_features` does
+    row-local arithmetic on the row's **own** values. Neither expresses "what is
+    typical for the group this row belongs to" — the average basket size for this
+    customer, the median duration for this route, how often this device is
+    active — which is a feature family every panel-shaped dataset has and which
+    the free-code path cannot produce.
+
+    It cannot, because a ``groupby(...).transform("mean")`` written in
+    ``transform_features`` recomputes the mean from whatever rows are in the
+    frame. That is batch-dependent by construction: one row alone gets its own
+    value back, and 0011's stability check rejects it — correctly. What makes it
+    legal here is that the group's number is **fitted once and stored**, so a
+    single row maps to the same value a million rows would.
+
+    Two consequences worth stating, because they are why this is useful rather
+    than merely allowed:
+
+    * The value column does **not** have to exist at predict time. Only the
+      ``by`` columns are read at lookup, so a quantity you can measure
+      historically but not on the day you predict becomes a legitimate feature —
+      as its group's history, never as itself.
+    * A group absent from the fit gets ``default_``: zero for the extensive
+      statistics (see :data:`_EXTENSIVE_STATS`), the population statistic
+      otherwise.
+
+    Why the value column is never assumed target-independent, and so why
+    :func:`fit_group_stats` always takes the out-of-fold path: a column
+    correlated with the target makes its per-group mean *nearly* a per-group mean
+    of the target, and computing it including the row's own contribution is
+    target encoding with the guard removed. Large groups hide it — a row moves a
+    thousand-row group's mean by a thousandth — but group size is a property of
+    the data, not of this class, and nothing here can inspect the correlation to
+    decide.
+    """
+
+    kind = "group_stats"
+
+    def __init__(self, by: list[str], value: str, stat: str = "mean"):
+        self.by = [str(c) for c in by]
+        self.value = str(value)
+        self.stat = str(stat)
+        if not self.by:
+            raise ValueError("by must name at least one column to group on")
+        if self.value in self.by:
+            raise ValueError(
+                f"value column {self.value!r} is also in by={self.by}: grouping a "
+                "column by itself gives one distinct value per group and no signal"
+            )
+        if self.stat not in GROUP_STATS:
+            raise ValueError(
+                f"unknown stat {self.stat!r}; use one of {', '.join(GROUP_STATS)}"
+            )
+        self.mapping_: dict[str, float] = {}
+        self.default_: float | None = None
+
+    @property
+    def output_column(self) -> str:
+        """The one column this adds, named after everything that defines it.
+
+        ``by`` + value + stat is exactly the encoder's identity, so two different
+        aggregations can never land on the same column name and silently
+        overwrite one another when both are added to the same table.
+        """
+        return "_".join([*self.by, self.value, self.stat])
+
+    def _keys(self, df: pd.DataFrame) -> pd.Series:
+        missing = [c for c in self.by if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"cannot look up group statistics: the grouping columns {missing} "
+                f"are not in this frame. These are read at predict time as well as "
+                f"at fit time, so they have to exist in both."
+            )
+        keys = df[self.by[0]].astype(str)
+        for col in self.by[1:]:
+            keys = keys + _KEY_SEP + df[col].astype(str)
+        return keys
+
+    def fit(self, df: pd.DataFrame, y=None) -> "GroupStatsEncoder":
+        if self.value not in df.columns:
+            raise ValueError(
+                f"value column {self.value!r} is not in this frame; columns are "
+                f"{list(df.columns)}"
+            )
+        stats = df.groupby(self._keys(df).to_numpy(), sort=False)[self.value].agg(self.stat)
+        # NaN groups are dropped rather than stored: a one-row group has no
+        # standard deviation, and leaving it out means the lookup falls through
+        # to `default_` — the same treatment an unseen group gets, which is what
+        # "no usable estimate for this group" should mean in both cases.
+        self.mapping_ = {
+            str(k): float(v) for k, v in stats.items() if pd.notna(v)
+        }
+        if self.stat in _EXTENSIVE_STATS:
+            self.default_ = 0.0
+        else:
+            population = df[self.value].agg(self.stat)
+            self.default_ = None if pd.isna(population) else float(population)
+        return self
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        out = df.copy()
+        mapped = self._keys(df).map(self.mapping_)
+        out[self.output_column] = pd.to_numeric(mapped, errors="coerce").astype(float)
+        if self.default_ is not None:
+            out[self.output_column] = out[self.output_column].fillna(self.default_)
+        return out
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": self.kind,
+            "by": self.by,
+            "value": self.value,
+            "stat": self.stat,
+            "mapping": self.mapping_,
+            "default": self.default_,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "GroupStatsEncoder":
+        enc = cls(d["by"], d["value"], d["stat"])
+        enc.mapping_ = dict(d["mapping"])
+        enc.default_ = d["default"]
+        return enc
+
+
 ENCODER_CLASSES: dict[str, type] = {
     "target": TargetEncoder,
     "frequency": FrequencyEncoder,
     "ordinal": OrdinalEncoder,
+    "group_stats": GroupStatsEncoder,
 }
 
 
@@ -229,6 +379,36 @@ def fit_encoding(df, columns, method="target", *, y=None, folds=None,
     raise ValueError(
         f"unknown encoding method: {method!r} (use 'target', 'frequency' or 'ordinal')"
     )
+
+
+def fit_group_stats(df, by, value, stat="mean", *, folds):
+    """Per-group statistics of a column, fitted out-of-fold (the tool entry point).
+
+    Returns ``(train_features, final_encoder)`` on the same contract as
+    :func:`fit_encoding`: the frame is what the model may **train** on, the
+    encoder is what runs at **predict**.
+
+    ``folds`` is required and there is no way to opt out of it. The alternative
+    — deciding per call whether the value column is target-correlated enough to
+    need holding out — is a judgement the caller would have to get right silently
+    on every column, and getting it wrong reintroduces target leakage under a
+    name that does not mention the target. One pass per fold is cheap; a silent
+    leak is not. See :class:`GroupStatsEncoder` for why the question arises at
+    all.
+
+    Under forward-chaining folds the first block is validated by nothing, so
+    those rows keep ``NaN`` — the same gap out-of-fold target encoding leaves,
+    and for the same reason.
+    """
+    enc = GroupStatsEncoder(by, value, stat)
+    column = enc.output_column
+    oof = pd.DataFrame(index=df.index)
+    oof[column] = np.nan
+    position = oof.columns.get_loc(column)
+    for tr, va in folds:
+        fold_enc = GroupStatsEncoder(by, value, stat).fit(df.iloc[tr])
+        oof.iloc[va, position] = fold_enc.transform(df.iloc[va])[column].to_numpy()
+    return oof, enc.fit(df)
 
 
 def oof_target_encode(df, y, columns, folds, smoothing: float = 10.0):

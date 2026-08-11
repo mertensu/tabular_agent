@@ -8,6 +8,106 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-11 (latest+7) — Both gaps closed; the run used the wrong one, and it did not help
+
+**Machine:** MacBook Air | **Branch:** master | **291 tests pass** (255 + 36).
+
+**Decision record `0032`.** Run is `_runs/rossmann_v5` (gitignored) — **finished
+cleanly, and it is the first Rossmann run to finalize itself and write a
+`submission.csv`** (41088 rows, zero negative predictions).
+
+### Built
+
+**`fit_group_stats(by, value, stat)`** — per-group statistics of a *non-target*
+column, fitted once into the lineage sidecar and looked up at predict. `<by>_<value>_<stat>`,
+one column. **Always out-of-fold, no opt-out**: the tool cannot tell whether the
+value column is a proxy for the target, and group size hides that leak rather than
+removing it. The payoff is that the *value* column need not exist at predict time —
+only `by` does — so a column 0030 could only refuse becomes usable as its group's
+history.
+
+**`filter_rows(code)`** — `keep_rows(df)` returns a boolean **mask**. The rows are
+dropped once, when the table is written, and the lineage step carries
+`train_only: True` so `Pipeline.transform` skips it. That flag is load-bearing:
+`transform` has exactly two callers, `_score_on_val` (which would misalign
+predictions against targets, and grade a filtered experiment on an easier exam) and
+`predict_bundle` (which owes an answer for every row). Third sandbox mode
+(`run_filter`); `rows.py` holds the argument.
+
+Two exemptions follow from "evaluated once, never replayed": the filter **may read
+the target** (0009's reason does not apply to code that is never re-run) and **may
+be batch-dependent** (nothing for it to disagree with). It is the only agent code
+here needing no stability check.
+
+Also: `transform.py`'s stability refusal no longer says a per-group aggregate of
+another column "cannot be built this way" — that sentence sent v4 into the retry
+loop that killed it. It names `fit_group_stats` now.
+
+### The result, and it refutes the premise this was prioritised on
+
+14 experiments, 21.1 min, best `e13` **0.13760** rmspe vs baseline 0.44541.
+(v3's best servable was 0.12344; Kaggle median 0.11677.)
+
+**`filter_rows` was used unprompted, twice** — the docstring was the whole channel.
+The second use is a clean A/B:
+
+| | table | features | model | val_score |
+|---|---|---|---|---|
+| `e8` | `t9` | 29 | catboost/log1p | 0.15589 |
+| `e10` | `t13` = `t9` + filter | **same 29** | **same** | 0.15924 |
+
+`vs_source_table -0.00336` on a `fold_spread` of ~0.07. **Dropping the 17% of rows
+`rmspe` does not score cost nothing and gained nothing** — a twentieth of the
+noise. The agent read that correctly and dropped the branch.
+
+Two earlier entries here called row filtering "the cheapest gap to close, biggest
+effect here", from the 17% figure alone. **Wrong, and the reason was never argued:
+`Open` is a feature.** The model already learns "closed → 0", so removing those
+rows takes information away and returns nothing. The step-8 notebook reproduces
+this independently on synthetic data. The capability is still right to have — on
+generality, not on this dataset's 17%.
+
+**`fit_group_stats` was never called.** Zero calls in 69 across both attempts. The
+tool the agent *asked for* in v4 went untouched; the tool nobody asked for got used
+twice. Not proof it is unwanted (n=1, and `Store_te` already covers much of the
+ground) — but it is the fourth time changing what the agent is *told* failed to
+change what it *does* (0024, 0027, 0028).
+
+### Shipped alongside
+
+- `docs/decisions/0032`, indexed in the decisions README.
+- `notebooks/phase3_harness_step8_rows_and_groups.ipynb` — 43 cells, 24 code, all
+  smoke-tested in order bar the two live-LLM ones. **Its filter demo loses**
+  (`cv` 272→113 while `val` 132→1580) and the notebook teaches that rather than
+  hiding it: two numbers over two populations, exam unmoved.
+- `tests/test_group_stats.py`, `tests/test_rows.py`,
+  `tests/test_harness_rows_and_groups.py`.
+- `scripts/run_rossmann.py` → `rossmann_v5`, plus `summarise_new_tools`.
+
+### Gotchas
+
+- **`cv_score` changes meaning under a filter** and `val_score` does not. The note
+  says so; two numbers on one row measuring different populations will get compared
+  anyway. This is exactly what confused the notebook demo at first reading.
+- **Attempt 1 died on `explore_experiment` exceeding its retry budget** —
+  `UnexpectedModelBehavior`, v4's failure shape in a new tool. Restart-on-error
+  salvaged it. That guard is now load-bearing rather than a nicety.
+- **The first `filter_rows` use was confounded**: the agent stacked four tables on
+  top before training, so `vs_source_table` was null and the branch's bad score said
+  nothing about the filter. It self-corrected later, but a tool whose effect is only
+  visible in a controlled pair is easy to misjudge once.
+- **Out-of-fold group stats inherit the NaN block** under forward chaining — same
+  gap as OOF target encoding, now on a second column family.
+- **The agent narrated the stop rule at itself** in its summary ("the harness
+  considered these improvements as being within noise") and miscounted its own
+  experiments (said 10, ran 14).
+- **Ten tools now**, up from eight. 0012's smallness argument gets a little thinner
+  each time.
+- **Next:** the submission is unscored — put `_runs/rossmann_v5/submission.csv`
+  through Kaggle and we get the honest number behind 0.13760. Then either the
+  time-windowed group aggregate (the deep one, still unbuilt) or `min_gain_ratio`,
+  which now has its second dataset.
+
 ## 2026-08-11 (latest+6) — A decorative guard, a corrupted run, and the tool the agent keeps asking for
 
 **Machine:** MacBook Air | **Branch:** master | **255 tests pass.**

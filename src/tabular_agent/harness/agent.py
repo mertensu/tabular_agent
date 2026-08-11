@@ -139,7 +139,7 @@ def _retryable(call):
 
 
 def build_agent(model=DEFAULT_MODEL):
-    """An agent whose *entire* tool surface is the eight functions below.
+    """An agent whose *entire* tool surface is the ten functions below.
 
     ``model`` is either a PydanticAI model string (``"anthropic:..."``,
     ``"openai:..."``) or a ``Model`` object — e.g. from :func:`gateway_model`,
@@ -240,6 +240,78 @@ def build_agent(model=DEFAULT_MODEL):
                 smoothing=smoothing,
             )
         )
+
+    @agent.tool
+    def fit_group_stats(
+        ctx: RunContext[Deps],
+        by: list[str],
+        value: str,
+        stat: str = "mean",
+        table: str | None = None,
+    ) -> dict:
+        """Summarise a column per group — the group's typical value, as a new column.
+
+        For "what is normal for this customer / route / location": the average,
+        median or spread of some column across all the rows sharing a key. The
+        same thing written as `groupby(...).transform("mean")` in
+        `transform_features` is rejected, because that recomputes the number from
+        whatever rows are in the frame; here it is fitted once and looked up, so
+        a single row gets the same feature it would in a batch of a million.
+
+        Always fitted out of fold, so a row never contributes to the statistic it
+        receives. Adds one column named `<by>_<value>_<stat>`.
+
+        `value` does not need to exist at predict time — only `by` does. That is
+        what makes this the way to use a quantity you can only measure after the
+        fact: as its group's history, never as itself. Drop the column itself
+        before training if it will not be there.
+
+        Args:
+            by: Column(s) forming the group key. These are read at predict time,
+                so they must exist then.
+            value: The column being summarised. Not the target — a per-group
+                target mean is `fit_encoding(method="target")`.
+            stat: One of "mean", "median", "std", "min", "max", "sum", "count",
+                "nunique".
+            table: Path to the source table. Omit to use the run's work table.
+        """
+        return _retryable(
+            lambda: tools.fit_group_stats(
+                ctx.deps.session, by=by, value=value, stat=stat, table=table
+            )
+        )
+
+    @agent.tool
+    def filter_rows(
+        ctx: RunContext[Deps],
+        code: str,
+        table: str | None = None,
+    ) -> dict:
+        """Write a table with fewer rows, to train on a subset — never to score one.
+
+        Use when some rows should not be learned from: rows the metric does not
+        score, rows from a regime you are not being asked to predict, outliers
+        whose error swamps the fit. This is the only step that does **not** run at
+        predict time — a served model must answer for every row it is given — so
+        it changes what the model learns from and nothing about how it is graded.
+
+        `val_score` is still measured on the whole held-back half, so a filtered
+        experiment stays directly comparable to an unfiltered one. `cv_score` does
+        not: it becomes the mean over the kept rows only.
+
+        Args:
+            code: Python defining `keep_rows(df)`, returning a **boolean Series**
+                — one value per row, True to keep, indexed like `df`. Unlike
+                `transform_features`, `df` here **does** include the target
+                column, and the code may use whole-column statistics: it is
+                evaluated once and never replayed. Example:
+
+                    def keep_rows(df):
+                        return (df["is_active"] == 1) & (df["amount"] > 0)
+
+            table: Path to the source table. Omit to use the run's work table.
+        """
+        return _retryable(lambda: tools.filter_rows(ctx.deps.session, code, table=table))
 
     @agent.tool
     def transform_features(

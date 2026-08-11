@@ -21,12 +21,14 @@ import pandas as pd
 
 from ..cv import make_folds
 from ..encoders import fit_encoding as _fit_encoding
+from ..encoders import fit_group_stats as _fit_group_stats
 from ..inspect import profile_dataframe
 from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..report import build_report, write_report
+from ..rows import select_rows
 from ..sandbox import SandboxError, run_readonly
 from ..target import TARGET_TRANSFORMS, invert_target
 from ..transform import transform_features as _transform_features
@@ -35,6 +37,11 @@ from .session import RunSession
 
 #: Column-level detail is capped so a wide table cannot blow up the context.
 MAX_REPORTED_COLUMNS = 60
+
+#: Absolute floor on what a row filter may leave behind, on top of the
+#: fold-count floor. Fewer rows than this is not a smaller training set, it is a
+#: predicate that went wrong — and the resulting table exists only to be refused.
+MIN_FILTERED_ROWS = 10
 
 
 def _lineage_path(table_path: str) -> str:
@@ -464,6 +471,227 @@ def fit_encoding(
                 else "The fitted encoder is kept in the table's lineage and replays at "
                 "predict time."
             )
+        ),
+    }
+
+
+def fit_group_stats(
+    session: RunSession,
+    by: list[str],
+    value: str,
+    stat: str = "mean",
+    table: str | None = None,
+) -> dict:
+    """Summarise a column per group into a new feature table (the fitted aggregate).
+
+    "What is typical for the group this row belongs to" — the average for this
+    customer, the median for this route, how busy this location usually is. The
+    obvious way to write it, ``groupby(...).transform("mean")`` inside
+    ``transform_features``, is refused and should be: that recomputes the number
+    from whatever rows are in the frame, so one row alone gets a different
+    feature than the same row in a batch. Here the group's number is fitted once
+    and **stored in the table's lineage**, so the lookup is identical at any batch
+    size.
+
+    Always out-of-fold, with no way to turn it off. A value column correlated
+    with the target makes its per-group mean nearly a per-group mean of *the
+    target*, and including the row's own contribution would be target encoding
+    with the guard off. Whether that matters depends on how many rows a group has
+    — which is a property of the data, not something this tool can check — so the
+    honest default is the safe one.
+
+    The value column does not have to exist at predict time; only the ``by``
+    columns are read at lookup. That is the point: a quantity measurable in
+    history but not on the day you predict is usable *as its group's history*.
+    It is still not usable as itself, so drop it before training if the run's
+    serving schema says it will not be there.
+    """
+    path = session.resolve_table(table)
+    spec = session.resolved()
+    df = load_table(path)
+
+    by = list(by)
+    missing = [c for c in [*by, value] if c not in df.columns]
+    if missing:
+        raise ValueError(f"columns not in {session.rel(path)}: {missing}")
+    if value == spec.target:
+        raise ValueError(
+            f"{value!r} is the target column. A per-group statistic of the target is "
+            "target encoding, which has its own tool because it needs smoothing as "
+            "well as out-of-fold fitting: fit_encoding(columns=[...], method='target')."
+        )
+    if spec.target in by:
+        raise ValueError(
+            f"refusing to group by the target column {spec.target!r}: the group key "
+            "has to exist at predict time and the target never does"
+        )
+    # Checked here rather than at training, because this failure is about the
+    # *key*, not the feature. A group statistic keyed on a column that will not
+    # exist can never be looked up, so the table would be built, trained on, and
+    # refused as unservable three calls later for a reason stated here in one.
+    unavailable_keys = [
+        c for c in by if c in _unavailable_at_predict_time(session, df)
+    ]
+    if unavailable_keys:
+        raise ValueError(
+            f"cannot group by {unavailable_keys}: these columns will not exist when a "
+            "prediction is asked for, so the stored statistics could never be looked "
+            "up. Group by a column that will be there."
+        )
+
+    folds = make_folds(df[spec.target], spec.task_type, n_splits=spec.n_splits,
+                       seed=spec.seed, order=_fold_order(session, df))
+    train_features, encoder = _fit_group_stats(df, by, value, stat, folds=folds)
+
+    out = df.join(train_features)
+    table_id = journal.next_table_id(session.run_dir)
+    out_path = session.ctx.path("tables", f"{table_id}.parquet")
+    save_parquet(out, out_path)
+
+    lineage = _load_lineage(path, spec.task_type)
+    lineage.add_encoder(encoder)
+    with open(_lineage_path(out_path), "w") as f:
+        json.dump(lineage.to_dict(), f, indent=2)
+
+    new_columns = list(train_features.columns)
+    journal.append_table(session.run_dir, {
+        "id": table_id,
+        "path": session.rel(out_path),
+        "source_table": session.rel(path),
+        "method": "group_stats",
+        "group_by": by,
+        "value_column": value,
+        "stat": stat,
+        "new_columns": new_columns,
+        "n_steps": len(lineage.steps),
+    })
+
+    column = new_columns[0]
+    n_missing = int(out[column].isna().sum())
+    value_unavailable = value in _unavailable_at_predict_time(session, df)
+    note = (
+        "Pass this table to train_tabular_model to use the new column. The values "
+        "here are out-of-fold; the statistics fitted on all rows are kept in the "
+        "table's lineage and are what a prediction looks up."
+    )
+    if value_unavailable:
+        note += (
+            f" {value!r} itself will not exist at predict time, so training on this "
+            f"table as it stands is refused — build one without it first: "
+            f"transform_features with df.drop(columns=['{value}'], errors='ignore'). "
+            f"The new column survives that, because it no longer needs {value!r}."
+        )
+    return {
+        "table": session.rel(out_path),
+        "new_columns": new_columns,
+        "n_groups": len(encoder.mapping_),
+        "n_rows": int(len(out)),
+        "source_table": session.rel(path),
+        # Out-of-fold values are missing wherever a row was in no fold's held-out
+        # block, which under an ordered split is the whole first period. Said
+        # plainly because the column looks broken otherwise, and the models
+        # handle it — this is a real "no estimate", not a zero.
+        "n_rows_without_value": n_missing,
+        "note": note,
+    }
+
+
+def filter_rows(
+    session: RunSession,
+    code: str,
+    table: str | None = None,
+    timeout: float = 30.0,
+) -> dict:
+    """Train on fewer rows: write a table with the rows a predicate keeps.
+
+    The only step in the harness that is **not** replayed at prediction time, and
+    it must not be — the validation half is scored by replaying lineage over its
+    rows, and a filter there would drop some and misalign the score; a served
+    model has to answer for every row it is given. So the rows are dropped once,
+    here, and the lineage records the filter as train-time-only.
+
+    What that buys: rows the real metric never scores, rows from a regime the
+    model is not being asked to predict, and outliers whose squared error drowns
+    out everything else, can all be kept out of the fit without touching how the
+    model is graded.
+
+    Unlike ``transform_features`` this code **can** see the target, and unlike
+    ``transform_features`` it needs no stability check. Both follow from the same
+    fact: the predicate is evaluated exactly once, against one frame, and never
+    again. Nothing it computes is replayed on a row that has no target, and it
+    cannot disagree with a version of itself run on a different batch.
+
+    Only the work half is affected. The validation half is untouched, so
+    ``val_score`` still measures the same exam and a filtered experiment stays
+    comparable to an unfiltered one. ``cv_score`` does not: it is now the mean
+    over the kept rows only.
+    """
+    path = session.resolve_table(table)
+    spec = session.resolved()
+    df = load_table(path)
+
+    kept, summary = select_rows(df, code, timeout=timeout)
+
+    if summary["n_dropped"] == 0:
+        raise ValueError(
+            f"this predicate kept all {summary['n_rows']} rows, so the table would be "
+            "a copy of its source. Either the condition is not the one you meant, or "
+            "there is nothing to drop here — train on the source table instead."
+        )
+    # A fold needs rows on both sides of it, and an ordered run needs one more
+    # block than it has folds. Below that the table cannot be trained on at all,
+    # and a table that exists only to be refused later is worse than a refusal now.
+    floor = max(spec.n_splits + 1, MIN_FILTERED_ROWS)
+    if summary["n_kept"] < floor:
+        raise ValueError(
+            f"this predicate kept {summary['n_kept']} of {summary['n_rows']} rows, which "
+            f"is below the {floor} a {spec.n_splits}-fold cross-validation needs. Filtering "
+            "removes rows from the fit, not from the problem — keep the condition to "
+            "rows the model genuinely should not learn from."
+        )
+
+    table_id = journal.next_table_id(session.run_dir)
+    out_path = session.ctx.path("tables", f"{table_id}.parquet")
+    # Reset, because every other table in the run is written from a fresh index
+    # and `train_cv` addresses folds positionally. A gappy index would still work
+    # here and would be a trap the first time something aligned by label.
+    save_parquet(kept.reset_index(drop=True), out_path)
+
+    lineage = _load_lineage(path, spec.task_type)
+    lineage.add_filter(code)
+    with open(_lineage_path(out_path), "w") as f:
+        json.dump(lineage.to_dict(), f, indent=2)
+
+    journal.append_table(session.run_dir, {
+        "id": table_id,
+        "path": session.rel(out_path),
+        "source_table": session.rel(path),
+        "method": "filter",
+        "code": code,
+        # A filter adds nothing, and the key has to be present anyway: every
+        # reader of `tables` (attribution, columns_by_table, explore_journal)
+        # reads `new_columns` and would otherwise report this table as missing
+        # rather than as empty-by-construction.
+        "new_columns": [],
+        "n_rows": int(summary["n_kept"]),
+        "n_dropped": int(summary["n_dropped"]),
+        "n_steps": len(lineage.steps),
+    })
+
+    return {
+        "table": session.rel(out_path),
+        "n_rows": int(summary["n_kept"]),
+        "n_rows_before": int(summary["n_rows"]),
+        "n_dropped": int(summary["n_dropped"]),
+        "fraction_dropped": round(summary["n_dropped"] / summary["n_rows"], 4),
+        "source_table": session.rel(path),
+        "new_columns": [],
+        "note": (
+            "Pass this table to train_tabular_model to fit on the kept rows only. "
+            "The filter is recorded as train-time-only and does not run at predict "
+            "time, so val_score is still measured on the whole validation half and "
+            "stays comparable to experiments on the unfiltered table. cv_score is "
+            "not: it is now the mean over the kept rows."
         ),
     }
 
@@ -1140,7 +1368,9 @@ _LB_COLUMNS = [
     "n_features",
 ]
 
-_TABLE_COLUMNS = ["id", "path", "method", "source_table", "n_columns", "columns", "code"]
+_TABLE_COLUMNS = [
+    "id", "path", "method", "source_table", "n_columns", "columns", "code", "n_dropped",
+]
 
 
 def _journal_frames(session: RunSession) -> dict:
@@ -1190,6 +1420,10 @@ def _journal_frames(session: RunSession) -> dict:
             "n_columns": len(t.get("new_columns") or []),
             "columns": t.get("new_columns") or [],
             "code": t.get("code"),
+            # Only a `filter` table drops rows, so this is null everywhere else —
+            # which is also how to find the filters. Without it a filter looks
+            # like a table that added no columns, i.e. like a wasted call.
+            "n_dropped": t.get("n_dropped"),
         }
         for t in j.get("tables") or []
     ], columns=_TABLE_COLUMNS)

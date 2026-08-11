@@ -15,7 +15,7 @@ This is an *isolation* boundary (survives runaway/buggy code), not a hard
 *security* boundary — the child runs with the same OS rights. That matches the
 threat model: your machine, your data.
 
-Two entry points share the same child and guard, differing only in what leaves
+Three entry points share the same child and guard, differing only in what leaves
 the sandbox:
 
 - :func:`run_readonly` — the code returns a small **summary** that is JSON-capped
@@ -25,6 +25,9 @@ the sandbox:
   pickle) to become a persisted, replayed-at-predict pipeline step
   (``transform_features``, §5.1). The contract requires ``df -> df`` that
   preserves the row index, so it stays a row-local, stateless transform.
+- :func:`run_filter` — the code returns a **boolean mask** saying which rows to
+  keep (``filter_rows``). Unlike the other two this feeds a step that is applied
+  once, at training time, and never replayed at predict.
 
 Both take a **namespace**: a dict of named frames pickled into the child, of
 which the agent's function receives only the ones its signature asks for. That
@@ -201,13 +204,49 @@ def _run_transform(fn, df):
         raise ValueError(
             "transform_features must preserve the row index — do not reorder, "
             "drop, or add rows (it is a stateless, row-local transform re-run at "
-            "predict time). Add columns instead of reindexing."
+            "predict time). Add columns instead of reindexing. To train on fewer "
+            "rows, use the filter_rows tool: dropping rows is a separate step "
+            "because it must not be replayed at predict time."
         )
     with open("out.pkl", "wb") as f:
         pickle.dump(result, f)
     new_cols = [str(c) for c in result.columns if c not in set(df.columns)]
     return {"ok": True, "n_rows": int(len(result)),
             "columns": [str(c) for c in result.columns], "new_columns": new_cols}
+
+
+def _run_filter(fn, df):
+    """Contract for a row filter: df -> boolean mask over the same index.
+
+    A mask rather than a filtered frame, deliberately. Returning rows would let
+    the same call reorder them, rename columns, or hand back rows that were never
+    in the input, and every one of those would have to be checked for. A boolean
+    Series indexed like the input can only ever *select*.
+    """
+    result = fn(df)
+    if isinstance(result, np.ndarray) and result.dtype == bool and len(result) == len(df):
+        result = pd.Series(result, index=df.index)
+    if not isinstance(result, pd.Series):
+        raise ValueError(
+            "keep_rows must return a boolean pandas Series, one value per row, "
+            "indexed like the frame it was given; got %s. Write the condition "
+            "directly, e.g. `return df[\"amount\"] > 0`." % type(result).__name__
+        )
+    if result.dtype != bool:
+        raise ValueError(
+            "keep_rows must return a *boolean* Series (True = keep the row); got "
+            "dtype %s. If your condition can be null, decide what a null means: "
+            "`(df[\"x\"] > 0).fillna(False)`." % result.dtype
+        )
+    if not result.index.equals(df.index):
+        raise ValueError(
+            "keep_rows must return a mask indexed like the frame it was given — "
+            "do not reset, sort or subset the index. Return the condition itself "
+            "rather than a mask built from already-filtered rows."
+        )
+    with open("out.pkl", "wb") as f:
+        pickle.dump(result, f)
+    return {"ok": True, "n_rows": int(len(result)), "n_kept": int(result.sum())}
 
 
 # Everything the code prints is captured rather than going to the pipe and
@@ -227,6 +266,8 @@ try:
             )
         if cfg["mode"] == "transform":
             out = _run_transform(fn, frames["df"])
+        elif cfg["mode"] == "filter":
+            out = _run_filter(fn, frames["df"])
         else:
             out = {"ok": True,
                    "result": _to_jsonable(_bind(fn, frames), cfg["max_rows"])}
@@ -344,4 +385,28 @@ def run_transform(df, code, *, func_name="transform_features", timeout=30.0,
         return transformed, {k: out[k] for k in ("n_rows", "columns", "new_columns")}
 
     return _run({"df": df}, code, mode="transform", func_name=func_name,
+                timeout=timeout, mem_mb=mem_mb, max_rows=0, load_out=load_out)
+
+
+def run_filter(df, code, *, func_name="keep_rows", timeout=30.0, mem_mb=2048):
+    """Run a row-selection predicate in the sandbox; return ``(mask, summary)``.
+
+    ``code`` must define ``func_name(df)`` (default ``keep_rows``) returning a
+    boolean pandas Series indexed like the input — ``True`` keeps the row.
+
+    The third sandbox mode, and the one that is *not* replayed at predict time
+    (see :func:`~tabular_agent.rows.select_rows`). That difference is why it gets
+    its own contract rather than reusing :func:`run_transform`: a transform must
+    preserve every row because its output has to line up with predictions, and a
+    filter exists precisely to break that.
+
+    ``summary`` has ``n_rows`` and ``n_kept``. Raises :class:`SandboxError` on
+    blocked imports, timeouts, contract violations, or user errors.
+    """
+    def load_out(work, out):
+        with open(os.path.join(work, "out.pkl"), "rb") as f:
+            mask = pickle.load(f)
+        return mask, {k: out[k] for k in ("n_rows", "n_kept")}
+
+    return _run({"df": df}, code, mode="filter", func_name=func_name,
                 timeout=timeout, mem_mb=mem_mb, max_rows=0, load_out=load_out)

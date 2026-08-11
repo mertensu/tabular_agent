@@ -30,9 +30,28 @@ class Pipeline:
         it reproducible and train/serve-skew-free."""
         self.steps.append({"type": "transform", "code": code, "func_name": func_name})
 
+    def add_filter(self, code: str, func_name: str = "keep_rows") -> None:
+        """Record a row filter — the one step that is applied at fit and never replayed.
+
+        Kept in the lineage rather than left out of it entirely, because the
+        lineage is also the *record* of how a table was built and a table with
+        fewer rows than its parent has to say why. It carries ``train_only`` so
+        :meth:`transform` knows to skip it; see :mod:`tabular_agent.rows` for what
+        breaks if it does not.
+        """
+        self.steps.append(
+            {"type": "filter", "code": code, "func_name": func_name, "train_only": True}
+        )
+
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         out = df
         for step in self.steps:
+            # Train-only steps are history, not instructions. Replaying a row
+            # filter here would drop validation rows out from under the scorer and
+            # refuse predictions to real serving rows — the two callers of this
+            # method are exactly `_score_on_val` and `predict_bundle`.
+            if step.get("train_only"):
+                continue
             if step["type"] == "encode":
                 enc = ENCODER_CLASSES[step["encoder"]["kind"]].from_dict(step["encoder"])
                 out = enc.transform(out)

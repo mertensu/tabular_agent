@@ -67,6 +67,9 @@ Vocabulary used throughout:
 - [0010 — Store the transform code, not the columns it produced](0010-store-code-not-columns.md)
 - [0011 — Statelessness is tested as a property, not blacklisted](0011-stability-check.md)
 - [0021 — The agent picks the target scale, from a fixed menu](0021-the-agent-picks-the-target-scale.md)
+- [0032 — Fitted group aggregates, and the first step that is not replayed](0032-fitted-aggregates-and-a-step-that-is-not-replayed.md)
+  *(what 0011 rejects becomes legal once the value is stored; and why a row
+  filter is train-time-only)*
 
 ### Surviving a real agent
 

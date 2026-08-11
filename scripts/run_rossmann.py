@@ -47,6 +47,14 @@ forward-chaining folds (0029) `cv_score` should come out *worse* than `val_score
 because early folds train on a fraction of the history — the reverse of every
 previous run. A large gap the other way would mean something is wrong.
 
+**4. (v5) Does the agent reach for the two tools it did not have?** `filter_rows`
+and `fit_group_stats` were added because earlier runs demonstrated the gaps: 17%
+of rows are ones `rmspe` does not score and could not be excluded from the fit,
+and v4's first attempt died trying to build per-group aggregates of a column that
+had no sanctioned path. Neither is mentioned in the prompt, for the same reason
+`Customers` is not — what is being measured is whether the tool's own description
+is enough. `summarise_new_tools` reports it.
+
 ## Episodes, or one conversation
 
 0025 measured the crossover: episodes cost more per experiment below roughly 35
@@ -77,7 +85,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from prep_rossmann import ABOUT, COLUMN_NOTES, METRIC, OUT, SPLIT_ON, TEST_OUT  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RUN_DIR = os.path.join(REPO, "_runs", "rossmann_v4")
+RUN_DIR = os.path.join(REPO, "_runs", "rossmann_v5")
 MODEL = "tensorx/deepseek-v4-flash-0731"
 
 #: A pilot. Below 0025's ~35 crossover, so this runs as one conversation.
@@ -222,6 +230,44 @@ def summarise_customers(run_dir: str) -> dict:
             and t.get("method") == "transform"
         ],
     }
+
+
+def summarise_new_tools(run_dir: str) -> dict:
+    """Did the two tools added for this run get used, and did they pay?
+
+    v4's first attempt died trying to build per-store aggregates it had no tool
+    for, and 17% of this dataset's rows are ones the metric does not score. Both
+    are now expressible. Whether the agent reaches for either is a behavioural
+    result, so it is measured rather than assumed — and "built a table nobody
+    trained on" is a distinct and interesting outcome from "never called it".
+    """
+    j = journal.load(run_dir)
+    tables = j.get("tables") or []
+    rows = j.get("leaderboard") or []
+    trained_on = {r.get("source_table") for r in rows}
+
+    def summarise(method: str) -> dict:
+        built = [t for t in tables if t.get("method") == method]
+        # Any experiment whose table has one of these in its history, not just as
+        # its immediate source — the agent normally stacks another step on top.
+        descended = [
+            r["id"] for r in rows
+            if any(t["path"] in journal.ancestry(j, r.get("source_table") or "")
+                   for t in built)
+        ]
+        return {
+            "tables_built": len(built),
+            "trained_on_directly": sum(1 for t in built if t["path"] in trained_on),
+            "experiments_downstream": len(descended),
+            "detail": [
+                {k: t.get(k) for k in ("id", "new_columns", "n_dropped", "group_by",
+                                       "value_column", "stat") if t.get(k) is not None}
+                for t in built
+            ],
+        }
+
+    return {"filter_rows": summarise("filter"),
+            "fit_group_stats": summarise("group_stats")}
 
 
 def write_submission(run_dir: str) -> str | None:
@@ -406,6 +452,7 @@ def main() -> int:
             print("  note: cv better than val — unexpected under forward chaining")
 
     print(f"\ncustomers: {json.dumps(summarise_customers(RUN_DIR), indent=2)}")
+    print(f"\nnew tools: {json.dumps(summarise_new_tools(RUN_DIR), indent=2)}")
 
     # The consequence, not the diagnosis. A model that used `Customers` cannot
     # score the test set at all, and that is worth seeing rather than inferring.

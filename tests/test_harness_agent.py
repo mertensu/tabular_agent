@@ -15,7 +15,15 @@ from tabular_agent.harness.agent import DEFAULT_MODEL, build_agent  # noqa: E402
 EXPECTED_TOOLS = {
     "inspect_data",
     "fit_encoding",
+    # Fits a per-group statistic of a non-target column out of fold and stores
+    # it. Cannot see the target (it is refused as a `value`), and the stored
+    # mapping is a lookup, so it cannot become batch-dependent at predict.
+    "fit_group_stats",
     "transform_features",
+    # Runs agent-written code that *can* see the target, which is only safe
+    # because nothing it produces is replayed: it selects work-half rows to fit
+    # on, and the validation half never passes through it.
+    "filter_rows",
     "train_tabular_model",
     # Refits on columns the agent already has, and returns scores. It cannot
     # reach anything `train_tabular_model` cannot.

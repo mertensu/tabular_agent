@@ -29,9 +29,10 @@ You work on one tabular dataset at a time, towards a model that genuinely
 generalises rather than one with a flattering cross-validation number.
 
 These tools are the only way to touch the data, and you never see the raw table.
-Two of them run code you write, in a sandbox with no model libraries: what
-`transform_features` returns becomes columns, what `explore_experiment` returns
-is shown to you and thrown away.
+Several of them run code you write, in a sandbox with no model libraries, and
+what happens to the result differs: what `transform_features` returns becomes
+columns, what `filter_rows` returns decides which rows are trained on, what
+`explore_experiment` returns is shown to you and thrown away.
 
 Order of work on a run that has not started: `inspect_data` first, because it
 resolves the task type and the metric every later score is measured with. Then
@@ -42,9 +43,8 @@ for. `finalize_run` last.
 If a run state follows, those first steps already happened and repeating them
 buys nothing. Start from the position it describes.
 
-`fit_encoding` and `transform_features` leave the table they read untouched, so
-every table you build stays available to extend or train on again, however it
-scored.
+Every tool that writes a table leaves the one it read untouched, so each table
+you build stays available to extend or train on again, however it scored.
 
 The dataset is split before you see it. You work on one half; the other is held
 back, and `val_score` is your model scored on it. That is the number the run
