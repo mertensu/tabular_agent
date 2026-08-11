@@ -121,14 +121,31 @@ second dataset 0028's `min_gain_ratio` question has been waiting for.**
   experiments (said 10, ran 14).
 - **Ten tools now**, up from eight. 0012's smallness argument gets a little thinner
   each time.
-- **The model does no reasoning as we call it.** `deepseek/deepseek-v4-flash-0731`
-  through Requesty as a plain `OpenAIChatModel`, no reasoning/thinking parameter
-  passed anywhere in `src/` or `scripts/`. Measured across both transcripts: **0
-  reasoning tokens** on 1.40M input / 29k output, every `usage.details` empty, and
-  no thinking parts — only `text`, `tool-call`, `tool-return`, `retry-prompt`. So
-  every behavioural finding in 0024/0025/0027/0032 is on a **non-reasoning** model
-  emitting ~420 output tokens per turn. Whether this model *can* reason if asked is
-  untested; it would be one `model_settings` experiment.
+- **The model does no reasoning, and cannot be asked to. Tested, not assumed.**
+  `deepseek/deepseek-v4-flash-0731` through Requesty as a plain `OpenAIChatModel`,
+  with no reasoning parameter anywhere in `src/` or `scripts/`. Across both v5
+  transcripts: **0 reasoning tokens** on 1.40M input / 29k output, every
+  `usage.details` empty, and no thinking parts — only `text`, `tool-call`,
+  `tool-return`, `retry-prompt`.
+
+  Then probed directly, five variants, one tiny request each —
+  `openai_reasoning_effort="high"`, `thinking={"type": "enabled"}`,
+  `extra_body={"reasoning_effort": ...}`, `extra_body={"reasoning": {...}}`, and a
+  baseline. **All five identical:** 4 output tokens, empty `usage.details`, no
+  thinking part. It also answers bat-and-ball correctly in those 4 tokens, which is
+  recall, not derivation.
+
+  The control that makes this conclusive: `extra_body={"temperature": 99999}`
+  produced garbled multilingual output, so **`extra_body` demonstrably reaches the
+  model.** The reasoning parameters got there and were ignored. (A garbage param
+  name is silently accepted, so pass-through could not have been inferred from
+  absence-of-error alone — hence the temperature control.)
+
+  So every behavioural finding in 0024/0025/0027/0032 is on a **non-reasoning**
+  model emitting ~420 output tokens per turn. That cuts both ways: the four failed
+  advisory steers and the orientation tax may be weaker on a reasoning model, or
+  the structural fixes may be needed regardless. **Untested, and now clearly the
+  cheapest open question** — it needs a different model, not a different setting.
 - **Next:** `min_gain_ratio` (0028) now has its second dataset **and** a validated
   yardstick, which is the strongest it has ever been positioned. Otherwise the
   time-windowed group aggregate (the deep one, still unbuilt).
