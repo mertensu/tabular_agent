@@ -8,6 +8,90 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-11 (latest+5) — Rossmann ran three times; the leak is now refused, and we audited what we cannot express
+
+**Machine:** MacBook Air | **Branch:** master | **254 tests pass.**
+
+**Decision record `0030`.** Runs live in `_runs/rossmann_v1..v3` (gitignored).
+
+### v1 — the run that justified everything after it
+
+The data-dictionary channel **worked and did not matter.** At experiment 9 the
+agent wrote, unprompted and in the replay-safe form:
+
+    # Customers is measured on the prediction day and is NOT available at predict time
+    if 'Customers' in df.columns:
+        df = df.drop(columns=['Customers'])
+
+then built an honest chain (`Store_te` → `Store×DayOfWeek` → `Store×Month` →
+tuning) taking 0.1698 → **0.13173**. It counted for nothing:
+
+| | val_score | servable |
+|---|---|---|
+| shipped `e7` (used Customers) | **0.07912** | no |
+| best honest `e17` | 0.13173 | yes, verified against real test rows |
+| Kaggle winner, 3300 teams | 0.08932 | |
+
+A val_score better than first place is the signature of a column nobody had.
+`best` ranks on `val_score`, so the leaked model stayed incumbent, **ten genuine
+improvements were each recorded as no-improvement**, the run stopped early on
+patience, and finalize bundled a model that raises `KeyError` on the first real
+prediction. The agent's own summary named the problem; it had no way to act on it.
+
+### v2 — the fix, and a different failure
+
+`RunSession(serving_columns=...)` + refusal at `train_tabular_model` (0030).
+**`experiments_using_customers: 0`.** The refusal never even fired: the agent read
+`columns_not_available_at_predict_time` off `inspect_data` and put the guarded drop
+in its *first* table, before training anything. Same fact as v1's prose, but
+machine-generated and backed by enforcement.
+
+**But v2 hit a flat 120-call limit and never finalized** — a good model, no bundle.
+Best 0.14049 vs v1's honest 0.13173, and **that 0.009 gap is nothing**:
+`fold_spread` on the winner is 0.07342, five times larger. Not measurably worse,
+not measurably better. What *is* different is behaviour — v1 descended steadily,
+v2 thrashed (0.261, 0.185, 0.191, 0.197, 0.151, 0.167, 0.145, **0.285**, 0.149,
+0.169, 0.156, 0.140) and took 33.5 min against 10.3.
+
+Fixed for v3: call budget is `max_experiments x 12`, and the runner finalizes when
+the conversation ends without one.
+
+### The capability audit, against Gert Jacobusse's 1st-place solution
+
+Asked because a run is only as good as what the tools can express. **Three gaps,
+in priority order:**
+
+1. **No row filtering.** `transform_features` must preserve the row index, so the
+   agent cannot drop the 17% of rows where the store is closed — rows `rmspe` does
+   not even score. Cheapest gap to close, biggest effect here. Needs a decision:
+   filtering *training* rows while the validation half keeps them is the honest
+   arrangement, and it touches 0029's line about who owns the split.
+2. **No time-windowed group aggregates** — "last quarter / half-year / year,
+   segmented by day-of-week and promo" was the winner's main feature family. A
+   rolling per-store mean is batch-dependent, so 0011 rejects it *correctly*: at
+   predict time the rows arrive without their history. Legal only as a **fitted**
+   transform, which is the `fit_*` family flagged as having "no sanctioned path"
+   since July. The deep one.
+3. **No blending.** `blend.py` written 2026-07-29, still unregistered. He used
+   20+ XGBoost models.
+
+Deliberately not gaps: external data (0001), and the 0.985 prediction correction —
+its own author reports the effect was smaller than the CV fold standard deviation
+and only appeared on the leaderboard, which is 0022's failure mode exactly.
+
+**Realistic ceiling with today's tools is ~0.13–0.14 against a Kaggle median of
+0.11677.** Worth remembering before reading any Rossmann number as a verdict on
+the agent.
+
+### Gotchas
+
+- **A flat tool-call budget is a per-run guillotine.** v1: 44 calls / 17
+  experiments. v2: 120 / 13. Same dataset, same model, same prompt.
+- **`val_se` is absent on this dataset** (ordered split, 0028), so `fold_spread` is
+  the only yardstick — and at 0.073 it is far too coarse to separate these runs.
+- Provider 502s killed v1's first attempt outright; the runner now restarts a fresh
+  agent on the same run dir, which is exactly what an episode does.
+
 ## 2026-08-11 (latest+4) — Rossmann runner written, NOT run; a third failure mode found
 
 **Machine:** MacBook Air | **Branch:** master | **250 tests pass.**
