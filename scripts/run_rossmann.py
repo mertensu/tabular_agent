@@ -76,7 +76,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from prep_rossmann import ABOUT, COLUMN_NOTES, METRIC, OUT, SPLIT_ON, TEST_OUT  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RUN_DIR = os.path.join(REPO, "_runs", "rossmann_v1")
+RUN_DIR = os.path.join(REPO, "_runs", "rossmann_v2")
 MODEL = "tensorx/deepseek-v4-flash-0731"
 
 #: A pilot. Below 0025's ~35 crossover, so this runs as one conversation.

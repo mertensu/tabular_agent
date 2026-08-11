@@ -99,6 +99,8 @@ Vocabulary used throughout:
 - [0029 — The harness owns the exam; folds respect the split](0029-the-harness-owns-the-exam.md)
   *(the evaluation protocol is ours, the modelling is the agent's — and what
   follows for time-ordered data)*
+- [0030 — A model that could never be served is refused, not scored](0030-a-model-that-cannot-be-served-is-not-trained.md)
+  *(the serving schema, and the Rossmann run that argued for it)*
 
 ## Related reading
 
