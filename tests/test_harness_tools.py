@@ -1465,6 +1465,74 @@ def test_the_uncertainty_is_reproducible(session):
     assert by_id[a["experiment_id"]]["val_se"] == by_id[b["experiment_id"]]["val_se"]
 
 
+def _panel(tmp_path, n_days=40, n_stores=6):
+    """A store-day panel: many rows share each date, as in Rossmann."""
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.default_rng(0)
+    days = pd.date_range("2024-01-01", periods=n_days, freq="D")
+    df = pd.DataFrame([
+        {"date": d, "store": s, "promo": int(rng.integers(0, 2))}
+        for d in days for s in range(n_stores)
+    ])
+    df["y"] = 100 + df["store"] * 10 + df["promo"] * 5 + np.arange(len(df)) * 0.01
+    path = tmp_path / "panel.csv"
+    df.to_csv(path, index=False)
+    return str(path)
+
+
+def test_the_split_never_puts_one_date_on_both_sides(tmp_path):
+    """Rows sharing a date share the promo calendar, the holiday, the weather. A
+    cut at an exact row count put 603 of one Rossmann day's stores in the work
+    half and 512 of the same day in validation — the model learns that day's
+    level from one group and applies it to the other."""
+    path = _panel(tmp_path)
+    session = RunSession(str(tmp_path / "run"), path, TaskSpec(target="y"),
+                         split_on="date", val_fraction=0.2)
+
+    work = load_table(session.data_path)
+    val = load_table(session.val_path)
+    assert not set(work["date"]) & set(val["date"])
+    assert work["date"].max() < val["date"].min()
+
+
+def test_cross_validation_forecasts_when_the_run_does(tmp_path):
+    """The inner folds have to ask the question the outer split asks. Left
+    random, `cv_score` measures interpolation while `val_score` measures
+    forecasting, and their disagreement looks like overfitting rather than what
+    it is: two different tasks."""
+    import pandas as pd
+
+    path = _panel(tmp_path)
+    session = RunSession(str(tmp_path / "run"), path, TaskSpec(target="y"),
+                         split_on="date", val_fraction=0.2)
+    inspect_data(session)
+    out = train_tabular_model(session, model_type="lgbm", params={"n_estimators": 20})
+
+    oof = pd.read_parquet(
+        os.path.join(session.run_dir, out["artifact_path"], "oof.parquet")
+    )
+    # The earliest block has no prediction — nothing precedes it to train on —
+    # and it must arrive as NaN, not as a zero that reads like a huge residual.
+    assert oof.iloc[:, 0].isna().any()
+    assert not oof.iloc[:, 0].isna().all()
+
+
+def test_a_table_that_drops_the_ordering_column_is_refused(tmp_path):
+    """Falling back to random folds would silently change the evaluation protocol
+    mid-run, which produces a confident number nobody can interpret afterwards."""
+    path = _panel(tmp_path)
+    session = RunSession(str(tmp_path / "run"), path, TaskSpec(target="y"),
+                         split_on="date", val_fraction=0.2)
+    inspect_data(session)
+    dropped = transform_features(session, "def transform_features(df):\n"
+                                          "    return df.drop(columns=['date'])")
+
+    with pytest.raises(ValueError, match="split on 'date'"):
+        train_tabular_model(session, table=dropped["table"], model_type="lgbm")
+
+
 def test_no_uncertainty_is_claimed_on_an_ordered_split(tmp_path):
     """The bootstrap assumes the validation rows are exchangeable draws from one
     population. Under `split_on` they are a *later period*, chosen because it

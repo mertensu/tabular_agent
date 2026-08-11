@@ -13,6 +13,7 @@ import os
 
 import numpy as np
 
+from ..cv import boundary_cut
 from ..io import load_table, save_parquet
 from ..runctx import RunContext
 from ..taskspec import ResolvedSpec, TaskSpec, resolve_taskspec
@@ -113,8 +114,18 @@ class RunSession:
             # the column is a date. A random split would let the model see past its
             # own prediction horizon, and would be optimistic in exactly the way
             # cross-validation is already optimistic.
-            order = np.argsort(df[self.split_on].to_numpy(), kind="stable")
-            val_pos = order[-n_val:]
+            #
+            # The cut lands on a *value* boundary, not on the exact row count. At
+            # 1115 stores per day, cutting at 20% of rows put 603 of one day's
+            # stores in the work half and 512 of the same day in validation — and
+            # rows sharing a day share the promo calendar, the holiday, the
+            # weather. The model learns that day's level from one group and applies
+            # it to the other, which is the leak the ordered split exists to
+            # prevent. The realised fraction moves to the nearest honest boundary.
+            values = df[self.split_on].to_numpy()
+            order = np.argsort(values, kind="stable")
+            cut = boundary_cut(values[order], n - n_val)
+            val_pos = order[cut:]
         else:
             val_pos = np.random.default_rng(self.spec.seed).permutation(n)[:n_val]
 

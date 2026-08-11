@@ -58,6 +58,33 @@ def _load_lineage(table_path: str, task_type: str) -> Pipeline:
         return Pipeline.from_dict(json.load(f))
 
 
+def _fold_order(session: RunSession, df: pd.DataFrame):
+    """The column folds must respect, or ``None`` when they need respect nothing.
+
+    A run split on a column is a run whose validation half is the *later* part of
+    that column, so its cross-validation has to ask the same question: train on
+    earlier rows, predict later ones. Leaving the inner folds random while the
+    outer split is ordered makes `cv_score` measure interpolation and `val_score`
+    measure forecasting, and their disagreement then looks like overfitting rather
+    than what it is — two different tasks.
+
+    Raises rather than falling back to random folds when the column is missing.
+    Silently changing the evaluation protocol because a table happens to have
+    dropped a column is the kind of failure that produces a confident number
+    nobody can interpret afterwards.
+    """
+    if session.split_on is None:
+        return None
+    if session.split_on not in df.columns:
+        raise ValueError(
+            f"this run is split on {session.split_on!r}, so every table has to keep "
+            f"that column for cross-validation to respect the same ordering — and "
+            f"it is not in this one. Columns are {list(df.columns)}. Rebuild the "
+            f"table without dropping {session.split_on!r}."
+        )
+    return df[session.split_on].to_numpy()
+
+
 def _feature_frame(df: pd.DataFrame, target: str) -> tuple[pd.DataFrame, list[str]]:
     """Numeric feature matrix + the names of the columns that had to be dropped.
 
@@ -288,7 +315,8 @@ def fit_encoding(
         # Same seed and n_splits as training, so the out-of-fold values in the
         # table were held out of exactly the folds the model is scored on.
         kwargs["y"] = y
-        kwargs["folds"] = make_folds(y, spec.task_type, n_splits=spec.n_splits, seed=spec.seed)
+        kwargs["folds"] = make_folds(y, spec.task_type, n_splits=spec.n_splits,
+                                     seed=spec.seed, order=_fold_order(session, df))
     train_features, encoder = _fit_encoding(df, columns, method, **kwargs)
 
     out = df.join(train_features)
@@ -717,7 +745,8 @@ def train_tabular_model(
         )
     y = df[spec.target]
 
-    folds = make_folds(y, spec.task_type, n_splits=spec.n_splits, seed=spec.seed)
+    folds = make_folds(y, spec.task_type, n_splits=spec.n_splits, seed=spec.seed,
+                       order=_fold_order(session, df))
     result = train_cv(
         X,
         y,
@@ -931,7 +960,8 @@ def explain_table(
             "fit_encoding to produce some first"
         )
     y = df[spec.target]
-    folds = make_folds(y, spec.task_type, n_splits=spec.n_splits, seed=spec.seed)
+    folds = make_folds(y, spec.task_type, n_splits=spec.n_splits, seed=spec.seed,
+                       order=_fold_order(session, df))
 
     def score(columns: list[str]) -> float:
         result = train_cv(
@@ -1105,7 +1135,7 @@ def _experiment_row(run_dir: str, exp_id: str) -> dict:
 
 
 def _residual_frame(df: pd.DataFrame, oof: pd.DataFrame, y: pd.Series, task_type: str,
-                    n_splits: int, seed: int) -> pd.DataFrame:
+                    n_splits: int, seed: int, order=None) -> pd.DataFrame:
     """The source table, plus what the model predicted for each row and its error.
 
     Row alignment is positional and holds by construction: ``train_cv`` resets
@@ -1142,8 +1172,13 @@ def _residual_frame(df: pd.DataFrame, oof: pd.DataFrame, y: pd.Series, task_type
         out["p_true"] = [values[r, classes.index(c)] for r, c in enumerate(y)]
         out["correct"] = out["oof_pred_label"].to_numpy() == y.to_numpy()
 
-    fold = np.empty(len(out), dtype=int)
-    for i, (_, va) in enumerate(make_folds(y, task_type, n_splits=n_splits, seed=seed)):
+    # -1 for a row no fold validated. Under forward chaining the earliest block is
+    # never held out, and calling those rows "fold 0" would put them in a group
+    # whose residuals were computed a completely different way.
+    fold = np.full(len(out), -1, dtype=int)
+    for i, (_, va) in enumerate(
+        make_folds(y, task_type, n_splits=n_splits, seed=seed, order=order)
+    ):
         fold[va] = i
     out["fold"] = fold
     return out
@@ -1188,7 +1223,8 @@ def explore_experiment(
     df = load_table(path)
     oof = pd.read_parquet(os.path.join(session.run_dir, row["artifact_path"], "oof.parquet"))
     frame = _residual_frame(
-        df, oof, df[spec.target], spec.task_type, spec.n_splits, spec.seed
+        df, oof, df[spec.target], spec.task_type, spec.n_splits, spec.seed,
+        order=_fold_order(session, df),
     )
 
     out = run_readonly({"df": frame}, code, func_name="explore", timeout=timeout)

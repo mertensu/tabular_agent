@@ -94,6 +94,12 @@ Vocabulary used throughout:
 
 - [0018 — The result payload is a budget, and so is the vocabulary](0018-the-payload-is-a-budget.md)
 
+### Who decides what
+
+- [0029 — The harness owns the exam; folds respect the split](0029-the-harness-owns-the-exam.md)
+  *(the evaluation protocol is ours, the modelling is the agent's — and what
+  follows for time-ordered data)*
+
 ## Related reading
 
 Longer-form notes that are not decisions:

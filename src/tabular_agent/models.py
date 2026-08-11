@@ -146,11 +146,17 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
     classes = None
     if task_type in ("binary", "multiclass"):
         classes = np.unique(y.to_numpy())
+    # NaN, not zero. Under forward-chaining folds the earliest block is never
+    # validated — nothing precedes it to train on — so some rows genuinely have no
+    # out-of-fold prediction. Zero-filling would hand those rows a *confident and
+    # wrong* prediction: a residual of exactly `y`, indistinguishable from a real
+    # catastrophic miss. With random folds every row is validated and nothing here
+    # stays NaN, so this costs the common case nothing.
     if task_type == "multiclass":
         k = len(classes)
-        oof = np.zeros((n, k))
+        oof = np.full((n, k), np.nan)
     else:
-        oof = np.zeros(n)
+        oof = np.full(n, np.nan)
 
     models = []
     fold_metrics = []

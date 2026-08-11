@@ -8,6 +8,78 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-11 (latest+3) — The harness owns the exam; CV forecasts when the run does
+
+**Machine:** MacBook Air | **Branch:** master | **250 tests pass.**
+
+**Decision record `0029`.** It answers Ulf's question — "we are doing
+preprocessing which could in principle be part of the agent's work, so the final
+result depends on what we do now, which is kinda not what I want" — and the
+split question, with one line.
+
+### The line
+
+**The harness owns the evaluation protocol; the agent owns the modelling.**
+Metric, `split_on`, `val_fraction`, fold strategy, column descriptions and CSV
+typing are ours — an agent that can change the exam can pass it without learning
+anything (0012's argument, applied to measurement). Which columns to use, and
+what to build from them, is the agent's.
+
+**So `Customers` went back into the Rossmann data.** Dropping it was the harness
+doing the agent's work. It stays, with the dictionary saying it is not available
+at prediction time, and whether the agent uses it is now a **measured result**: if
+it trains on it, `val_score` looks excellent and we learn the dictionary channel
+does not change behaviour. Worth more than a clean number.
+
+The `store.csv` join stays in prep — there is no join tool — and is recorded as a
+real confound rather than explained away.
+
+### Time or grouping? Time, and the data says so
+
+1115 stores in the work half, 1115 in validation, **zero validation-only stores**.
+Kaggle's test set is the same stores on later dates, so a time split asks the
+deployment question. Grouping on `Store` would answer "how well do I predict a
+store I have never seen" — a different product. General rule: **hold out whatever
+deployment will hand you that is new.**
+
+### Three fixes to the exam, which was subtly wrong
+
+**1. CV forecasts when the run does.** `make_folds(order=)` builds forward-chaining
+folds. Random k-fold on a panel lets a model predict Wednesday having trained on
+Tuesday and Thursday *of the same store* — interpolation, not forecasting.
+**Both strategies kept**; the choice follows `split_on`. On Rossmann: `cv_score`
+0.371 vs `val_score` 0.314, i.e. CV is now the *pessimistic* number where random
+folds made it optimistic.
+
+**2. The split cuts on a value, not a row count.** It had put 603 of
+2015-01-30's stores in work and 512 of the same day in validation.
+
+**3. A table dropping the ordering column is refused**, rather than silently
+falling back to random folds mid-run.
+
+### Gotchas / open questions
+
+- **Not every row gets an out-of-fold prediction now** — 160,559 of 965,919 on
+  Rossmann. NaN in `oof.parquet`, `fold = -1` in `explore_experiment`'s frame.
+  `explore_experiment`'s "positionally aligned" promise is now "aligned, some
+  missing".
+- **Out-of-fold target encoding leaves that same block NaN**, so ~1/(n_splits+1)
+  of training rows have no encoded value, and the missingness is time-correlated
+  — a tree can learn it as "early period". Not fixed: every alternative computes
+  the value from the row's own future or from itself.
+- **`fold_spread` now mixes noise with "how much does more history help"**, since
+  fold training sets are unequal. Matters because 0028 withholds `val_se` on
+  ordered splits, leaving `fold_spread` as the only yardstick.
+- **`val_fraction` is approximate under an ordered split.** At 0.05 on Rossmann it
+  gives a 45-day horizon against Kaggle's 48 — close enough to compare against the
+  public leaderboard in the folder (3300 teams: best 0.08932, top 10% 0.10294,
+  median 0.11677).
+- **Still no runner for Rossmann** and no live run attempted. A hand-driven lgbm
+  with 100 trees scores 0.314 rmspe in ~5s, so the dataset is affordable.
+- **Model note:** runs so far use `tensorx/deepseek-v4-flash-0731` to keep costs
+  down, deliberately not a frontier model. Ulf expects better models to help in
+  production; every behavioural finding in 0024/0025/0027 is on this one model.
+
 ## 2026-08-11 (latest+2) — Rossmann: the data dictionary now has a channel
 
 **Machine:** MacBook Air | **Branch:** master | **236 tests pass.**

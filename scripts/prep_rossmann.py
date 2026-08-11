@@ -8,17 +8,23 @@ of them is a decision rather than a chore:
 table and has no join tool — deliberately, since a join is a modelling decision
 about grain, not a feature transform — so it happens here, once, in the open.
 
-**2. `Customers` is dropped, and this is the important one.** It correlates 0.895
-with `Sales` and **does not exist in `test.csv`**: you cannot know today's customer
-count when forecasting tomorrow's sales. Left in, it is a leak that every guard in
-this harness permits — no fold boundary is crossed, no encoder is misfitted — and
-that the validation half *confirms*, because the validation half is drawn from the
-same file and has the column too. It is the `Id` failure from house-prices run 1
-(0019's gotcha) with a far bigger number attached.
+**2. `Customers` is kept, and it is a trap on purpose.** It correlates 0.895 with
+`Sales` and **does not exist in `test.csv`**: you cannot know today's customer count
+when forecasting tomorrow's sales. Trained on, it is a leak that every guard in this
+harness permits — no fold boundary crossed, no encoder misfitted — and that the
+validation half *confirms*, because validation is drawn from the same file and has
+the column too. It is the `Id` failure from house-prices run 1 (0019's gotcha) with
+a far bigger number attached.
 
-Nothing computable from `train.csv` reveals this. The only evidence is the
-competition's own data dictionary and the column list of a test set the harness
-never sees. That is what `column_notes` below is for.
+An earlier version of this script dropped it. That was the harness doing the
+agent's work (0029): whether to use a column is a modelling decision, and deciding
+it here means the run measures our judgement rather than the agent's. So the column
+stays and the dictionary says plainly that it is unavailable at prediction time.
+
+If the agent trains on it anyway, `val_score` will look excellent and we will have
+learned that the data-dictionary channel does not change behaviour — which is worth
+more than a clean number, and cannot be learned from a file that never had the
+column.
 
 **3. `Date` is kept as a column so the run can order its split on it.** Train ends
 2015-07-31 and test begins 2015-08-01, so this is a forecast, not a random split.
@@ -51,9 +57,10 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(REPO, "rossmann_store_sales")
 OUT = os.path.join(RAW, "train_joined.parquet")
 
-#: Present in `train.csv`, absent from `test.csv`. Not a feature — an outcome
-#: measured at the same time as the target.
-LEAKING_COLUMNS = ["Customers"]
+#: Kept in the table, not removed. See point 2 of the module docstring: which
+#: columns to use is the agent's decision, and the dictionary gives it what it
+#: needs to make this one.
+LEAKING_COLUMNS: list[str] = []
 
 #: The competition's published data dictionary, transcribed and nothing more.
 #:
@@ -66,12 +73,19 @@ LEAKING_COLUMNS = ["Customers"]
 #: putting them in the dictionary is doing its work while calling it documentation.
 #:
 #: `DayOfWeek` and `Date` have no entry, faithfully — the source says "most of the
-#: fields are self-explanatory" and describes only the rest. `Id` and `Customers`
-#: are described there too and are absent here, because neither column exists in
-#: the table this builds.
+#: fields are self-explanatory" and describes only the rest. `Id` is described
+#: there and absent here, because that column does not exist in this table.
 COLUMN_NOTES = {
     "Store": "a unique Id for each store",
     "Sales": "the turnover for any given day (this is what you are predicting)",
+    # Verbatim from the competition, plus the one fact the competition states by
+    # omission: the column is in the training file and not in the test file. That
+    # is not an opinion about modelling, it is what the data is — and it is
+    # unobtainable from the training table, which is the whole reason this channel
+    # exists.
+    "Customers": "the number of customers on a given day. This column exists in "
+                 "the training data only: it is measured on the same day as the "
+                 "target and is NOT available at prediction time.",
     "Open": "an indicator for whether the store was open: 0 = closed, 1 = open",
     "StateHoliday": "indicates a state holiday. Normally all stores, with few "
                     "exceptions, are closed on state holidays. Note that all "
@@ -111,8 +125,9 @@ COLUMN_NOTES = {
 #:
 #: **Actionable?** Then keep it; otherwise it is prose for a human. "The per-store
 #: table has been joined on already" answers a question no agent can ask, since it
-#: never sees `store.csv`. "Customers has been removed" describes a column that is
-#: not in the file — nothing the agent can do differs on knowing it.
+#: never sees `store.csv`. What matters about `Customers` is a fact about one
+#: column, so it rides on that column in `COLUMN_NOTES` rather than sitting here
+#: where it would have to be matched up by name.
 #:
 #: What survives is the one thing that is neither: that a row is a store-day and
 #: the task is to forecast forward rather than interpolate. The split record says
