@@ -125,8 +125,12 @@ def transform_features(df, code, *, timeout=30.0, check_stability=True):
                 "smaller batch, so at predict time — where the batch is whatever arrives, "
                 "sometimes a single row — they would not match what the model trained on. "
                 "Causes are pandas operations that read the whole column: pd.qcut, rank, "
-                "and anything dividing by df[...].mean()/std()/max(). Use fixed thresholds "
-                "instead (pd.cut with explicit bin edges), or fit_encoding, which learns "
-                "its parameters once and stores them."
+                "anything dividing by df[...].mean()/std()/max(), and any groupby "
+                "aggregate spread back over the rows. "
+                "For thresholds, use fixed ones (pd.cut with explicit bin edges). "
+                "For a per-group average **of the target**, use fit_encoding — it learns "
+                "the values once and stores them. "
+                "A per-group average of some *other* column has no tool here and cannot "
+                "be built this way: do not retry it with a different phrasing."
             )
     return out, summary

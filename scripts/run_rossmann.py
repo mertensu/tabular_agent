@@ -356,13 +356,20 @@ def main() -> int:
             with open(os.path.join(RUN_DIR, f"transcript_{attempt}.json"), "w") as f:
                 json.dump(raw, f)
 
-            if ended != "provider":
+            if ended not in ("provider", "error"):
                 print(f"\n{output}")
                 break
             failures += 1
-            print(f"  !! provider error ({failures}/{MAX_PROVIDER_FAILURES}); "
+            # `error` restarts for the same reason `provider` does, and v4 is why:
+            # the agent tried to build per-store aggregates, the stability check
+            # refused them three times, the tool's retry budget ran out, and
+            # `UnexpectedModelBehavior` ended a 25-experiment run after 2.5
+            # minutes with nothing on the leaderboard. One idea the harness cannot
+            # express should cost an idea, not the run — and a fresh agent gets a
+            # fresh retry budget plus a brief describing what already exists.
+            print(f"  !! {ended} ({failures}/{MAX_PROVIDER_FAILURES}); "
                   "restarting on the same run dir")
-            time.sleep(20)
+            time.sleep(10)
 
     with open(os.path.join(RUN_DIR, "episodes.json"), "w") as f:
         json.dump(episodes, f, indent=2)
