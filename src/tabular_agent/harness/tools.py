@@ -72,6 +72,53 @@ def _feature_frame(df: pd.DataFrame, target: str) -> tuple[pd.DataFrame, list[st
     return numeric, dropped
 
 
+#: Bootstrap resamples behind `val_se`. A few hundred is plenty for a standard
+#: error (it is a second moment, not a tail quantile), and the whole loop is
+#: milliseconds against the seconds a fit already costs.
+N_BOOTSTRAP = 200
+
+
+def _bootstrap_se(metric: str, y, preds, labels, seed: int) -> float | None:
+    """The standard error of a metric, by resampling the rows it was computed on.
+
+    This is the yardstick 0022 says every validation comparison needs. The score
+    itself is one draw from a distribution — resample the validation rows with
+    replacement, rescore, and the spread of those scores is how much the number
+    would have moved had the split fallen differently.
+
+    Seeded from the run's own seed so it is reproducible: `val_se` gates the stop
+    rule, and a noise estimate that changes between identical runs would make the
+    run's control flow non-deterministic.
+
+    ``None`` when it cannot be computed — too few rows to resample meaningfully,
+    or a metric that keeps failing on the resamples (a class missing from a draw,
+    typically). A missing yardstick is handled by the caller; a wrong one is not
+    detectable at all.
+    """
+    y = np.asarray(y)
+    preds = np.asarray(preds)
+    n = len(y)
+    if n < 10:
+        return None
+
+    rng = np.random.default_rng(seed)
+    scores = []
+    for _ in range(N_BOOTSTRAP):
+        idx = rng.integers(0, n, n)
+        try:
+            scores.append(
+                compute_metric(metric, y[idx], preds[idx], labels=labels)
+            )
+        except Exception:
+            # A resample can be degenerate — one class only, say — and that draw
+            # is uninformative rather than fatal. Enough of them failing is what
+            # the length check below treats as "no estimate".
+            continue
+    if len(scores) < N_BOOTSTRAP // 2:
+        return None
+    return float(np.std(scores))
+
+
 def _score_on_val(
     session: RunSession,
     source_path: str,
@@ -80,8 +127,8 @@ def _score_on_val(
     spec,
     y_work: pd.Series,
     target_transform: str = "none",
-) -> tuple[float | None, str | None]:
-    """Score a just-fitted model on the validation half. ``(score, why_not)``.
+) -> tuple[float | None, float | None, str | None]:
+    """Score a just-fitted model on the validation half. ``(score, se, why_not)``.
 
     The validation rows are **raw**: no tool ever wrote them, so the columns the
     model expects do not exist on them yet and have to be rebuilt by replaying
@@ -102,7 +149,7 @@ def _score_on_val(
 
     missing = [c for c in feature_names if c not in features.columns]
     if missing:
-        return None, f"replaying the table's lineage did not produce {missing[:5]}"
+        return None, None, f"replaying the table's lineage did not produce {missing[:5]}"
 
     classes = None
     if spec.task_type in ("binary", "multiclass"):
@@ -122,7 +169,12 @@ def _score_on_val(
     # inversion is tested rather than trusted.
     if target_transform != "none":
         preds = invert_target(target_transform, preds)
-    return float(compute_metric(spec.metric, y_val, preds, labels=classes)), None
+    score = float(compute_metric(spec.metric, y_val, preds, labels=classes))
+    # Computed here rather than in the stop rule because this is the only place
+    # that still holds the predictions: the leaderboard keeps the score, not the
+    # rows behind it.
+    se = _bootstrap_se(spec.metric, y_val, preds, classes, spec.seed)
+    return score, se, None
 
 
 def inspect_data(session: RunSession, table: str | None = None) -> dict:
@@ -657,7 +709,7 @@ def train_tabular_model(
 
     cv_score = float(np.mean(result.fold_metrics))
     fold_spread = float(np.std(result.fold_metrics))
-    val_score, val_unavailable = _score_on_val(
+    val_score, val_se, val_unavailable = _score_on_val(
         session, path, result.final_model, result.feature_names, spec, y, target_transform
     )
 
@@ -677,6 +729,7 @@ def train_tabular_model(
         "metric": spec.metric,
         "cv_score": cv_score,
         "val_score": val_score,
+        "val_se": val_se,
         "fold_metrics": [float(m) for m in result.fold_metrics],
         "feature_names": list(result.feature_names),
         "target": spec.target,
@@ -706,6 +759,11 @@ def train_tabular_model(
         "metric": spec.metric,
         "val_score": val_score,
         "val_unavailable": val_unavailable,
+        # The yardstick every comparison on this row is judged against (0022).
+        # `fold_spread` stays below because it is still the honest answer to "how
+        # much did this model wobble across folds" — it simply stopped being the
+        # ruler, since nothing has been ranked by `cv_score` since 0019.
+        "val_se": val_se,
         "cv_score": cv_score,
         "fold_spread": fold_spread,
         "vs_baseline": (
@@ -761,6 +819,12 @@ def train_tabular_model(
         # rows and their disagreement is information — a gain that shows up in the
         # folds and not on the validation half is a gain in the folds only.
         "val_score": val_score,
+        # Beside the score it qualifies, always — not only when `note` warns.
+        # A validation score reported bare invites comparison digit by digit,
+        # which is the failure 0022 exists to record: a run once celebrated a
+        # 0.008 gain that was worth 0.0007, on a score whose own standard error
+        # was 0.012. This is the one field that says how many digits are real.
+        "val_se": val_se,
         "cv_score": cv_score,
         "fold_spread": fold_spread,
         "model_type": model_type,
@@ -906,7 +970,7 @@ def explain_table(
 #: with what it asked.
 _LB_COLUMNS = [
     "id", "model_type", "params", "target_transform", "source_table", "metric",
-    "val_score", "cv_score", "fold_spread", "vs_baseline", "vs_source_table",
+    "val_score", "val_se", "cv_score", "fold_spread", "vs_baseline", "vs_source_table",
     "n_features",
 ]
 
@@ -938,6 +1002,7 @@ def _journal_frames(session: RunSession) -> dict:
             "source_table": r.get("source_table"),
             "metric": r.get("metric"),
             "val_score": r.get("val_score"),
+            "val_se": r.get("val_se"),
             "cv_score": r.get("cv_score"),
             "fold_spread": r.get("fold_spread"),
             "vs_baseline": r.get("vs_baseline"),
@@ -1162,6 +1227,7 @@ def finalize_run(session: RunSession) -> dict:
         # the fold estimate — the gap between them is the run's own record of how
         # far the search drifted from the folds it was optimising.
         selection_score=meta["val_score"],
+        val_se=meta.get("val_se"),
         cv_score=meta["cv_score"],
         fold_metrics=meta["fold_metrics"],
         baseline_score=j["baseline"]["val_score"],

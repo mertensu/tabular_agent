@@ -58,6 +58,95 @@ def test_gains_inside_the_fold_noise_do_not_count():
     assert "inside the noise" in status["reason"]
 
 
+def test_the_yardstick_is_val_se_not_fold_spread():
+    """0022, reproduced as the case that motivated it.
+
+    House-prices: `fold_spread` ~0.0098 makes the bar 0.0025, and the run
+    celebrated a gain of 0.008. The validation score's own standard error was
+    ~0.0098, so the honest bar was 0.0025 against noise four times larger — and
+    Kaggle later said the gain was 0.0007, i.e. 91% of it was optimism.
+
+    With `val_se` on the row the same history is read correctly, and it is read
+    correctly *while the run is still going*, which no later split can do.
+    """
+    lb = [
+        row("e1", 0.4008, model_type="baseline"),
+        {**row("e2", 0.12162, spread=0.0098), "val_se": 0.0098},
+        {**row("e3", 0.11354, spread=0.0098), "val_se": 0.0098},
+    ]
+    # 0.00808 clears 0.25 x fold_spread (0.0025) but not 0.25 x val_se... which
+    # is the same number here. The point is which quantity it is a quarter *of*:
+    # se is the noise in `val_score`, and the gain is well inside one of them.
+    status = evaluate(lb, "rmsle", POLICY)
+    assert status["since_improvement"] == 0  # 0.008 > 0.0025, still counts
+
+    # Now the case the old ruler could not see: a validation half four times
+    # noisier than the folds suggest. Nothing about `fold_spread` changed.
+    noisy = [
+        row("e1", 0.4008, model_type="baseline"),
+        {**row("e2", 0.12162, spread=0.0098), "val_se": 0.040},
+        {**row("e3", 0.11354, spread=0.0098), "val_se": 0.040},
+    ]
+    status = evaluate(noisy, "rmsle", POLICY)
+    assert status["since_improvement"] == 1, "0.008 is inside 0.25 x 0.040"
+
+
+def test_a_sub_noise_gain_is_reported_without_being_refused():
+    """The advisory half of 0028, and the distinction it rests on.
+
+    The enforced bar is a *quarter* of a standard error; this warns at a whole
+    one. So an experiment can be credited as progress and still be told its gain
+    is inside the noise — which is exactly 0022's case, where 0.008 on a 0.012
+    standard error turned out to be worth 0.0007.
+    """
+    lb = [
+        row("e1", 0.4008, model_type="baseline"),
+        {**row("e2", 0.12162, spread=0.01), "val_se": 0.0122},
+        {**row("e3", 0.11354, spread=0.01), "val_se": 0.0122},
+    ]
+    status = evaluate(lb, "rmsle", POLICY)
+
+    # Credited: 0.008 clears 0.25 x 0.0122. Nothing is refused, nothing stops.
+    assert status["since_improvement"] == 0
+    assert not status["should_stop"]
+
+    warned = status["latest_gain_inside_one_se"]
+    assert warned["id"] == "e3" and round(warned["gain"], 5) == 0.00808
+    assert "inside one standard error" in advisory(status)
+
+
+def test_nothing_is_said_when_there_is_nothing_to_say():
+    """A gain bigger than the noise, and a result that did not improve at all,
+    must both stay quiet — a warning on every row is a warning on none."""
+    big = [
+        {**row("e1", 0.40, spread=0.01), "val_se": 0.01},
+        {**row("e2", 0.20, spread=0.01), "val_se": 0.01},
+    ]
+    assert evaluate(big, "rmsle", POLICY)["latest_gain_inside_one_se"] is None
+
+    worse = [
+        {**row("e1", 0.20, spread=0.01), "val_se": 0.01},
+        {**row("e2", 0.21, spread=0.01), "val_se": 0.01},
+    ]
+    assert evaluate(worse, "rmsle", POLICY)["latest_gain_inside_one_se"] is None
+
+    # And with no val_se there is no standard error to speak of.
+    no_se = [row("e1", 0.20), row("e2", 0.199)]
+    assert evaluate(no_se, "rmsle", POLICY)["latest_gain_inside_one_se"] is None
+    assert "standard error" not in advisory(evaluate(no_se, "rmsle", POLICY))
+
+
+def test_fold_spread_is_the_fallback_when_val_se_is_missing():
+    """Rows written before 0022, and rows whose validation score could not be
+    computed, must still be judged by something rather than by zero."""
+    from tabular_agent.harness.stop import _noise
+
+    assert _noise({"val_se": 0.03, "fold_spread": 0.01}) == 0.03
+    assert _noise({"fold_spread": 0.01}) == 0.01
+    assert _noise({"val_se": None, "fold_spread": 0.01}) == 0.01
+    assert _noise({}) == 0.0
+
+
 def test_a_gain_above_the_noise_floor_counts_even_if_small():
     lb = [row("e1", 0.300, spread=0.01), row("e2", 0.29)]  # 0.01 > 0.25 * 0.01
     assert evaluate(lb, "logloss", POLICY)["since_improvement"] == 0

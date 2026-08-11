@@ -96,6 +96,36 @@ is not a sample.
 The only claim this record makes is the pre-registered one: the orientation share did
 not move.
 
+## What we decided to do about it: nothing, for now
+
+Ulf's call, and it came from checking whether the tax blocks anything before
+designing a fix for it. It does not. Extrapolating v7 — 18 experiments in 4
+episodes and 15.3 minutes:
+
+| | v7 measured | at 150 experiments |
+|---|---|---|
+| episodes | 4 | ~33 |
+| wall clock | 15.3 min | **~2.1 hours** |
+| requests | 65 | ~540 |
+
+The 150-experiment overnight run — the thing episodes exist to make possible —
+fits in roughly two hours of an eight-hour window **with the tax included**.
+Removing it entirely would save perhaps 40 minutes of that night.
+
+Against that, every fix on the table restricts the agent's ability to look at its
+own work: charging `explore_journal` against a budget, or capping it per episode,
+undoes the "free diagnosis" property that 0020 and the step-5/6 work were built
+around — charging for a look at a failure prices *understanding* the same as
+*causing* an experiment. The third option (the episode driver runs fixed queries
+and pastes the answers in) does not restrict anything, but v7 is direct evidence
+against it: the brief already is information handed over for free, and the agent
+queried anyway.
+
+So the tax is **real, measured, and not currently on the critical path**. Recorded
+here so it is not re-derived from scratch later. Revisit it if episode counts
+start mattering — a run budgeted well past 150, or a model whose orientation share
+is materially worse than this one's.
+
 ## What it costs
 
 **Good**

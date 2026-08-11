@@ -84,7 +84,9 @@ Vocabulary used throughout:
 - [0017 — Credit is measured by refitting without the columns, not by importance](0017-credit-by-ablation.md)
 - [0019 — The leaderboard is a public leaderboard](0019-the-leaderboard-is-a-public-leaderboard.md)
 - [0022 — The yardstick must measure the quantity being ranked](0022-the-yardstick-must-measure-the-ranked-quantity.md)
-  *(accepted, not yet implemented)*
+  *(accepted and now implemented; one claim about what the fix achieves is corrected by 0028)*
+- [0028 — `val_se` is implemented; the bar it is a quarter of is still open](0028-the-yardstick-is-fixed-the-bar-is-not.md)
+  *(accepted; `min_gain_ratio` deliberately left open pending a second dataset)*
 - [0023 — The third split has evidence now](0023-the-third-split-has-evidence-now.md)
   *(accepted, not yet implemented)*
 

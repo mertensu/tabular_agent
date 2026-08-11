@@ -396,7 +396,7 @@ def build_agent(model=DEFAULT_MODEL):
 
                     lb      one row per experiment: id, model_type, params (a
                             JSON string), target_transform, source_table, metric,
-                            val_score, cv_score, fold_spread, vs_baseline,
+                            val_score, val_se, cv_score, fold_spread, vs_baseline,
                             vs_source_table, n_features
                     tables  one row per feature table: id, path, method,
                             source_table, n_columns, columns, code

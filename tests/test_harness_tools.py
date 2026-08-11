@@ -378,6 +378,11 @@ TRAIN_RESULT_FIELDS = {
     "trained",
     "experiment_id",
     "val_score",
+    # The 14th field, added deliberately (0022/0028). It is not derivable — the
+    # agent has no bootstrap — and a validation score shipped without its own
+    # uncertainty is what the run once used to celebrate a 0.008 gain worth
+    # 0.0007. `note` carries the warning; this carries the number every time.
+    "val_se",
     "cv_score",
     "fold_spread",
     "model_type",
@@ -1356,6 +1361,55 @@ def test_it_answers_the_question_no_single_result_can(session):
         "    return m.groupby('method')['val_score'].mean().round(4).to_dict()"
     ))
     assert set(out["result"]) == {"frequency", "target"}
+
+
+def test_every_experiment_carries_the_uncertainty_of_its_own_score(session):
+    """0022's fix: the yardstick has to measure the quantity being ranked, and
+    that quantity is `val_score`, so its standard error has to be on the row."""
+    inspect_data(session)
+    out = train_tabular_model(session, model_type="lgbm")
+
+    row = journal.load(session.run_dir)["leaderboard"][-1]
+    assert row["val_se"] is not None and row["val_se"] > 0
+    # On the row and in the artifact, like every other score.
+    with open(os.path.join(session.run_dir, row["artifact_path"], "meta.json")) as f:
+        assert json.load(f)["val_se"] == row["val_se"]
+    assert out["val_score"] is not None
+
+
+def test_the_uncertainty_is_reproducible(session):
+    """It gates the stop rule, so a noise estimate that moved between identical
+    runs would make the run's control flow non-deterministic."""
+    inspect_data(session)
+    a = train_tabular_model(session, model_type="lgbm", params={"n_estimators": 20})
+    b = train_tabular_model(session, model_type="lgbm", params={"n_estimators": 20})
+
+    rows = journal.load(session.run_dir)["leaderboard"]
+    by_id = {r["id"]: r for r in rows}
+    assert by_id[a["experiment_id"]]["val_se"] == by_id[b["experiment_id"]]["val_se"]
+
+
+def test_no_uncertainty_rather_than_a_meaningless_one(tmp_path):
+    """A validation half too small to resample gets `None`, not a number. The
+    stop rule falls back to `fold_spread`; a fabricated standard error would be
+    trusted exactly as much as a real one."""
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.default_rng(0)
+    n = 40  # 20% of 40 is 8 validation rows, under the floor
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    df["y"] = df["a"] * 2 + rng.normal(0, 0.1, n)
+    path = tmp_path / "tiny.csv"
+    df.to_csv(path, index=False)
+
+    tiny = RunSession(str(tmp_path / "run"), str(path), TaskSpec(target="y"))
+    inspect_data(tiny)
+    train_tabular_model(tiny, model_type="lgbm")
+
+    row = journal.load(tiny.run_dir)["leaderboard"][-1]
+    assert row["val_score"] is not None
+    assert row["val_se"] is None
 
 
 def test_a_table_reports_the_columns_it_added(session):

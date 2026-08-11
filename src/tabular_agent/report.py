@@ -23,14 +23,21 @@ def build_report(
     cv_score: float | None = None,
     split: dict | None = None,
     attribution: list[dict] | None = None,
+    val_se: float | None = None,
 ) -> str:
     fold_std = float(np.std(fold_metrics))
+    # The headline number's own uncertainty, printed beside it (0022). A score
+    # reported bare invites the reader to compare it against other runs digit by
+    # digit; +/- one standard error is what says how many of those digits are real.
+    headline = f"{selection_score:.3f}"
+    if val_se is not None:
+        headline += f" (+/- {val_se:.3f})"
     lines = [
         "# Run Report",
         "",
         f"- **Task type:** {task_type}",
         f"- **Selection metric:** {metric}",
-        f"- **Validation score:** {selection_score:.3f}",
+        f"- **Validation score:** {headline}",
         f"- **Baseline score:** {baseline_score:.3f}",
         f"- **Models:** {', '.join(model_types)}",
         f"- **Features ({len(feature_names)}):** {', '.join(feature_names)}",

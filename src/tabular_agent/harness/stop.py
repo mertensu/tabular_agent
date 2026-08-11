@@ -14,10 +14,16 @@ Two layers, the same split as everywhere else in this harness:
 
 The interesting part is what counts as an improvement. Not an absolute
 threshold — that would need tuning per dataset and per metric, and getting it
-wrong is silent. The yardstick is already in the leaderboard: ``fold_spread``,
-how much the incumbent's own score moves between folds. A gain far below that is
-not a smaller gain, it is noise, and treating it as progress is how a run talks
-itself into another six experiments.
+wrong is silent. The yardstick is the incumbent's own uncertainty: ``val_se``,
+the standard error of the validation score, obtained by resampling the rows it
+was measured on. A gain far below that is not a smaller gain, it is noise, and
+treating it as progress is how a run talks itself into another six experiments.
+
+This was ``fold_spread`` until 0022 — the fold-to-fold wobble of ``cv_score``,
+which is a sound estimate for a quantity nothing has been ranked by since 0019.
+The two were numerically close on the dataset where it hid, and the bar is a
+*quarter* of the yardstick, so the bar came out four times smaller than the noise
+in the number it gated.
 
 The second interesting part is *which* failures should count against a run at
 all. Trying eight ideas that do not work in order to find the ninth that does is
@@ -85,10 +91,32 @@ def _attempts(leaderboard: list[dict]) -> list[dict]:
     ]
 
 
+def _noise(row: dict) -> float:
+    """The incumbent's own uncertainty, in the units of the number being compared.
+
+    `val_se` is the standard error of `val_score` — the quantity every comparison
+    here is made on since 0019 — obtained by resampling the validation rows the
+    score was computed from. It is the right ruler, and 0022 is the record of
+    what went wrong while it was the wrong one: on house-prices the bar was
+    `0.25 x fold_spread = 0.0025` while the noise in the compared number was
+    `0.0098`, so every sub-noise gain passed and was recorded as progress.
+
+    `fold_spread` is the fallback, not the default: it measures how much
+    `cv_score` moved between folds, which is a fine estimate of the wrong
+    quantity. It is used only when `val_se` is absent — a validation score that
+    could not be computed, a validation half too small to resample, or a
+    leaderboard row written before `val_se` existed.
+    """
+    se = row.get("val_se")
+    if se is not None:
+        return float(se)
+    return float(row.get("fold_spread") or 0.0)
+
+
 def _since_improvement(rows: list[dict], higher_better: bool, min_gain_ratio: float) -> int:
     """How many of ``rows`` have passed since one of them was a real improvement."""
     incumbent = None
-    incumbent_spread = 0.0
+    incumbent_noise = 0.0
     last_progress = -1
     for i, r in enumerate(rows):
         score = r["val_score"]
@@ -96,9 +124,9 @@ def _since_improvement(rows: list[dict], higher_better: bool, min_gain_ratio: fl
             progress = True
         else:
             gain = (score - incumbent) if higher_better else (incumbent - score)
-            # The incumbent's own fold-to-fold movement is the noise floor. A
-            # "gain" underneath it is a coin flip that landed our way.
-            progress = gain > min_gain_ratio * max(incumbent_spread, 1e-12)
+            # The incumbent's own uncertainty is the noise floor. A "gain"
+            # underneath it is a coin flip that landed our way.
+            progress = gain > min_gain_ratio * max(incumbent_noise, 1e-12)
 
         better = incumbent is None or (
             score > incumbent if higher_better else score < incumbent
@@ -108,11 +136,47 @@ def _since_improvement(rows: list[dict], higher_better: bool, min_gain_ratio: fl
             # sub-noise gains cannot be laundered into progress by resetting the
             # comparison point each time.
             incumbent = score
-            incumbent_spread = float(r.get("fold_spread") or 0.0)
+            incumbent_noise = _noise(r)
         if progress:
             last_progress = i
 
     return len(rows) - 1 - last_progress if rows else 0
+
+
+def _latest_gain_inside_one_se(rows: list[dict], higher_better: bool) -> dict | None:
+    """Did the newest experiment beat the incumbent by less than one standard error?
+
+    **Advisory, and deliberately not wired to anything that refuses.** The bar the
+    stop rule enforces is ``min_gain_ratio`` (0.25) times the yardstick, i.e. a
+    *quarter* of a standard error. This reports the other threshold — a whole one
+    — which is what 0022's prose actually argues for and what the arithmetic in
+    0028 shows the enforced bar does not catch.
+
+    Which of the two should gate the run is an open question that needs a second
+    dataset. Until then the agent is *told* and decides, because telling costs
+    nothing and refuses nothing — and whether it listens is itself the evidence
+    for which way to settle it.
+
+    ``None`` unless there is something to say: no gain, a gain larger than the
+    noise, or no `val_se` to compare against.
+    """
+    if len(rows) < 2:
+        return None
+    latest = rows[-1]
+    se = latest.get("val_se")
+    if se is None or latest.get("val_score") is None:
+        return None
+
+    earlier = [r["val_score"] for r in rows[:-1] if r.get("val_score") is not None]
+    if not earlier:
+        return None
+    incumbent = max(earlier) if higher_better else min(earlier)
+
+    score = latest["val_score"]
+    gain = (score - incumbent) if higher_better else (incumbent - score)
+    if gain <= 0 or gain > se:
+        return None
+    return {"id": latest.get("id"), "gain": float(gain), "val_se": float(se)}
 
 
 def table_status(
@@ -165,6 +229,7 @@ def evaluate(leaderboard: list[dict], metric: str, policy: StopPolicy) -> dict:
         rows, greater_is_better(metric), policy.min_gain_ratio
     )
     n_experiments = len(leaderboard)
+    inside_noise = _latest_gain_inside_one_se(rows, greater_is_better(metric))
 
     stalled = bool(rows) and since_improvement >= policy.patience
     exhausted = n_experiments >= policy.max_experiments
@@ -189,6 +254,8 @@ def evaluate(leaderboard: list[dict], metric: str, policy: StopPolicy) -> dict:
         "since_improvement": since_improvement,
         "patience": policy.patience,
         "experiments_remaining": max(policy.max_experiments - n_experiments, 0),
+        # Advisory only: this does not gate anything. See `_latest_gain_inside_one_se`.
+        "latest_gain_inside_one_se": inside_noise,
     }
 
 
@@ -216,7 +283,19 @@ def advisory(status: dict, table: dict | None = None) -> str:
     else:
         note = f"{status['since_improvement']} experiment(s) since the last real improvement."
 
-    return (
+    line = (
         f"{note} {status['experiments_remaining']} experiments remain in this run's "
         f"budget; the run ends after {status['patience']} in a row without an improvement."
     )
+
+    # Said last so it is the thing most recently read, and phrased as a fact about
+    # the measurement rather than an instruction: the run is not being stopped and
+    # nothing is being refused. What to do about it is the reader's call.
+    noise = status.get("latest_gain_inside_one_se")
+    if noise:
+        line += (
+            f" Note that this beat the previous best by {noise['gain']:.4f}, which is "
+            f"inside one standard error of the validation score ({noise['val_se']:.4f}) "
+            "— a gain that size is as likely to be the split as the model."
+        )
+    return line

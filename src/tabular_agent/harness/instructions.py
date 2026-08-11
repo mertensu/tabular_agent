@@ -53,10 +53,10 @@ own half — when it improves and `val_score` does not, the gain was in the fold
 Both are in the direction `inspect_data` reported.
 
 Every `vs_...` field and every `contribution` is a **gain**: positive is better
-whatever the metric. Improvement is measured against `fold_spread`, so a gain
-well under it does not count as one, and a table that takes a few experiments
-without a real improvement stops being trainable. `note` says where that leaves
-you.
+whatever the metric. Improvement is measured against `val_se`, the uncertainty of
+the score being compared, so a gain well under it does not count as one, and a
+table that takes a few experiments without a real improvement stops being
+trainable. `note` says where that leaves you.
 
 `vs_baseline`, `vs_source_table` and `explain_table` answer three different
 questions: whether this is worth shipping at all, whether the columns added since

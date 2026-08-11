@@ -8,6 +8,62 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-11 (latest+1) — `val_se` shipped; the bar it gates is deliberately still open
+
+**Machine:** MacBook Air | **Branch:** master | **233 tests pass.**
+
+**Decision record `0028`. It corrects one claim in `0022` — read it before
+assuming "0022 is implemented" means the run-3 failure cannot recur. It can.**
+
+### Done this session
+
+**1. `val_se` — 0022's decision, built.** `_score_on_val` bootstraps the
+validation score over its own rows (200 resamples, seeded from the run seed, so
+control flow stays deterministic). It lands on the leaderboard row, `meta.json`,
+the training payload, `explore_journal`'s `lb` frame, and the report's headline
+(`0.138 (+/- 0.012)`). `stop._noise` prefers it over `fold_spread`, which stays as
+the fallback for old rows and un-resamplable validation halves.
+
+Verified against 0022's independent bootstrap (~0.0098): we measure **0.0122** on
+house-prices lgbm. `val_se / fold_spread` runs **1.12–1.40x** on this dataset.
+
+**2. The correction, which is the important part.** 0022 claims the fix "would have
+told run 3 at e4 that its 0.008 gain sat inside the noise". **It would not:**
+
+    old:  0.25 x fold_spread (0.01008) = 0.00252  ->  gain 0.00808 PASSES
+    new:  0.25 x val_se      (0.01223) = 0.00306  ->  gain 0.00808 PASSES
+
+The enforced bar is a **quarter** of the yardstick. Rejecting that gain needs
+`min_gain_ratio > 0.66`. 0022 fixed the *category* error (right quantity) and left
+the *magnitude* error (factor of four) untouched — and its own opening sentence,
+"the bar is four times smaller than the noise", is the accurate statement.
+
+**3. An advisory, shipped; the bar, not changed.** `note` now says when a gain is
+inside one standard error — refuses nothing, gates nothing, silent unless the gain
+is in the band between zero and 1 SE. **`min_gain_ratio` stays at 0.25 pending a
+second dataset, which Ulf is supplying.**
+
+### Gotchas / open questions
+
+- **`min_gain_ratio` is the open question, and it needs the second dataset.** What
+  to measure when it lands: (a) does `val_se / fold_spread` diverge more than
+  house-prices' 1.1–1.4x — that is how much the category fix was worth; (b) what
+  ratio separates gains that survive a held-out check from ones that do not.
+- **A stricter bar costs less than 0022 implied.** `min_gain_ratio` does not refuse
+  experiments — it decides whether one counts as *progress* for the patience
+  counters. Higher bar = the run **stops sooner**, not the agent blocked.
+- **Advisory is, on this project's own evidence, the option least likely to work**
+  — 0024, v4, and 0027 are three recorded failures of advisory guidance. Shipped
+  anyway because it is free and it *is* the experiment: if the agent is told a gain
+  is noise and grinds on, that is data point four and the structural version gets
+  made on evidence.
+- **`val_se` understates uncertainty under an ordered split** (`split_on`): the
+  bootstrap assumes i.i.d. validation rows, which a time-ordered split is not.
+  Inherited from 0022, unaddressed.
+- **The payload is 14 fields now.** 0018's guard caught the addition and forced it
+  to be declared, which is the guard working as designed.
+- **No notebook yet for `val_se`.** This chunk is untaught.
+
 ## 2026-08-11 (latest) — v7 ran: the brief does not cut the orientation tax
 
 **Machine:** MacBook Air | **Branch:** master | **226 tests pass** (no library code
