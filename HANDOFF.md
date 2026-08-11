@@ -157,6 +157,38 @@ second dataset 0028's `min_gain_ratio` question has been waiting for.**
   `fireworks/deepseek-v4-flash-0731` and compare. Budget for it — reasoning tokens
   are billed output, and v5 spent only 29k output tokens precisely because it never
   thought.
+
+- **Why tensorx behaves this way: no documentation says. Two things are known.**
+  Searched; nothing states the limitation. What was found:
+
+  *The wrong flag has a mechanism.* TensorX's own docs say "The List Models API
+  does not currently return per-model capability flags." So Requesty cannot be
+  reading `supports_reasoning` from the provider — it is attached to the **model
+  family** (DeepSeek V4 Flash does support thinking) rather than to the **route**.
+  General lesson: on a multi-provider gateway, a capability flag describes the
+  model, and only a real call describes the route.
+
+  *TensorX is a small EU-sovereign host* (Dublin/Helsinki, OpenAI-compatible,
+  $0.04/M input). Their docs do not list `deepseek-v4-flash-0731` at all and their
+  stated pick for "complex reasoning tasks" is the older `deepseek-r1-0528` —
+  consistent with a deployment that never enabled the V4 thinking path. Inference,
+  not documentation.
+
+  *Ruled out empirically:* it is **not** a response-parsing gap. If thinking
+  happened and `reasoning_content` merely failed to be split out, the chain of
+  thought would arrive inside `content`, usually in `<think>` tags. A hotel-riddle
+  prompt at `reasoning_effort: max` returned 266 tokens of direct answer with no
+  `<think>` anywhere. Thinking never triggers.
+
+- **Pre-flight for the thinking re-run: PASSED, and it was worth checking.**
+  DeepSeek V4 thinking + tool calls is widely broken across intermediaries
+  (litellm, opencode, codex and n8n all have open issues) because `reasoning_content`
+  must be echoed back on every assistant message once a tool call enters the
+  conversation, and clients drop it → 400. **Our harness is exactly a multi-turn
+  tool loop, so this was the real risk.** Tested: pydantic-ai 2.19.0 on
+  `fireworks/deepseek-v4-flash-0731` completed a two-call tool loop with thinking
+  on, surfacing `thinking` parts and round-tripping correctly. No harness change
+  needed.
 - **Next:** `min_gain_ratio` (0028) now has its second dataset **and** a validated
   yardstick, which is the strongest it has ever been positioned. Otherwise the
   time-windowed group aggregate (the deep one, still unbuilt).
