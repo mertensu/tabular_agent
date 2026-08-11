@@ -76,7 +76,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from prep_rossmann import ABOUT, COLUMN_NOTES, METRIC, OUT, SPLIT_ON, TEST_OUT  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RUN_DIR = os.path.join(REPO, "_runs", "rossmann_v2")
+RUN_DIR = os.path.join(REPO, "_runs", "rossmann_v3")
 MODEL = "tensorx/deepseek-v4-flash-0731"
 
 #: A pilot. Below 0025's ~35 crossover, so this runs as one conversation.
@@ -91,9 +91,12 @@ USE_EPISODES = MAX_EXPERIMENTS > EPISODE_CROSSOVER
 TOOL_CALLS_PER_EPISODE = 16
 MAX_EPISODES = 12
 
-#: Backstop for the single-conversation path: generous enough not to interfere
-#: with a 25-experiment budget, tight enough that a loop cannot bill all night.
-SINGLE_RUN_CALL_LIMIT = 120
+#: Backstop for the single-conversation path, sized *per experiment* rather than
+#: absolutely. v1 spent 44 calls on 17 experiments; v2 spent 120 on 13 and was cut
+#: off before it could finalize. Calls-per-experiment is a property of how the
+#: agent happens to work on a dataset, so a fixed number is a budget for one run's
+#: habits and a guillotine for another's.
+CALLS_PER_EXPERIMENT = 12
 
 #: ~45 days of validation against Kaggle's 48-day test window.
 VAL_FRACTION = 0.05
@@ -325,7 +328,8 @@ def main() -> int:
             agent = build_agent(gateway_model(MODEL))
             t0 = time.time()
             raw, output, ended = drive(
-                agent, RESUME if resuming else FIRST, session, SINGLE_RUN_CALL_LIMIT
+                agent, RESUME if resuming else FIRST, session,
+                MAX_EXPERIMENTS * CALLS_PER_EXPERIMENT,
             )
             calls = tool_calls(raw)
             episodes.append({
@@ -351,6 +355,19 @@ def main() -> int:
 
     with open(os.path.join(RUN_DIR, "episodes.json"), "w") as f:
         json.dump(episodes, f, indent=2)
+
+    # The agent normally calls `finalize_run` itself, and when it does not — it ran
+    # out of calls, the provider gave up — the run has a leaderboard, a winner and
+    # nothing to show for it. Packaging it here is a *driver* decision, not a
+    # library one: 0012 gives the harness the stop, and this is the harness
+    # noticing the conversation ended without one.
+    j = journal.load(RUN_DIR)
+    if j.get("leaderboard") and not j["stop"]["finalized"]:
+        from tabular_agent.harness import tools
+        print("\nthe run ended without finalize_run — packaging its best model")
+        report = tools.finalize_run(session)
+        print(f"  bundled {report['best_experiment_id']} "
+              f"({report['metric']} {report['val_score']:.5f})")
 
     # ------------------------------------------------------------------ results
     print(f"\n{'=' * 70}")
