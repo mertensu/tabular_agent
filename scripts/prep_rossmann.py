@@ -149,6 +149,33 @@ METRIC = "rmspe"
 SPLIT_ON = "Date"
 
 
+TEST_OUT = os.path.join(RAW, "test_joined.parquet")
+
+
+def prep_test() -> pd.DataFrame:
+    """The competition's test rows, put through the *same* join and typing.
+
+    Kept here rather than in the runner so there is one definition of "what a row
+    of this dataset looks like". A bundle rebuilds its own features from raw
+    columns, so anything done differently between these two files becomes a silent
+    train/serve skew — the exact failure the lineage replay exists to prevent.
+
+    Two differences from the training file are the data's, not ours: there is no
+    `Sales` column (that is the submission) and no `Customers` column (which is
+    what makes training on it a leak). `Open` is missing for 11 rows, a known quirk
+    of this competition, and is left missing — GBDTs take NaN, and inventing a
+    value here would be a modelling decision smuggled into a prep script.
+    """
+    test = pd.read_csv(os.path.join(RAW, "test.csv"), low_memory=False,
+                       parse_dates=["Date"])
+    store = pd.read_csv(os.path.join(RAW, "store.csv"), low_memory=False)
+    joined = test.merge(store, on="Store", how="left", validate="many_to_one")
+    assert len(joined) == len(test), "the join changed the row count"
+    joined["StateHoliday"] = joined["StateHoliday"].astype(str)
+    joined.to_parquet(TEST_OUT, index=False)
+    return joined
+
+
 def main() -> int:
     train_csv = os.path.join(RAW, "train.csv")
     store_csv = os.path.join(RAW, "store.csv")
@@ -189,6 +216,11 @@ def main() -> int:
     undescribed = [c for c in joined.columns if c not in COLUMN_NOTES]
     if undescribed:
         print(f"NOT described: {undescribed}")
+
+    test = prep_test()
+    print(f"wrote {TEST_OUT}  {test.shape}")
+    print(f"  in train and not in test: "
+          f"{sorted(set(joined.columns) - set(test.columns))}")
 
     zero = (joined["Sales"] == 0).mean()
     print(f"\nzero-sales rows kept: {zero:.1%} (rmspe does not score them)")

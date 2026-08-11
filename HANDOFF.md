@@ -8,6 +8,63 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-11 (latest+4) — Rossmann runner written, NOT run; a third failure mode found
+
+**Machine:** MacBook Air | **Branch:** master | **250 tests pass.**
+
+`scripts/run_rossmann.py` exists and **has not been run** — no API spend on this
+dataset yet. `prep_rossmann.py` now also writes `test_joined.parquet` (the
+competition's test rows through the same join and typing), so a run can end in a
+real submission.
+
+Config: `rmspe`, `split_on="Date"`, `val_fraction=0.05` (~45-day horizon vs
+Kaggle's 48), `max_experiments=25`. That is **below 0025's ~35 crossover, so it
+runs as one conversation, not episodes** — the switch is in the script, since
+where it should live is still open.
+
+### The finding, from dry-running the machinery without the LLM
+
+Dropping `Customers` has **two** failure modes, not one, and only the third
+option is submittable:
+
+| what the agent does | val_score | bundle predicts test? |
+|---|---|---|
+| keeps `Customers` | 0.314 (flattered) | **no** — model needs a missing column |
+| `df.drop(columns=['Customers'])` | 0.372 | **no** — stored transform re-runs and raises |
+| `df.drop(..., errors='ignore')` | 0.372 | yes |
+
+**The middle one is the trap.** The agent does the right thing, the score is
+honest, and the bundle still cannot run: per 0010 a transform is stored as *code*
+and replayed on raw rows, which at predict time never had the column.
+
+**Nothing in the harness can catch it.** `_score_on_val` replays lineage on
+validation rows drawn from the training file, and those still have `Customers`.
+There is no row anywhere in a run that is shaped like a real serving row. The
+first prediction on genuinely unseen data is the first chance to find out — which
+is why the runner attempts a submission and reports the two failures distinctly.
+
+Generalises well past this dataset: **any transform referencing a column absent at
+predict time breaks the bundle silently.** 0011's stability check does not look for
+it (it tests batch-dependence). Worth a decision record if we act on it.
+
+### What the run will measure
+
+1. **Does the agent drop `Customers`?** It is numeric, so it is in the feature
+   matrix *by default* — doing nothing means training on it. The prompt does not
+   mention it; the only reason to act is the dictionary line saying it does not
+   exist at prediction time.
+2. **Does any of this work at 1M rows?** Every earlier run was 1460.
+3. **Is `cv_score` worse than `val_score`?** It should be, under forward chaining.
+   The other direction means something is wrong.
+
+### Gotchas
+
+- **~1094 of 41088 test predictions came out negative** in the dry run. The runner
+  reports them and does **not** clip: flooring in a script would hide a real defect
+  in the fit.
+- `write_submission` finds the bundle at `run_dir/bundle` on disk, because
+  `finalize_run`'s return went to the agent, not to us.
+
 ## 2026-08-11 (latest+3) — The harness owns the exam; CV forecasts when the run does
 
 **Machine:** MacBook Air | **Branch:** master | **250 tests pass.**
