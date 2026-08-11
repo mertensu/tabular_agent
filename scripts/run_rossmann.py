@@ -61,7 +61,7 @@ import time
 from collections import Counter
 
 from pydantic_ai import capture_run_messages
-from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 from pydantic_ai.usage import UsageLimits
 
@@ -118,6 +118,17 @@ whether it worked, stop and summarise what you did and what you would try next.
 Do not call finalize_run unless you are genuinely finished with the whole run."""
 
 
+def serving_columns() -> list[str]:
+    """What will exist when this model is asked for a prediction.
+
+    Read from the competition's own test file rather than written by hand, so it
+    cannot drift from the thing it describes.
+    """
+    import pandas as pd
+
+    return [c for c in pd.read_parquet(TEST_OUT).columns if c != "Id"]
+
+
 def make_session() -> RunSession:
     return RunSession(
         RUN_DIR,
@@ -126,6 +137,7 @@ def make_session() -> RunSession:
         stop_policy=StopPolicy(max_experiments=MAX_EXPERIMENTS),
         val_fraction=VAL_FRACTION,
         split_on=SPLIT_ON,
+        serving_columns=serving_columns(),
     )
 
 
@@ -138,12 +150,24 @@ def tool_calls(raw) -> list[str]:
     ]
 
 
-def drive(agent, prompt, session, call_limit):
-    """One agent run; returns (transcript, calls, output, hit_cap).
+#: Provider failures tolerated before giving up. The first attempt of this run
+#: died on a 502 from the gateway after two experiments — nothing to do with the
+#: harness, and it took the whole conversation with it.
+MAX_PROVIDER_FAILURES = 5
 
-    `capture_run_messages` keeps the transcript even when the cap fires, which is
-    the case most worth reading — a run ended by the harness rather than by the
-    agent.
+
+def drive(agent, prompt, session, call_limit):
+    """One agent run; returns (transcript, output, ended).
+
+    `capture_run_messages` keeps the transcript even when the run does not return
+    normally, which is the case most worth reading: a run ended by the harness or
+    by the provider rather than by the agent.
+
+    A transient provider error is caught here and reported as an ending like any
+    other. It is *not* retried at this level — retrying inside one conversation
+    would resend a context the provider just failed on. The caller starts a fresh
+    agent instead, which is the same move an episode makes and works for the same
+    reason: the state is the run directory, not the conversation (0003, 0024).
     """
     with capture_run_messages() as messages:
         try:
@@ -152,10 +176,13 @@ def drive(agent, prompt, session, call_limit):
                 deps=Deps(session=session),
                 usage_limits=UsageLimits(tool_calls_limit=call_limit),
             )
-            return json.loads(result.all_messages_json()), result.output, False
+            return json.loads(result.all_messages_json()), result.output, "agent"
         except UsageLimitExceeded:
             raw = json.loads(ModelMessagesTypeAdapter.dump_json(messages))
-            return raw, f"[cut at {call_limit} tool calls]", True
+            return raw, f"[cut at {call_limit} tool calls]", "cap"
+        except ModelHTTPError as e:
+            raw = json.loads(ModelMessagesTypeAdapter.dump_json(messages))
+            return raw, f"[provider error {e.status_code}]", "provider"
 
 
 def summarise_customers(run_dir: str) -> dict:
@@ -260,7 +287,7 @@ def main() -> int:
             before = len(journal.load(RUN_DIR).get("leaderboard") or [])
             agent = build_agent(gateway_model(MODEL))
             t0 = time.time()
-            raw, output, hit_cap = drive(
+            raw, output, ended = drive(
                 agent, EPISODE_FIRST if i == 1 else RESUME, session,
                 TOOL_CALLS_PER_EPISODE,
             )
@@ -269,13 +296,12 @@ def main() -> int:
             episodes.append({
                 "episode": i, "experiments_before": before, "experiments_after": after,
                 "tool_calls": calls, "elapsed_min": round((time.time() - t0) / 60, 2),
-                "ended_by": "cap" if hit_cap else "agent", "output": output,
+                "ended_by": ended, "output": output,
                 **{k: context_profile(raw).get(k)
                    for k in ("peak_input_tokens", "n_requests")},
             })
             print(f"\nEPISODE {i}: {after - before} new experiments, {len(calls)} calls, "
-                  f"{episodes[-1]['elapsed_min']:.1f} min, ended by "
-                  f"{'CAP' if hit_cap else 'agent'}")
+                  f"{episodes[-1]['elapsed_min']:.1f} min, ended by {ended}")
             print(f"  {dict(Counter(calls))}")
             with open(os.path.join(RUN_DIR, f"transcript_ep{i}.json"), "w") as f:
                 json.dump(raw, f)
@@ -285,20 +311,43 @@ def main() -> int:
                 print("  !! no experiments added — stopping the loop")
                 break
     else:
-        agent = build_agent(gateway_model(MODEL))
-        raw, output, hit_cap = drive(agent, FIRST, session, SINGLE_RUN_CALL_LIMIT)
-        calls = tool_calls(raw)
-        episodes.append({
-            "episode": 1, "tool_calls": calls, "ended_by": "cap" if hit_cap else "agent",
-            "output": output, "elapsed_min": round((time.time() - t_start) / 60, 2),
-            **{k: context_profile(raw).get(k)
-               for k in ("peak_input_tokens", "n_requests")},
-        })
-        print(f"\n{len(calls)} tool calls, ended by {'CAP' if hit_cap else 'agent'}")
-        print(f"  {dict(Counter(calls))}")
-        print(f"\n{output}")
-        with open(os.path.join(RUN_DIR, "transcript.json"), "w") as f:
-            json.dump(raw, f)
+        # One conversation, but restarted on a fresh agent if the provider drops
+        # it. That restart *is* an episode — same run dir, new context — which is
+        # why nothing extra is needed to make it work.
+        failures = 0
+        attempt = 0
+        while attempt < 1 + MAX_PROVIDER_FAILURES:
+            attempt += 1
+            j = journal.load(RUN_DIR)
+            resuming = bool(j.get("leaderboard"))
+            if j["stop"]["finalized"]:
+                break
+            agent = build_agent(gateway_model(MODEL))
+            t0 = time.time()
+            raw, output, ended = drive(
+                agent, RESUME if resuming else FIRST, session, SINGLE_RUN_CALL_LIMIT
+            )
+            calls = tool_calls(raw)
+            episodes.append({
+                "attempt": attempt, "tool_calls": calls, "ended_by": ended,
+                "output": output, "resumed": resuming,
+                "elapsed_min": round((time.time() - t0) / 60, 2),
+                **{k: context_profile(raw).get(k)
+                   for k in ("peak_input_tokens", "n_requests")},
+            })
+            print(f"\nattempt {attempt}: {len(calls)} tool calls, ended by {ended}"
+                  f"{' (resumed)' if resuming else ''}")
+            print(f"  {dict(Counter(calls))}")
+            with open(os.path.join(RUN_DIR, f"transcript_{attempt}.json"), "w") as f:
+                json.dump(raw, f)
+
+            if ended != "provider":
+                print(f"\n{output}")
+                break
+            failures += 1
+            print(f"  !! provider error ({failures}/{MAX_PROVIDER_FAILURES}); "
+                  "restarting on the same run dir")
+            time.sleep(20)
 
     with open(os.path.join(RUN_DIR, "episodes.json"), "w") as f:
         json.dump(episodes, f, indent=2)

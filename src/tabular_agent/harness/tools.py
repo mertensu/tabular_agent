@@ -85,6 +85,105 @@ def _fold_order(session: RunSession, df: pd.DataFrame):
     return df[session.split_on].to_numpy()
 
 
+#: Rows in the serving probe. Enough that a transform doing real arithmetic
+#: behaves normally; few enough that the replay costs nothing.
+SERVING_PROBE_ROWS = 20
+
+
+def _unavailable_at_predict_time(session: RunSession, df: pd.DataFrame) -> list[str]:
+    """Raw columns of ``df`` that will not exist when a prediction is asked for."""
+    if session.serving_columns is None:
+        return []
+    target = session.resolved().target
+    return [
+        c for c in df.columns
+        if c != target and c not in session.serving_columns
+    ]
+
+
+def _refuse_if_unservable(
+    session: RunSession, path: str, df: pd.DataFrame, feature_names: list[str]
+) -> dict | None:
+    """``None`` if this model could actually be served, otherwise the refusal.
+
+    The check is a **replay, not a name comparison**, and it has to be: almost no
+    feature is a raw column. `Store_te`, `Year`, `CompetitionOpenMonths` are all
+    derived, and none of them appears in a serving schema either. What matters is
+    whether the table's lineage can *produce* the model's columns from the columns
+    that will exist — so this builds a serving-shaped frame and runs the lineage
+    over it, which is exactly what `predict_bundle` will do later.
+
+    One mechanism, two failures, and the second is why a name comparison would not
+    have been enough (Rossmann, 2026-08-11):
+
+    * the model trains on a column that will not exist — the leak;
+    * the model does not use the column, but a stored transform *references* it,
+      and per 0010 the code is the artifact and gets re-run on rows that never had
+      it. `df.drop(columns=["X"])` fails this; `errors="ignore"` survives it.
+
+    Refused rather than silently dropped, and refused *before* the fit: a run that
+    discovers this at `finalize_run` has spent its whole budget optimising a
+    number measured on rows that will never exist again. Which is not
+    hypothetical — it is what happened, and the leaked score won the leaderboard
+    while ten genuine improvements were counted as failures.
+    """
+    if session.serving_columns is None:
+        return None
+
+    # The probe is built from **raw** rows, not from the table being trained on.
+    # A table's lineage replays every step from raw input — that is what
+    # `_score_on_val` does and what `predict_bundle` will do — so handing it an
+    # already-transformed frame would re-apply the chain to its own output. It
+    # happens to give the right answer for a single step and stops doing so as
+    # soon as a table has a parent.
+    spec = session.resolved()
+    raw = load_table(session.data_path).head(SERVING_PROBE_ROWS)
+    absent = _unavailable_at_predict_time(session, raw)
+    probe = raw.drop(columns=absent + [spec.target], errors="ignore")
+
+    try:
+        produced = _load_lineage(path, spec.task_type).transform(probe)
+    except Exception as e:
+        return {
+            "trained": False,
+            "table": session.rel(path),
+            "unservable": True,
+            "reason": (
+                f"this table cannot be rebuilt at prediction time: replaying its "
+                f"steps over rows without {absent} raised {type(e).__name__}: {e}"
+            ),
+            "columns_not_available_at_predict_time": absent,
+            "next": (
+                "the stored code is re-run on raw rows at prediction time, and "
+                "those rows never had these columns. Guard the reference — "
+                "`df.drop(columns=[...], errors='ignore')`, or check membership "
+                "first — and build the table again."
+            ),
+        }
+
+    missing = [c for c in feature_names if c not in produced.columns]
+    if not missing:
+        return None
+    return {
+        "trained": False,
+        "table": session.rel(path),
+        "unservable": True,
+        "reason": (
+            f"{len(missing)} of this table's feature columns cannot exist at "
+            f"prediction time: {missing[:8]}. Training on them would produce a "
+            f"score measured on rows that will never occur again, and a model "
+            f"that cannot be asked for a prediction at all."
+        ),
+        "columns_not_available_at_predict_time": absent,
+        "next": (
+            "build a table without them — transform_features with "
+            "`df.drop(columns=[...], errors='ignore')` — and train on that. The "
+            "guard matters: the code is stored and re-run on rows that never had "
+            "the columns."
+        ),
+    }
+
+
 def _feature_frame(df: pd.DataFrame, target: str) -> tuple[pd.DataFrame, list[str]]:
     """Numeric feature matrix + the names of the columns that had to be dropped.
 
@@ -235,6 +334,7 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
     )
     journal.set_split(session.run_dir, session.split_record())
 
+    unavailable = _unavailable_at_predict_time(session, df)
     columns = prof["columns"]
     truncated = len(columns) > MAX_REPORTED_COLUMNS
     shown = dict(list(columns.items())[:MAX_REPORTED_COLUMNS])
@@ -259,6 +359,12 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
         "columns": shown,
         "columns_truncated": truncated,
         "non_numeric_columns": dropped,
+        # Only when a serving schema was supplied, and only when something is
+        # actually missing from it. This is the one fact no amount of profiling
+        # recovers, and training on such a column is refused rather than warned
+        # about — the note says so, so the refusal is not a surprise.
+        **({"columns_not_available_at_predict_time": unavailable}
+           if unavailable else {}),
         # Present only when the data's owner supplied it. Facts about the dataset
         # as a whole — what a row is, which rows the real scoring ignores, how it
         # was collected — that have no single column to attach to. Per-column
@@ -743,6 +849,13 @@ def train_tabular_model(
             "no numeric feature columns available to train on; use transform_features "
             "or fit_encoding to produce some first"
         )
+    # Before the fit, not after: a refusal that arrives once the model is trained
+    # has already spent the experiment it was meant to save.
+    if enforce_stop:
+        refusal = _refuse_if_unservable(session, path, df, list(X.columns))
+        if refusal is not None:
+            return refusal
+
     y = df[spec.target]
 
     folds = make_folds(y, spec.task_type, n_splits=spec.n_splits, seed=spec.seed,

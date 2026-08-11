@@ -1363,6 +1363,106 @@ def test_it_answers_the_question_no_single_result_can(session):
     assert set(out["result"]) == {"frequency", "target"}
 
 
+def _leaky(tmp_path):
+    """A dataset shaped like Rossmann: one column recorded alongside the target
+    and unavailable when a prediction is asked for."""
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.default_rng(0)
+    n = 300
+    df = pd.DataFrame({
+        "size": rng.uniform(20, 200, n),
+        "region": rng.integers(0, 5, n),
+        "footfall": rng.integers(10, 400, n),   # measured on the day; not served
+    })
+    df["revenue"] = df["footfall"] * 9 + df["size"] * 3
+    path = tmp_path / "shop.csv"
+    df.to_csv(path, index=False)
+    return str(path), ["size", "region"]
+
+
+def test_training_on_a_column_that_will_not_exist_is_refused(tmp_path):
+    """The Rossmann failure, structurally prevented.
+
+    `footfall` correlates hugely with the target, sits in the training file, and
+    is absent at prediction time. Nothing computable from the training data says
+    so — the validation half comes from the same file and has the column too, so
+    it *confirms* the gain rather than catching it.
+    """
+    path, serving = _leaky(tmp_path)
+    session = RunSession(str(tmp_path / "run"), path, TaskSpec(target="revenue"),
+                         serving_columns=serving)
+
+    assert inspect_data(session)["columns_not_available_at_predict_time"] == ["footfall"]
+
+    out = train_tabular_model(session, model_type="lgbm")
+    assert out["trained"] is False
+    assert out["unservable"] is True
+    assert "footfall" in out["reason"]
+    # Refused as a return value, not an exception (0013), and nothing recorded:
+    # a refusal must not cost the experiment it exists to save.
+    assert not journal.load(session.run_dir)["leaderboard"]
+
+
+def test_a_transform_that_references_the_column_is_refused_too(tmp_path):
+    """The second failure, and the one no name comparison would find.
+
+    The model does not use the column — but per 0010 the transform is stored as
+    *code* and re-run on raw rows at prediction time, and those rows never had it.
+    A plain drop raises there; `errors='ignore'` survives.
+    """
+    path, serving = _leaky(tmp_path)
+    session = RunSession(str(tmp_path / "run"), path, TaskSpec(target="revenue"),
+                         serving_columns=serving)
+    inspect_data(session)
+
+    unguarded = transform_features(session, "def transform_features(df):\n"
+                                            "    return df.drop(columns=['footfall'])")
+    out = train_tabular_model(session, table=unguarded["table"], model_type="lgbm")
+    assert out["trained"] is False
+    assert "cannot be rebuilt at prediction time" in out["reason"]
+    assert "errors='ignore'" in out["next"]
+
+    guarded = transform_features(session, "def transform_features(df):\n"
+                                          "    return df.drop(columns=['footfall'], "
+                                          "errors='ignore')")
+    ok = train_tabular_model(session, table=guarded["table"], model_type="lgbm")
+    assert ok["trained"] is True
+
+
+def test_the_check_replays_from_raw_rows_not_the_trained_table(tmp_path):
+    """A table with a parent must not be probed with its own output: the lineage
+    replays every step from raw input, so handing it a transformed frame applies
+    the chain to itself. Single-step tables hide this; chained ones do not."""
+    path, serving = _leaky(tmp_path)
+    session = RunSession(str(tmp_path / "run"), path, TaskSpec(target="revenue"),
+                         serving_columns=serving)
+    inspect_data(session)
+
+    first = transform_features(session, "def transform_features(df):\n"
+                                        "    return df.drop(columns=['footfall'], "
+                                        "errors='ignore')")
+    second = transform_features(session, "def transform_features(df):\n"
+                                         "    df = df.copy()\n"
+                                         "    df['per_region'] = df['size'] / (df['region'] + 1)\n"
+                                         "    return df", table=first["table"])
+
+    out = train_tabular_model(session, table=second["table"], model_type="lgbm")
+    assert out["trained"] is True, out.get("reason")
+    assert "per_region" in out["features"] if "features" in out else True
+
+
+def test_no_serving_schema_means_no_check(tmp_path):
+    """The default. Most datasets are their own serving format, and a run that was
+    told nothing must behave exactly as it did before this existed."""
+    path, _ = _leaky(tmp_path)
+    session = RunSession(str(tmp_path / "run"), path, TaskSpec(target="revenue"))
+
+    assert "columns_not_available_at_predict_time" not in inspect_data(session)
+    assert train_tabular_model(session, model_type="lgbm")["trained"] is True
+
+
 def test_the_data_dictionary_reaches_the_agent(tmp_path):
     """The only channel by which the *meaning* of a column reaches the agent.
 

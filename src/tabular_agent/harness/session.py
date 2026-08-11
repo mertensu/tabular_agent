@@ -42,6 +42,7 @@ class RunSession:
         stop_policy: StopPolicy | None = None,
         val_fraction: float = 0.2,
         split_on: str | None = None,
+        serving_columns: list[str] | None = None,
     ):
         self.ctx = RunContext(run_dir)
         # The file the user handed us. Never trained on directly — `data_path`
@@ -58,6 +59,18 @@ class RunSession:
         # auto-detected: guessing which column is time and being wrong produces a
         # split that looks principled and is not, and the failure is silent.
         self.split_on = split_on
+        # Which columns will exist when this model is asked for a prediction.
+        # `None` means "assume everything here will be there", which is the right
+        # default for a table that is its own serving format and wrong for every
+        # dataset where an outcome was recorded alongside the target.
+        #
+        # This is the only fact in the harness that cannot be derived from the
+        # training data by any means. Rossmann's `Customers` correlates 0.895 with
+        # the target, sits in the training file, is absent from the test file, and
+        # nothing in a run can tell — the validation half is drawn from the same
+        # file and has the column too, so it *confirms* the leak instead of
+        # catching it.
+        self.serving_columns = list(serving_columns) if serving_columns else None
         self._resolved: ResolvedSpec | None = None
         self._split: tuple[str, str] | None = None
 

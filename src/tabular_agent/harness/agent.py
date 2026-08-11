@@ -186,6 +186,12 @@ def build_agent(model=DEFAULT_MODEL):
     def inspect_data(ctx: RunContext[Deps], table: str | None = None) -> dict:
         """Profile a table: shape, per-column dtype/missing/unique, task type and metric.
 
+        Read `columns_not_available_at_predict_time` if it is there: those columns
+        exist while you train and will not exist when the model is asked for a
+        prediction, so training on them is refused. Removing one takes a guarded
+        drop — `df.drop(columns=[...], errors="ignore")` — because the transform
+        code is stored and re-run on rows that never had the column.
+
         Args:
             table: Path to the table. Omit to use the run's work table.
         """
