@@ -21,6 +21,36 @@ lineage, bundle).
 - They are *not* documentation of how the system currently works. Per-line
   rationale belongs in docstrings and comments, where it cannot drift.
 
+## Datasets are probes, not targets
+
+We run real datasets (house-prices, Rossmann) to **find out what the harness
+cannot express**. The dataset is the instrument; the library is the subject. A
+run's score is a reading, not a goal.
+
+So: **nothing dataset-specific goes into `src/`.** Every capability added because
+a run exposed a gap has to be justified as a gap *any* tabular problem could hit,
+and named in those terms. If the argument for a feature is "it would help on
+Rossmann", it is not an argument.
+
+The test is whether the feature's docstring can be written without naming the
+dataset. "Per-group aggregates of a column, fitted once and replayed" passes.
+"Exclude rows where the store was closed" does not — the general form is "some
+rows should not be trained on", and that is what gets built.
+
+Dataset-specific knowledge has exactly two sanctioned homes, both outside the
+library: `scripts/prep_*.py` (the join, the typing, the data dictionary, the
+metric and split for *that* competition) and `TaskSpec.notes` / `column_notes`,
+which the data's owner fills in per run.
+
+Two things that follow, and both have already been tempting:
+
+- **Do not tune the library against a leaderboard.** A change that improves one
+  score and cannot be defended on its own terms is leaderboard-fitting, which is
+  the failure 0022 exists to record — one level up.
+- **A finding can be real and still not be ours to fix.** Rossmann's winner used
+  external weather data; that stays out (0001). The 0.985 prediction multiplier
+  stays out because its own author reports the effect was inside the CV noise.
+
 ## Keep Ulf in the loop (quizzes + notebooks)
 
 Ulf is building this to *understand* it, not just to have it built. Code that lands

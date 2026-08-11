@@ -73,6 +73,27 @@ tool.**
 
 ### Design notes for the next chunk
 
+**First, the framing — now a standing rule in `CLAUDE.md` ("Datasets are probes,
+not targets").** Rossmann is an instrument for finding out what the harness cannot
+express. Nothing dataset-specific goes into `src/`, and every capability below has
+to be justified as a gap *any* tabular problem could hit. The test: can the
+docstring be written without naming the dataset?
+
+Both candidate chunks are exactly where that discipline gets tested, so state the
+general form before writing code:
+
+| Rossmann-shaped temptation | the general capability to build |
+|---|---|
+| "exclude rows where the store was closed" | some rows should not be trained on |
+| "per-store average of Open/Customers" | per-group aggregates of a column, fitted once and replayed |
+| "handle the 17% zero-sales rows" | nothing — `rmspe` already excludes them, which is the metric's job |
+| "log the target because rmspe is relative" | nothing — `target_transform` exists; the finding is that the *agent* under-uses it |
+
+The last row matters most: **the log1p finding is a behavioural result about the
+agent, not a missing feature.** Do not add a rule that picks a transform from the
+metric. What it argues for is better evidence about whether advisory text ever
+changes behaviour — which is 0027's open question, not a Rossmann one.
+
 **A `fit_*` group-statistics tool.** Sketch:
 
     fit_group_stats(by=["Store"], value="Open", stat="mean")   -> Store_Open_mean
