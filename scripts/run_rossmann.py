@@ -58,6 +58,7 @@ import json
 import os
 import sys
 import time
+import traceback
 from collections import Counter
 
 from pydantic_ai import capture_run_messages
@@ -76,7 +77,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from prep_rossmann import ABOUT, COLUMN_NOTES, METRIC, OUT, SPLIT_ON, TEST_OUT  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RUN_DIR = os.path.join(REPO, "_runs", "rossmann_v3")
+RUN_DIR = os.path.join(REPO, "_runs", "rossmann_v4")
 MODEL = "tensorx/deepseek-v4-flash-0731"
 
 #: A pilot. Below 0025's ~35 crossover, so this runs as one conversation.
@@ -186,6 +187,16 @@ def drive(agent, prompt, session, call_limit):
         except ModelHTTPError as e:
             raw = json.loads(ModelMessagesTypeAdapter.dump_json(messages))
             return raw, f"[provider error {e.status_code}]", "provider"
+        except Exception as e:
+            # Broad on purpose, and only at the driver. v3 died on an OSError from
+            # a corrupt parquet while holding eight experiments and the best model
+            # any run had produced — and lost all of it, because the exception went
+            # straight past the finalize step. The artifacts were on disk the whole
+            # time. Printed in full rather than swallowed: this catches so the run
+            # can be salvaged, not so a bug can be ignored.
+            traceback.print_exc()
+            raw = json.loads(ModelMessagesTypeAdapter.dump_json(messages))
+            return raw, f"[{type(e).__name__}: {e}]", "error"
 
 
 def summarise_customers(run_dir: str) -> dict:
