@@ -73,6 +73,24 @@ twice. Not proof it is unwanted (n=1, and `Store_te` already covers much of the
 ground) — but it is the fourth time changing what the agent is *told* failed to
 change what it *does* (0024, 0027, 0028).
 
+### Kaggle scored it: 0.135, and our exam was PESSIMISTIC for the first time
+
+| | our val | Kaggle | |
+|---|---|---|---|
+| house-prices run 3 (random split) | 0.11354 | 0.12298 | optimistic by 0.00944 |
+| **rossmann v5 (ordered split)** | **0.13760** | **0.135** | **pessimistic by 0.0026** |
+
+Rank ~2140/3300. The absolute number is middling; **the calibration is the
+finding.** Every earlier run's validation half flattered itself — 0022 exists
+because 91% of a celebrated gain turned out to be optimism. Here the model did
+slightly *better* on unseen data than our own exam predicted.
+
+That is 0029 paying off and the first direct evidence for it: an ordered split plus
+forward-chaining folds asks the competition's question, so there is no
+interpolation premium to hand back. Practical consequence — **this dataset's
+`val_score` is trustworthy in a way house-prices' never was, which is exactly the
+second dataset 0028's `min_gain_ratio` question has been waiting for.**
+
 ### Shipped alongside
 
 - `docs/decisions/0032`, indexed in the decisions README.
@@ -103,10 +121,17 @@ change what it *does* (0024, 0027, 0028).
   experiments (said 10, ran 14).
 - **Ten tools now**, up from eight. 0012's smallness argument gets a little thinner
   each time.
-- **Next:** the submission is unscored — put `_runs/rossmann_v5/submission.csv`
-  through Kaggle and we get the honest number behind 0.13760. Then either the
-  time-windowed group aggregate (the deep one, still unbuilt) or `min_gain_ratio`,
-  which now has its second dataset.
+- **The model does no reasoning as we call it.** `deepseek/deepseek-v4-flash-0731`
+  through Requesty as a plain `OpenAIChatModel`, no reasoning/thinking parameter
+  passed anywhere in `src/` or `scripts/`. Measured across both transcripts: **0
+  reasoning tokens** on 1.40M input / 29k output, every `usage.details` empty, and
+  no thinking parts — only `text`, `tool-call`, `tool-return`, `retry-prompt`. So
+  every behavioural finding in 0024/0025/0027/0032 is on a **non-reasoning** model
+  emitting ~420 output tokens per turn. Whether this model *can* reason if asked is
+  untested; it would be one `model_settings` experiment.
+- **Next:** `min_gain_ratio` (0028) now has its second dataset **and** a validated
+  yardstick, which is the strongest it has ever been positioned. Otherwise the
+  time-windowed group aggregate (the deep one, still unbuilt).
 
 ## 2026-08-11 (latest+6) — A decorative guard, a corrupted run, and the tool the agent keeps asking for
 

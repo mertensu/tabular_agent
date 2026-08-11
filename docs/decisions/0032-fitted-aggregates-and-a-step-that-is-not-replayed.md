@@ -158,6 +158,25 @@ told has failed to change what it does (0024, 0027, 0028).
 Also worth recording: `experiments_using_customers: 0` for the second run running,
 so 0030's guard is holding.
 
+### The submission scored, and the exam was honest for the first time
+
+**Kaggle public: 0.135**, against our `val_score` of 0.13760. Rank ~2140/3300.
+
+The absolute number is modest. **The calibration is not, and it is the most
+important thing this run produced.** Every previous run's validation half was
+*optimistic* — house-prices run 3 said 0.11354 and Kaggle said 0.12298, a 0.00944
+gap that was 91% of the gain the run thought it had made (0022). Here the
+validation half was **pessimistic by 0.0026**: the model did slightly better on
+genuinely unseen data than our own exam predicted.
+
+That is 0029 paying off, and it is the first direct evidence for it. An ordered
+split on `Date` plus forward-chaining folds asks the same question the competition
+asks — train on earlier rows, predict later ones — so there is no interpolation
+premium to give back. It also means this dataset's `val_score` can be trusted in a
+way house-prices' never could, which matters for 0028's open `min_gain_ratio`
+question: this is the second dataset that question was waiting for, and it arrives
+with a validated yardstick.
+
 ## Why this and not the alternatives
 
 **Not `method="group_stats"` on `fit_encoding`.** Different arguments (`by`,
