@@ -72,6 +72,7 @@ from collections import Counter
 from pydantic_ai import capture_run_messages
 from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.models.openai import OpenAIChatModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from tabular_agent.harness import journal
@@ -85,8 +86,32 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from prep_rossmann import ABOUT, COLUMN_NOTES, METRIC, OUT, SPLIT_ON, TEST_OUT  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RUN_DIR = os.path.join(REPO, "_runs", "rossmann_v5")
-MODEL = "tensorx/deepseek-v4-flash-0731"
+RUN_DIR = os.path.join(REPO, "_runs", "rossmann_v6")
+
+#: v6 changes the **route**, not the model. Every run before this one went through
+#: `tensorx/deepseek-v4-flash-0731`, which serves this model with thinking mode
+#: switched off — verified across five parameter shapes, and not something the
+#: gateway's own `supports_reasoning: true` metadata will tell you (that flag
+#: describes the model, not the route). `fireworks` serves the same weights with
+#: thinking available.
+#:
+#: So every behavioural finding this project has (0024, 0025, 0027, 0032) was
+#: measured on a model that was never allowed to think, and v6 is the controlled
+#: repeat that says whether any of them survive. Everything else below —
+#: experiments, prompts, budget, split, metric — is byte-identical to v5.
+MODEL = "fireworks/deepseek-v4-flash-0731"
+
+#: Thinking is off unless asked for, and asking takes both keys: the mode and the
+#: budget. `high` rather than `max` because the point is to find out whether
+#: deliberation changes behaviour at all, and `max` would confound "does it think"
+#: with "how much".
+#:
+#: This costs real money in a way v5 did not: reasoning tokens are billed as
+#: output, and v5's whole run spent 29k output tokens precisely because it never
+#: thought.
+MODEL_SETTINGS = {
+    "extra_body": {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
+}
 
 #: A pilot. Below 0025's ~35 crossover, so this runs as one conversation.
 MAX_EXPERIMENTS = 25
@@ -187,6 +212,11 @@ def drive(agent, prompt, session, call_limit):
                 prompt,
                 deps=Deps(session=session),
                 usage_limits=UsageLimits(tool_calls_limit=call_limit),
+                # Passed here rather than baked into `build_agent`: which model
+                # serves the run, and how hard it is asked to think, are the
+                # driver's business (0013's division). The library stays
+                # provider-agnostic.
+                model_settings=OpenAIChatModelSettings(**MODEL_SETTINGS),
             )
             return json.loads(result.all_messages_json()), result.output, "agent"
         except UsageLimitExceeded:
@@ -230,6 +260,37 @@ def summarise_customers(run_dir: str) -> dict:
             and t.get("method") == "transform"
         ],
     }
+
+
+def summarise_thinking(run_dir: str) -> dict:
+    """Did the model actually think, and how much did it cost?
+
+    Recorded because "we switched to a reasoning route" is a claim about
+    configuration and this is the evidence. A run with zero thinking parts is
+    v5 again under a different model name, and every comparison drawn from it
+    would be wrong in the same direction.
+
+    Output tokens are the price of the answer: on this provider the chain of
+    thought is billed as output, so the ratio against v5's 29k is the cost of
+    deliberation.
+    """
+    out = {"thinking_parts": 0, "text_parts": 0, "input_tokens": 0, "output_tokens": 0}
+    for name in sorted(os.listdir(run_dir)):
+        if not (name.startswith("transcript_") and name.endswith(".json")):
+            continue
+        with open(os.path.join(run_dir, name)) as f:
+            raw = json.load(f)
+        for m in raw:
+            for p in m.get("parts", []):
+                if p.get("part_kind") == "thinking":
+                    out["thinking_parts"] += 1
+                elif p.get("part_kind") == "text":
+                    out["text_parts"] += 1
+            u = m.get("usage") or {}
+            out["input_tokens"] += u.get("input_tokens") or 0
+            out["output_tokens"] += u.get("output_tokens") or 0
+    out["v5_output_tokens_for_comparison"] = 29027
+    return out
 
 
 def summarise_new_tools(run_dir: str) -> dict:
@@ -331,6 +392,8 @@ def main() -> int:
 
     os.makedirs(RUN_DIR, exist_ok=True)
     session = make_session()
+    print(f"model {MODEL} | thinking "
+          f"{MODEL_SETTINGS['extra_body']['reasoning_effort']}")
     print(f"metric {METRIC} | split_on {SPLIT_ON} | val_fraction {VAL_FRACTION}")
     print(f"{MAX_EXPERIMENTS} experiments, "
           f"{'EPISODES' if USE_EPISODES else 'one conversation'} "
@@ -453,6 +516,7 @@ def main() -> int:
 
     print(f"\ncustomers: {json.dumps(summarise_customers(RUN_DIR), indent=2)}")
     print(f"\nnew tools: {json.dumps(summarise_new_tools(RUN_DIR), indent=2)}")
+    print(f"\nthinking: {json.dumps(summarise_thinking(RUN_DIR), indent=2)}")
 
     # The consequence, not the diagnosis. A model that used `Customers` cannot
     # score the test set at all, and that is worth seeing rather than inferring.
