@@ -121,31 +121,42 @@ second dataset 0028's `min_gain_ratio` question has been waiting for.**
   experiments (said 10, ran 14).
 - **Ten tools now**, up from eight. 0012's smallness argument gets a little thinner
   each time.
-- **The model does no reasoning, and cannot be asked to. Tested, not assumed.**
-  `deepseek/deepseek-v4-flash-0731` through Requesty as a plain `OpenAIChatModel`,
-  with no reasoning parameter anywhere in `src/` or `scripts/`. Across both v5
-  transcripts: **0 reasoning tokens** on 1.40M input / 29k output, every
-  `usage.details` empty, and no thinking parts — only `text`, `tool-call`,
-  `tool-return`, `retry-prompt`.
+- **Every run to date has been on a NON-reasoning route of a reasoning-capable
+  model. The fix is one string.** This is the biggest thing in this entry and it
+  invalidates nothing, but it re-frames everything.
 
-  Then probed directly, five variants, one tiny request each —
-  `openai_reasoning_effort="high"`, `thinking={"type": "enabled"}`,
-  `extra_body={"reasoning_effort": ...}`, `extra_body={"reasoning": {...}}`, and a
-  baseline. **All five identical:** 4 output tokens, empty `usage.details`, no
-  thinking part. It also answers bat-and-ball correctly in those 4 tokens, which is
-  recall, not derivation.
+  Across both v5 transcripts: **0 reasoning tokens** on 1.40M input / 29k output,
+  no thinking parts — only `text`, `tool-call`, `tool-return`, `retry-prompt`.
 
-  The control that makes this conclusive: `extra_body={"temperature": 99999}`
-  produced garbled multilingual output, so **`extra_body` demonstrably reaches the
-  model.** The reasoning parameters got there and were ignored. (A garbage param
-  name is silently accepted, so pass-through could not have been inferred from
-  absence-of-error alone — hence the temperature control.)
+  DeepSeek V4 Flash **does** support thinking, via
+  `extra_body={"thinking": {"type": "enabled"}, "reasoning_effort": "high"|"max"}`,
+  returning `reasoning_content` beside `content`. Sending exactly that to our route
+  changes nothing. Sending it to a different provider route for **the same model**
+  works:
 
-  So every behavioural finding in 0024/0025/0027/0032 is on a **non-reasoning**
-  model emitting ~420 output tokens per turn. That cuts both ways: the four failed
-  advisory steers and the orientation tax may be weaker on a reasoning model, or
-  the structural fixes may be needed regardless. **Untested, and now clearly the
-  cheapest open question** — it needs a different model, not a different setting.
+  | Requesty route | completion tokens | `reasoning_content` |
+  |---|---|---|
+  | `tensorx/deepseek-v4-flash-0731` *(ours)* | 4 | **absent** |
+  | `fireworks/deepseek-v4-flash-0731` | 74 | present |
+  | `novita/deepseek/deepseek-v4-flash-0731` | 95 | present |
+
+  Same gateway, same request body, same model. **It is the provider route, not the
+  model and not our code.** Note the gateway's own `/models` metadata reports
+  `supports_reasoning: true` for the tensorx route — **that flag is wrong, do not
+  trust it.** Only an actual call tells you.
+
+  Confirmed end-to-end through our stack: on the fireworks route pydantic-ai
+  surfaces a real `thinking` part, so `harness/usage.py` and the transcript
+  tooling need no changes — only `MODEL` and a `model_settings`.
+
+  Consequence: the four failed advisory steers, the orientation tax (0024/0025/
+  0027) and 0032's unused `fit_group_stats` are all results on a model that was
+  never allowed to think. They may be artifacts of that, or the structural fixes
+  may be needed regardless. **This is now the cheapest and highest-value open
+  experiment in the project**: re-run v5's configuration on
+  `fireworks/deepseek-v4-flash-0731` and compare. Budget for it — reasoning tokens
+  are billed output, and v5 spent only 29k output tokens precisely because it never
+  thought.
 - **Next:** `min_gain_ratio` (0028) now has its second dataset **and** a validated
   yardstick, which is the strongest it has ever been positioned. Otherwise the
   time-windowed group aggregate (the deep one, still unbuilt).
