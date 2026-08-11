@@ -1465,6 +1465,46 @@ def test_the_uncertainty_is_reproducible(session):
     assert by_id[a["experiment_id"]]["val_se"] == by_id[b["experiment_id"]]["val_se"]
 
 
+def test_no_uncertainty_is_claimed_on_an_ordered_split(tmp_path):
+    """The bootstrap assumes the validation rows are exchangeable draws from one
+    population. Under `split_on` they are a *later period*, chosen because it
+    differs from the training rows — resampling inside it measures the wrong
+    variation and would come out confidently too small.
+
+    A too-small yardstick is worse than none, because the stop rule believes it.
+    """
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.default_rng(0)
+    n = 400
+    day = np.arange(n)
+    df = pd.DataFrame({
+        "day": day,
+        "x": rng.normal(size=n),
+        "date": pd.date_range("2024-01-01", periods=n, freq="D"),
+    })
+    df["y"] = df["x"] * 2 + day * 0.01 + rng.normal(0, 0.1, n) + 10
+    path = tmp_path / "series.csv"
+    df.to_csv(path, index=False)
+
+    ordered = RunSession(str(tmp_path / "ordered"), str(path),
+                         TaskSpec(target="y"), split_on="date")
+    inspect_data(ordered)
+    train_tabular_model(ordered, model_type="lgbm")
+    row = journal.load(ordered.run_dir)["leaderboard"][-1]
+    assert row["val_score"] is not None
+    assert row["val_se"] is None
+    assert journal.load(ordered.run_dir)["split"]["mode"] == "ordered"
+
+    # The same data split at random does get one — it is the ordering that makes
+    # the estimate invalid, not anything about this dataset.
+    shuffled = RunSession(str(tmp_path / "random"), str(path), TaskSpec(target="y"))
+    inspect_data(shuffled)
+    train_tabular_model(shuffled, model_type="lgbm")
+    assert journal.load(shuffled.run_dir)["leaderboard"][-1]["val_se"] is not None
+
+
 def test_no_uncertainty_rather_than_a_meaningless_one(tmp_path):
     """A validation half too small to resample gets `None`, not a number. The
     stop rule falls back to `fold_spread`; a fabricated standard error would be

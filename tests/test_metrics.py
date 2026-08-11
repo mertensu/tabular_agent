@@ -46,7 +46,53 @@ def test_greater_is_better_directions():
 
 
 def test_supported_metrics_set():
-    assert SUPPORTED_METRICS == {"rmse", "rmsle", "mae", "logloss", "auc", "accuracy"}
+    assert SUPPORTED_METRICS == {
+        "rmse", "rmsle", "rmspe", "mae", "logloss", "auc", "accuracy"
+    }
+
+
+def test_every_metric_says_what_it_measures():
+    """A name and a direction say which way to push a number, not what it rewards.
+
+    The registry and the descriptions must not drift apart: a metric added without
+    one leaves the agent optimising something nobody explained to it.
+    """
+    from tabular_agent.metrics import METRIC_NOTES, describe_metric
+
+    assert set(METRIC_NOTES) == SUPPORTED_METRICS
+    assert "relative" in describe_metric("rmspe")
+    with pytest.raises(ValueError):
+        describe_metric("bogus")
+
+
+def test_rmspe_is_relative_and_ignores_zero_valued_rows():
+    """Both halves are the definition, not a convenience.
+
+    Rows whose true value is zero have no relative error — it is undefined, not
+    large — and the competitions using this metric exclude them explicitly. That
+    exclusion belongs in the metric, where the model can still see the rows and
+    decide what to do about them, rather than in a prep script that hides them.
+    """
+    y = np.array([100.0, 200.0])
+
+    # Same absolute error, different relative error: 10/100 vs 10/200.
+    small = compute_metric("rmspe", y, np.array([110.0, 200.0]))
+    large = compute_metric("rmspe", y, np.array([100.0, 210.0]))
+    assert small > large
+
+    # A zero-valued row is not scored, so any prediction on it is free.
+    with_zero = np.array([100.0, 0.0])
+    assert compute_metric("rmspe", with_zero, np.array([110.0, 0.0])) == pytest.approx(
+        compute_metric("rmspe", with_zero, np.array([110.0, 99999.0]))
+    )
+    # And it agrees with the same row scored alone.
+    assert compute_metric("rmspe", with_zero, np.array([110.0, 5.0])) == pytest.approx(
+        compute_metric("rmspe", np.array([100.0]), np.array([110.0]))
+    )
+
+    assert greater_is_better("rmspe") is False
+    with pytest.raises(ValueError, match="none"):
+        compute_metric("rmspe", np.array([0.0, 0.0]), np.array([1.0, 2.0]))
 
 
 def test_greater_is_better_unknown_metric_raises_value_error():

@@ -23,7 +23,7 @@ from ..cv import make_folds
 from ..encoders import fit_encoding as _fit_encoding
 from ..inspect import profile_dataframe
 from ..io import load_table, save_parquet
-from ..metrics import compute_metric, greater_is_better
+from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..report import build_report, write_report
@@ -173,7 +173,20 @@ def _score_on_val(
     # Computed here rather than in the stop rule because this is the only place
     # that still holds the predictions: the leaderboard keeps the score, not the
     # rows behind it.
-    se = _bootstrap_se(spec.metric, y_val, preds, classes, spec.seed)
+    #
+    # Not computed at all on an ordered split. The bootstrap resamples rows as if
+    # they were exchangeable draws from one population; under `split_on` they are
+    # a *later period*, deliberately chosen to differ from the training rows, and
+    # resampling within it measures how much the score wobbles inside that period
+    # while saying nothing about the thing that actually varies — which period it
+    # is. The number would be confidently too small, and a too-small yardstick is
+    # worse than none: `stop._noise` falls back to `fold_spread`, which at least
+    # does not claim to measure something it cannot see.
+    se = (
+        None
+        if session.split_on
+        else _bootstrap_se(spec.metric, y_val, preds, classes, spec.seed)
+    )
     return score, se, None
 
 
@@ -209,6 +222,11 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
         # every training result. Every `vs_...` field is already signed as a gain;
         # this is the direction of `cv_score` itself.
         "higher_is_better": greater_is_better(spec.metric),
+        # What the metric rewards, not just which way to push it. The direction
+        # alone does not say that `rmspe` and `rmsle` punish *relative* error, nor
+        # that `rmspe` does not score zero-valued rows at all — and both change
+        # what a good model looks like rather than merely how it is graded.
+        "metric_measures": describe_metric(spec.metric),
         "n_splits": spec.n_splits,
         "target": prof.get("target"),
         "columns": shown,

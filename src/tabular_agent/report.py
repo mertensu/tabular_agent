@@ -57,6 +57,18 @@ def build_report(
             "was steering towards, not an independent check on it. The gap to the CV score "
             "says how far the two came apart.",
         ]
+        if val_se is None and split.get("split_on"):
+            lines += [
+                "",
+                "> **No uncertainty is reported for the validation score.** It is "
+                "estimated by resampling the validation rows, which assumes they "
+                "are exchangeable draws from one population. Split on "
+                f"`{split['split_on']}` they are a later period, chosen precisely "
+                "because it differs from the training rows — so a resample would "
+                "measure the wobble *inside* that period and miss the thing that "
+                "actually varies, which is the period itself. It would be "
+                "confidently too small.",
+            ]
         if split.get("val_is_thin"):
             lines += [
                 "",
