@@ -55,7 +55,9 @@ Vocabulary used throughout:
 - [0025 — Episodes buy feasibility, not cost](0025-episodes-buy-feasibility-not-cost.md)
   *(accepted, not yet implemented)*
 - [0026 — The brief is rendered, never accumulated](0026-the-brief-is-rendered-not-remembered.md)
-  *(accepted and implemented; unmeasured on a live run)*
+  *(accepted and implemented; its central claim is superseded by 0027)*
+- [0027 — The brief did not cut the orientation tax](0027-the-brief-did-not-cut-the-orientation-tax.md)
+  *(a measurement: orientation is a fraction of the episode, not an information deficit)*
 
 ### Keeping features honest
 

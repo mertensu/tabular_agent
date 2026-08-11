@@ -8,7 +8,65 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-11 — The derived brief is built; it is not yet measured
+## 2026-08-11 (latest) — v7 ran: the brief does not cut the orientation tax
+
+**Machine:** MacBook Air | **Branch:** master | **226 tests pass** (no library code
+changed — this was an experiment).
+
+**Decision record `0027`. It supersedes the central claim of `0026`, which was
+written earlier today. 0026's implementation stands; its hypothesis does not.**
+
+### The result
+
+Orientation per episode, both runs recomputed with **one** function
+(`orientation_share`), because 0025's published v6 numbers were hand-counted and
+do not reconcile:
+
+| | ep1 | ep2 | ep3 | ep4 | ep5 | resumed mean |
+|---|---|---|---|---|---|---|
+| v6, no brief | 8% | 32% | 50% | 32% | 50% | **41%** |
+| v7, brief | 0% | 40% | 44% | 35% | — | **40%** |
+
+**No change.** The brief did not move the number it exists to move.
+
+### What actually happened, which is the interesting part
+
+The **composition** of orientation changed completely while its size did not.
+`inspect_data` per resumed episode went 3,2,3,3 → 1,1,2 (the `SYSTEM_PROMPT` fix
+landing exactly as designed), and the agent spent the freed calls on
+`explore_journal` instead: 3,8,3,4 → 7,7,4.
+
+So **orientation is not an information deficit that can be paid off — it is
+roughly a constant fraction of whatever episode it is given.** 0025 saw one face
+of this (a bigger cap buys more orientation); v7 shows the other (free information
+buys none). Three advisory fixes in a row have now failed to change behaviour.
+Whatever solves this will be structural.
+
+### Two things NOT claimed, both tempting
+
+- **v7 best 0.11977 vs v6 0.12525.** Inside one `val_se` (~0.010, 0022). Not
+  evidence of anything.
+- **v7 used 73 calls / 65 requests vs v6's 98 / 90 for the same 18 experiments.**
+  Not attributable to the brief: **episode 1 is configured identically in both runs**
+  (a fresh run gets no brief either way) and differed by 8 calls and 2 experiments.
+  That is the noise floor, and it is large against a 25-call total difference.
+
+### Gotchas / open questions
+
+- **The v7 script printed a misleading comparison on its first run** because it
+  hardcoded 0025's hand-counted baseline. Fixed to recomputed values. General
+  lesson: a baseline not computed with the same code is not a baseline.
+- **The brief stays**, demoted to a cheap correctness aid — it carries the metric's
+  *direction* to an agent with no way to derive it, which is a correctness argument
+  independent of the failed one. Do not size an episode budget assuming it helps.
+- **The remaining options for the tax are all structural**: charge orientation
+  against a budget, cap `explore_journal` per episode, or have the episode driver
+  make the first query and hand over the answer. None are designed.
+- **n=1 vs n=1.** This rules out a large effect, not a small one.
+- **Next:** decide which structural lever to try, or park the tax and move to the
+  `harness/` loop and `val_se` (0022).
+
+## 2026-08-11 (earlier) — The derived brief is built; it is not yet measured
 
 **Machine:** MacBook Air | **Branch:** master | **226 tests pass** (215 + 11).
 

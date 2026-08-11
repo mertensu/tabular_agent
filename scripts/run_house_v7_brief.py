@@ -59,8 +59,12 @@ MAX_EPISODES = 8
 TOOL_CALLS_PER_EPISODE = 16
 MAX_EXPERIMENTS = 30
 
-#: What v6 spent orienting, per episode, as a fraction of its tool calls.
-V6_ORIENTATION = [0.26, 0.50, 0.26, 0.43]
+#: What v6 spent orienting, per episode, **recomputed with `orientation_share`
+#: below** from `_runs/house_prices_v6/episodes.json`. It is deliberately not
+#: 0025's published 26/50/26/43: those were counted by hand, and a baseline you
+#: did not compute with the same code is not a baseline. The first run of this
+#: script printed the hand-counted numbers and the comparison was misleading.
+V6_ORIENTATION = [0.08, 0.32, 0.50, 0.32, 0.50]
 
 FIRST = """Build the best model you can for this dataset of house sales.
 The target is SalePrice.
