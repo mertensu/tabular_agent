@@ -73,18 +73,47 @@ tool.**
 
 ### Design notes for the next chunk
 
-**A `fit_*` group-statistics tool.** The key simplification, and it is a big one:
-a per-group statistic of a **non-target** column needs *no out-of-fold discipline
-at all*. `store_open_rate` never touches `Sales`, so there is nothing to leak —
-fit it on the work half, store the mapping in the lineage, look it up at predict.
-Far simpler than `fit_encoding`. Sketch:
+**A `fit_*` group-statistics tool.** Sketch:
 
     fit_group_stats(by=["Store"], value="Open", stat="mean")   -> Store_Open_mean
 
-Only the **time-windowed** variant is hard, and only when the value is the target:
-"last quarter's mean sales for this store" needs a cutoff, per-fold discipline,
-and a frozen version for predict (test rows have no history). Ship the easy half
-first; it covers what v4 asked for.
+Mechanically it is `FrequencyEncoder` with `value_counts` swapped for a stored
+`groupby` — that class is the working template, down to its unknown-category
+fallback. Three steps: **fit** on the work half
+(`df.groupby("Store")["Open"].mean().to_dict()` — 1115 entries, 0.703 to 1.000 on
+this data, plus a global default for a store never seen); **store** the dict in
+the lineage sidecar as JSON; **look up** at predict with
+`df["Store"].map(mapping_).fillna(default_)`. It never recomputes, which is
+exactly why it is stable where the agent's `groupby(...).transform("mean")` is
+not: one row maps to the same number as a million.
+
+**CORRECTION to the first version of this entry.** It said a per-group statistic
+of a non-target column "needs no out-of-fold discipline at all". **Too strong —
+do not implement from that.** It holds for `Open`, which is genuinely
+target-independent. It fails for `Customers`, which correlates 0.895 with `Sales`:
+a per-store mean of `Customers` is very nearly a per-store mean of the target, and
+computing it without holding out the row's own contribution is target encoding
+with the guard taken off. Group size rescues it *here* — ~896 rows per store, so a
+row moves its own group's mean by about a thousandth — but that is a property of
+this dataset, not of the tool. On a key with three rows per group it is the same
+leak `oof_target_encode` exists to prevent.
+
+Since the tool cannot know whether a value column is target-correlated, **use the
+out-of-fold path always.** `fit_encoding` already implements it, the cost is one
+pass per fold, and it removes a judgement call the agent would otherwise have to
+get right silently.
+
+**The consequence worth having:** this makes `Customers` *usable* instead of
+merely refused. `fit_group_stats(by=["Store"], value="Customers", stat="mean")` is
+each store's typical footfall — a number fixed at training time and looked up at
+predict, requiring no knowledge of the test day's actual count. Legitimate, and
+precisely the shape of the winner's features: historical aggregates of quantities
+you cannot observe on the day you predict. The tool turns today's hard refusal
+into a sanctioned path.
+
+Only the **time-windowed** variant stays hard: "last quarter's mean sales for this
+store" needs a cutoff, per-fold discipline, and a frozen version for predict (test
+rows have no history). Ship the plain version first; it covers what v4 asked for.
 
 **Row filtering.** `Open == 0` is 17% of rows, unscored by `rmspe`, and cannot be
 dropped today. The design point that makes this a decision rather than a patch:
