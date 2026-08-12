@@ -8,6 +8,173 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-12 — Thinking changed the behaviour and not the score; the ceiling is diversity, not blending
+
+**Machine:** MacBook Air | **Branch:** master | **306 tests pass** (was 291).
+
+Two runs (`_runs/rossmann_v6`, `_runs/house_prices_v8`), one new model type, and a
+measurement that killed the plan I was about to recommend.
+
+### Read this first
+
+**Every behavioural finding before yesterday was measured on a model that was
+never allowed to think** — see the previous entry. v6 and v8 are the first runs on
+the reasoning route (`fireworks/deepseek-v4-flash-0731`, `reasoning_effort: high`).
+
+**Result, both datasets: behaviour changed a lot, the score did not.**
+
+| run | route | exp | best val | Kaggle |
+|---|---|---|---|---|
+| rossmann v5 | tensorx | 14 | 0.13760 | 0.135 |
+| rossmann v6 | **fireworks+think** | 15 | **0.12741** | unscored |
+| house run 3 | tensorx | 24 | 0.11354 | 0.12298 |
+| house v8 | **fireworks+think** | 14 | **0.11171** | **0.123 — identical** |
+
+**v8 is the important row.** Same Kaggle score as run 3 from a val score 0.0018
+better, i.e. **optimism went UP (+0.0113 vs +0.00944) on FEWER experiments (14 vs
+24)**. All the apparent val gain was self-flattery. 0023's "optimism grows with
+experiment count" is not the whole story.
+
+Thinking was **cheap**: v6 22.9k output tokens vs v5's 29.0k, and v6 used 38 tool
+calls where v5 used 69. v8: 18.3k output. It does more with less context.
+
+### What thinking did change — the tools
+
+`fit_group_stats` went from **0 calls in v5 to the second call of v6**, on
+`Customers`, the exact column it was designed for. v8 used it 3x
+(`Neighborhood_*_mean`) and `filter_rows` **4x for outlier removal**
+(`GrLivArea <= 4000`) — a second legitimate use, distinct from Rossmann's regime
+exclusion, and the one where the target being visible to the predicate is the point.
+
+**The dictionary channel finally paid.** `house_prices/data_description.txt` now
+reaches the agent via `TaskSpec.column_notes` (79 columns, ~2.8k tokens), and v8
+encoded **21 columns as `method="ordinal"`** — run 3 never used ordinal once.
+`ordinal` *requires* a level order that cannot be inferred, so those orders came
+from the dictionary and nowhere else. It also filled `BsmtQual` NaNs with
+`"NoBsmt"` *before* encoding, which is reading the dictionary properly.
+
+`MAX_REPORTED_COLUMNS` **60 -> 100**: with 80 columns the profile truncated and took
+a quarter of the dictionary with it, including four columns carrying a level order.
+
+**Filter measured cleanly on Rossmann, and it is a null.** v6 `e10` vs `e8`:
+identical 29 features, same catboost, same log1p, only 166,265 dropped rows.
+`vs_source_table -0.00336` on a `fold_spread` of 0.07. See 0032 — the 17%-of-rows
+premise this was prioritised on is refuted, because `Open` is a *feature* and the
+model already learns "closed -> 0".
+
+### `fit_seconds` and a wall-clock bound
+
+v6 lost **113 of its 132 minutes to one fit** whose parameters were *identical* to a
+3.8-minute one (30 vs 32 features, same 799,654 rows). So cost is **not** a function
+of what was asked for, and the blowup was environmental. Consequences:
+
+- `fit_seconds` is now on the leaderboard row, in `meta.json`, in the training
+  payload and in `explore_journal`'s `lb`. Nothing measured it before — v6's
+  timings had to be reconstructed from file mtimes.
+- `train_cv(time_budget_s=)`, checked between folds, raising `TrainingTooSlow` (a
+  `ValueError`, so the agent gets a correction and the run survives). Off by
+  default; Rossmann sets 20 min.
+- **Deliberately not a cap on hyper-parameters** — that would have caught the wrong
+  thing. The features-over-tuning preference is a **prompt line** instead, which is
+  worth trying now precisely because all four prior advisory failures were measured
+  on the non-reasoning route.
+
+### The wandb blogpost, and a correction to my own reading
+
+`wandb_fc/tabular-nomad` — their agent got rank 1/685 agent submissions on NOMAD.
+I first read it as "generate wide, then prune". **Re-read: the post describes no
+pruning at all.** It says only *"The feature matrix grew to 677 columns"*, gives no
+tool-call counts, and the one use of "selection" is *blend weight* selection. So
+the difference from us is **accumulation volume** (677 vs our 30), plausibly by the
+same incremental mechanism.
+
+Their setup: L40 GPU, 15-30 vCPU, minimal tuning, LightGBM+XGBoost+CatBoost blended
+with non-negative OOF weights, ~60 feature iterations overnight across 4 datasets.
+Three of four tasks beat the Kaggle median — so one did not.
+
+### Blending is NOT our gap. Measured twice.
+
+| | result |
+|---|---|
+| Rossmann, OOF weights over 4 models | **worse** (0.12991 vs 0.12741) |
+| Rossmann, weights fitted on last fold only | 0.12792 — better, still not winning |
+| house-prices, 3 GBDT families | +0.00024, i.e. nothing |
+
+The reason is in the residuals: **GBDT-vs-GBDT correlation 0.86-0.88.** Three
+boosted-tree models on the same features make the same mistakes. On Rossmann the
+OOF optimiser put **0.8 on the lgbm that was worst on val**, because it had the best
+`cv_score` — 0022's optimism biting the blending mechanism specifically.
+
+**The gap is diversity, not averaging.** Which is why `elasticnet` exists now.
+
+### `elasticnet` — one model type, and it is a diagnostic
+
+On v8's winning table at defaults: **elasticnet 0.11217, catboost 0.11207, lgbm
+0.12141.** A linear model matches a tuned catboost, so by the TabArena rule
+(*"if your model can't clearly beat this, your features carry the signal"*) our
+signal is in the features. **The run had no way to ask this before.**
+
+One entry, not three: ridge 0.11420 / lasso 0.11215 / self-tuned elasticnet 0.11216
+— it finds the better end unaided, the endpoints differ by 18% of one `val_se`, and
+three menu entries would be three ways to spend an experiment on noise right after
+we told the agent not to. **0021's "a menu entry makes it an experiment" cuts both
+ways: entries should be things worth an experiment.**
+
+Two things that were the actual work:
+
+- **Preprocessing lives inside the estimator**, so `train_cv` refits it per fold and
+  the median and scale come from training rows only. In a feature table it would
+  leak across the fold boundary — batch dependence in the one place 0011's
+  stability check cannot see, because it never runs on a model.
+- **Infinities.** v8's own matrix had **78 non-finite values**; agents write ratio
+  features constantly and something always divides by zero. GBDTs split on `inf`,
+  linear models refuse. Non-finite -> NaN -> imputed.
+
+Classification goes through `LogisticRegressionCV` with `scoring` **following the
+run's metric** (`logloss`->`neg_log_loss`, `auc`->`roc_auc`/`roc_auc_ovr`,
+`accuracy`->`accuracy`). My first version hardcoded `neg_log_loss`, which was the
+same category of error as sklearn's accuracy default.
+
+### Gotchas
+
+- **Requesty's `/models` reports `supports_reasoning: true` for the tensorx route,
+  and it is wrong.** TensorX's own docs say their List Models API returns no
+  per-model capability flags, so the flag describes the *model family*, not the
+  route. **Only a real call tells you.**
+- **`ElasticNetCV` has no `scoring` parameter** — always selects alpha by squared
+  error. Under `target_transform="log1p"` that *is* `rmsle` so it matches by
+  construction; under `mae` it does not. Recorded in the code, not fixed.
+- **sklearn 1.9.0 is the latest stable**; the deprecations we hit point at 1.10/1.11,
+  so `use_legacy_attributes=False` is opting into future behaviour early, not a
+  workaround for being behind.
+- **v6's 113-minute fit is a contaminated measurement** — I ran heavy analysis on the
+  same laptop during part of that window. Size any timeout from a clean run.
+- **`t6` in v8 was claimed but never journaled** (0031's known gotcha: a failed call
+  burns an id and can leave a stray parquet).
+- **A blended house submission is written and unscored**:
+  `_runs/house_prices_v8/submission_blend.csv` (lasso+catboost 52/48, weights from
+  OOF only, val 0.10906 vs 0.11171). Scoring it settles whether OOF-weighted
+  blending transfers or is just more val-flattery.
+- **Kaggle-specific vs real:** the top-1% notebook we looked at blends **other
+  people's public submission CSVs** selected by their LB scores. That is unservable
+  by 0030's own test — a lookup table for 1459 ids, no function from features to a
+  prediction. Do not chase that number.
+
+### Owed, and next
+
+- **No decision record for `elasticnet` / `fit_seconds` yet.** Both deserve one; the
+  elasticnet-as-diagnostic argument is the part a newcomer cannot reverse-engineer.
+- **No notebook for this chunk** — `fit_seconds`, the time budget and `elasticnet`
+  are untaught. Quiz was done for 0032 only.
+- **Next candidates:** score the blend submission; the house-prices **ablation**
+  (same v8 script, dictionary withheld) to attribute v8's behaviour change; or
+  `min_gain_ratio` (0028), which now has a second dataset *and* — from Rossmann v5's
+  pessimistic exam — a validated yardstick.
+- **A finding worth acting on eventually:** on ordered splits the **last fold** ranks
+  models far better than the mean of folds (Spearman 0.960 vs 0.864 against val on
+  v6), because early forward-chaining folds train on a sixth of the history. That is
+  a candidate correctness fix to what `cv_score` means under `split_on`.
+
 ## 2026-08-11 (latest+7) — Both gaps closed; the run used the wrong one, and it did not help
 
 **Machine:** MacBook Air | **Branch:** master | **291 tests pass** (255 + 36).

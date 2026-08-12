@@ -23,6 +23,10 @@ house_prices/
 # rossmann-store-sales competition. `train_joined.parquet` is built from them by
 # `scripts/prep_rossmann.py` — regenerate it rather than looking for it here.
 rossmann_store_sales/
+# `seguro_driver_prediction/`: porto-seguro-safe-driver-prediction. 287MB, and no
+# runner exists for it yet — it is a third dataset waiting to be used, not part of
+# any finding recorded so far.
+seguro_driver_prediction/
 
 # Secrets — API keys live here and must never be committed.
 .secrets/
