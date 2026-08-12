@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from tabular_agent.cv import make_folds
-from tabular_agent.models import train_cv, predict_model, TrainResult
+from tabular_agent.models import TrainingTooSlow, train_cv, predict_model, TrainResult
 from tabular_agent.pipeline import Pipeline, save_bundle, load_bundle, predict_bundle
 from tabular_agent.runctx import RunContext
 
@@ -286,3 +286,50 @@ def test_unknown_transform_lists_the_real_ones():
     folds = make_folds(y, "regression", n_splits=2)
     with pytest.raises(ValueError, match="unknown target_transform"):
         train_cv(X, y, folds, "regression", "rmse", target_transform="boxcox")
+
+
+def test_a_fit_reports_what_it_cost():
+    """Wall clock is recorded because nothing else in a run measures it.
+
+    Rossmann v6 produced two experiments with byte-identical parameters that took
+    3.8 and 113.2 minutes, and the only way to find that out afterwards was the
+    mtimes of the files they wrote.
+    """
+    X = pd.DataFrame({"a": np.arange(60.0), "b": np.arange(60.0) % 7})
+    y = pd.Series(np.arange(60.0))
+    folds = make_folds(y, "regression", n_splits=3)
+
+    result = train_cv(X, y, folds, "regression", "rmse", model_type="baseline")
+
+    assert result.fit_seconds >= 0.0
+    assert isinstance(result.fit_seconds, float)
+
+
+def test_a_fit_over_its_time_budget_is_abandoned_with_a_measurement():
+    """A wall-clock ceiling, checked between folds.
+
+    Deliberately not a cap on parameters: v6's 113-minute fit had the same
+    parameters as one that took under four minutes, so cost is not a function of
+    what was asked for. A budget of zero stands in for "however slow the machine
+    turned out to be" — the first completed fold always exceeds it.
+    """
+    X = pd.DataFrame({"a": np.arange(60.0), "b": np.arange(60.0) % 7})
+    y = pd.Series(np.arange(60.0))
+    folds = make_folds(y, "regression", n_splits=3)
+
+    with pytest.raises(TrainingTooSlow, match="1 of 3 folds done"):
+        train_cv(X, y, folds, "regression", "rmse", model_type="baseline",
+                 time_budget_s=0.0)
+
+
+def test_no_budget_means_no_ceiling():
+    """The default, and the only safe default for a library that cannot know the
+    size of the data or the speed of the machine."""
+    X = pd.DataFrame({"a": np.arange(60.0), "b": np.arange(60.0) % 7})
+    y = pd.Series(np.arange(60.0))
+    folds = make_folds(y, "regression", n_splits=3)
+
+    result = train_cv(X, y, folds, "regression", "rmse", model_type="baseline",
+                      time_budget_s=None)
+
+    assert len(result.fold_metrics) == 3

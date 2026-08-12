@@ -43,6 +43,7 @@ class RunSession:
         val_fraction: float = 0.2,
         split_on: str | None = None,
         serving_columns: list[str] | None = None,
+        fit_time_budget_s: float | None = None,
     ):
         self.ctx = RunContext(run_dir)
         # The file the user handed us. Never trained on directly — `data_path`
@@ -71,6 +72,16 @@ class RunSession:
         # file and has the column too, so it *confirms* the leak instead of
         # catching it.
         self.serving_columns = list(serving_columns) if serving_columns else None
+        # Wall-clock ceiling on one cross-validated fit. `None` means no ceiling,
+        # which is right for a library that cannot know how big the data is or what
+        # machine it is on — and why this sits beside `stop_policy` rather than
+        # being a module constant: it is a property of *this* run's budget.
+        #
+        # It is a safety net, not a tuning policy. Rossmann v6 lost 113 of its 132
+        # minutes to a single fit whose parameters were identical to one that took
+        # 3.8 — so the blowup was environmental, and no instruction to the agent
+        # and no cap on parameters would have caught it. Only wall clock does.
+        self.fit_time_budget_s = fit_time_budget_s
         self._resolved: ResolvedSpec | None = None
         self._split: tuple[str, str] | None = None
 

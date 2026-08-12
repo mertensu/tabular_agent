@@ -135,6 +135,21 @@ CALLS_PER_EXPERIMENT = 12
 #: ~45 days of validation against Kaggle's 48-day test window.
 VAL_FRACTION = 0.05
 
+#: Wall-clock ceiling on one cross-validated fit. A **safety net**, not a tuning
+#: policy — the instruction to prefer features over hyper-parameters lives in the
+#: prompt, and this catches what no instruction can.
+#:
+#: Sized from v6, where 13 of 15 experiments finished inside 4 minutes and one took
+#: **113** with parameters identical to a 3.8-minute one. 20 minutes is therefore
+#: five times the observed normal and a fifth of the observed pathology, which is
+#: about as much daylight as a single threshold gets.
+#:
+#: Two caveats on that number. v6's timings are contaminated — other heavy work ran
+#: on the same laptop during the long fit — so the pathology may be smaller than it
+#: looks. And this is a property of *this machine*: on the GPU box the same fits
+#: take seconds, and 20 minutes would never fire.
+FIT_TIME_BUDGET_S = 20 * 60
+
 #: From `rossmann-store-sales-publicleaderboard-*.csv`, 3300 teams.
 LEADERBOARD = {"best": 0.08932, "top 10%": 0.10294, "median": 0.11677}
 
@@ -175,6 +190,7 @@ def make_session() -> RunSession:
         val_fraction=VAL_FRACTION,
         split_on=SPLIT_ON,
         serving_columns=serving_columns(),
+        fit_time_budget_s=FIT_TIME_BUDGET_S,
     )
 
 
@@ -513,6 +529,19 @@ def main() -> int:
         # history than the final fit. The other direction means something is off.
         if row.get("cv_score") and row["cv_score"] < best["val_score"]:
             print("  note: cv better than val — unexpected under forward chaining")
+
+    # Where the wall clock actually went. v6 spent 113 of 132 minutes inside one
+    # fit and nothing in the run said so — it had to be reconstructed from file
+    # mtimes afterwards. Printed as a distribution rather than a total, because the
+    # question is whether one experiment ate the run.
+    costs = [(r["id"], r.get("fit_seconds")) for r in rows if r.get("fit_seconds")]
+    if costs:
+        worst = max(costs, key=lambda c: c[1])
+        total = sum(c[1] for c in costs)
+        print(f"\nfit cost: {total / 60:.1f} min over {len(costs)} experiments"
+              f" | median {sorted(c[1] for c in costs)[len(costs) // 2] / 60:.1f} min"
+              f" | worst {worst[0]} {worst[1] / 60:.1f} min"
+              f" ({worst[1] / total:.0%} of all fitting)")
 
     print(f"\ncustomers: {json.dumps(summarise_customers(RUN_DIR), indent=2)}")
     print(f"\nnew tools: {json.dumps(summarise_new_tools(RUN_DIR), indent=2)}")

@@ -385,6 +385,11 @@ TRAIN_RESULT_FIELDS = {
     "val_se",
     "cv_score",
     "fold_spread",
+    # What the experiment cost in wall clock. Earns its place because the agent is
+    # the only party that can choose something cheaper, and a cost it is never
+    # shown is a cost it cannot trade against a score. Rossmann v6 spent 113 of
+    # its 132 minutes inside one fit and nothing in the payload said so.
+    "fit_seconds",
     "model_type",
     "n_features",
     "source_table",
@@ -1737,3 +1742,59 @@ def test_it_costs_nothing_and_works_after_finalize(session):
     assert out["result"] == 2
     assert "best is e2" in out["stdout"]
     assert journal.load(session.run_dir) == before
+
+
+def test_an_experiment_records_what_it_cost(session):
+    """`fit_seconds` reaches all three places a run remembers things."""
+    inspect_data(session)
+    out = train_tabular_model(session, model_type="lgbm")
+
+    assert out["fit_seconds"] >= 0.0
+
+    row = journal.load(session.run_dir)["leaderboard"][-1]
+    assert row["fit_seconds"] == out["fit_seconds"]
+
+    meta_path = os.path.join(session.run_dir, out["artifact_path"], "meta.json")
+    with open(meta_path) as f:
+        assert json.load(f)["fit_seconds"] == out["fit_seconds"]
+
+
+def test_the_cost_is_queryable_from_the_journal(session):
+    """So "which experiments were expensive" is a question, not forensics."""
+    inspect_data(session)
+    train_tabular_model(session, model_type="lgbm")
+
+    out = tools.explore_journal(
+        session,
+        "def explore(lb):\n    return lb[['id', 'fit_seconds']].to_dict('records')\n",
+    )
+    assert out["result"][0]["fit_seconds"] is not None
+
+
+def test_a_fit_over_the_run_s_time_budget_is_refused_as_a_correction(tmp_path):
+    """A ValueError, so it reaches the agent as `ModelRetry` and the run survives.
+
+    The fit is gone either way; ending the run over it would throw away every
+    experiment already completed (0007).
+    """
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({"x": rng.normal(size=80), "y": rng.normal(size=80)})
+    path = str(tmp_path / "d.csv")
+    df.to_csv(path, index=False)
+    s = RunSession(
+        str(tmp_path / "run"), path,
+        TaskSpec(target="y", task_type="regression", metric="rmse", n_splits=3),
+        # Zero stands in for "slower than this machine turned out to be".
+        fit_time_budget_s=0.0,
+    )
+    inspect_data(s)
+
+    with pytest.raises(ValueError, match="abandoned this fit"):
+        train_tabular_model(s, model_type="lgbm")
+
+    # Nothing was recorded: an abandoned fit has no score to rank.
+    assert journal.load(s.run_dir)["leaderboard"] == []
+
+
+def test_no_time_budget_is_the_default(session):
+    assert session.fit_time_budget_s is None

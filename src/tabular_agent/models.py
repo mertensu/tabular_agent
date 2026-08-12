@@ -1,6 +1,7 @@
 """Model wrappers over LightGBM/XGBoost/CatBoost plus a trivial baseline,
 and cross-validated training that emits OOF predictions and fold metrics."""
 
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -114,6 +115,15 @@ def predict_model(model, X: pd.DataFrame, task_type: str, classes=None) -> np.nd
     return full
 
 
+class TrainingTooSlow(ValueError):
+    """A cross-validated fit was abandoned for exceeding its wall-clock budget.
+
+    A ``ValueError`` so it reaches the agent as a correction rather than ending
+    the run (0007): the fit is gone either way, and "ask for something cheaper"
+    is a message it can act on.
+    """
+
+
 @dataclass
 class TrainResult:
     oof: np.ndarray
@@ -123,10 +133,15 @@ class TrainResult:
     feature_names: list[str]
     model_type: str
     target_transform: str = "none"
+    #: Wall-clock seconds spent fitting — every fold plus the final model. Recorded
+    #: because nothing else in a run measures it, and the one time it mattered we
+    #: had to reconstruct it from file timestamps after the fact (Rossmann v6: two
+    #: experiments with identical parameters took 3.8 and 113.2 minutes).
+    fit_seconds: float = 0.0
 
 
 def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, seed=42,
-             target_transform="none") -> TrainResult:
+             target_transform="none", time_budget_s=None) -> TrainResult:
     """Cross-validated fit. ``target_transform`` changes what the model is fitted
     on; it never changes what is *reported*.
 
@@ -135,6 +150,17 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
     `oof` are on the original scale for every experiment, transformed or not,
     which is what keeps a leaderboard mixing the two comparable — and what keeps
     a residual denominated in the units the agent asked about.
+
+    ``time_budget_s`` bounds the whole fit, checked **between folds** — coarse on
+    purpose. A hard interrupt would need a subprocess and would buy little: the
+    case this exists for is a fit whose *every* fold is slow, so the first
+    boundary catches it, and a genuinely cheap fit never reaches a check at all.
+
+    It is deliberately not a parameter cap. Rossmann v6 produced two experiments
+    with byte-identical parameters, 30 and 32 features and the same 799,654 rows
+    that took 3.8 and 113.2 minutes — so the cost of a fit is not a function of
+    what was asked for, and a rule about parameters would have caught the wrong
+    thing. Wall clock does not care why.
     """
     check_target_domain(target_transform, y, task_type)
     X = X.reset_index(drop=True)
@@ -160,7 +186,8 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
 
     models = []
     fold_metrics = []
-    for tr, va in folds:
+    started = time.monotonic()
+    for i, (tr, va) in enumerate(folds):
         model = _make_model(model_type, task_type, params, seed)
         model.fit(X.iloc[tr], y_fit.iloc[tr])
         preds = predict_model(model, X.iloc[va], task_type, classes=classes)
@@ -172,7 +199,21 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
         fold_metrics.append(compute_metric(metric, y.iloc[va].to_numpy(), preds, **metric_kwargs))
         models.append(model)
 
+        elapsed = time.monotonic() - started
+        # Checked after a fold rather than before: one completed fold is the only
+        # honest estimate of what the remaining ones plus the final fit will cost,
+        # and it lets the message quote a measurement instead of a prediction.
+        if time_budget_s is not None and elapsed > time_budget_s:
+            raise TrainingTooSlow(
+                f"abandoned this fit after {elapsed / 60:.1f} min: {i + 1} of "
+                f"{len(folds)} folds done, and the budget for a whole experiment is "
+                f"{time_budget_s / 60:.1f} min. Nothing was recorded. Ask for something "
+                f"cheaper — fewer boosting rounds, a shallower model, or a smaller "
+                f"feature table — and spend the run on features rather than on one "
+                f"expensive fit."
+            )
+
     final = _make_model(model_type, task_type, params, seed)
     final.fit(X, y_fit)
     return TrainResult(oof, fold_metrics, models, final, list(X.columns), model_type,
-                       target_transform)
+                       target_transform, round(time.monotonic() - started, 1))

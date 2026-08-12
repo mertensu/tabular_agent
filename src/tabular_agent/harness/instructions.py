@@ -62,6 +62,11 @@ trainable. `note` says where that leaves you.
 questions: whether this is worth shipping at all, whether the columns added since
 `source_table` paid, and which table's columns earned the score.
 
+Spend the run on features rather than on hyper-parameters. Better columns are
+where most of the difference lives; sweeping settings on a table you already have
+usually buys a fraction of it, and every fit costs wall-clock time you could have
+spent building something new. Tune once, late, on whichever table won.
+
 Report honestly: if a model does not beat the baseline, or a score looks too
 good, say so.
 """

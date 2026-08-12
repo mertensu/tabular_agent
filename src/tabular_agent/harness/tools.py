@@ -1098,6 +1098,10 @@ def train_tabular_model(
         params=params,
         seed=spec.seed,
         target_transform=target_transform,
+        # `None` unless this run set one. Raises `TrainingTooSlow` (a ValueError,
+        # so the agent gets a correction rather than the run ending) and records
+        # nothing — an abandoned fit has no score to put on the leaderboard.
+        time_budget_s=session.fit_time_budget_s,
     )
 
     cv_score = float(np.mean(result.fold_metrics))
@@ -1123,6 +1127,7 @@ def train_tabular_model(
         "cv_score": cv_score,
         "val_score": val_score,
         "val_se": val_se,
+        "fit_seconds": result.fit_seconds,
         "fold_metrics": [float(m) for m in result.fold_metrics],
         "feature_names": list(result.feature_names),
         "target": spec.target,
@@ -1159,6 +1164,10 @@ def train_tabular_model(
         "val_se": val_se,
         "cv_score": cv_score,
         "fold_spread": fold_spread,
+        # On the row so a run can be asked what its experiments *cost*, not only
+        # what they scored. Nothing else in the journal measures time, and the one
+        # time it mattered it had to be reconstructed from file timestamps.
+        "fit_seconds": result.fit_seconds,
         "vs_baseline": (
             None
             if baseline is None or val_score is None
@@ -1220,6 +1229,10 @@ def train_tabular_model(
         "val_se": val_se,
         "cv_score": cv_score,
         "fold_spread": fold_spread,
+        # What this experiment cost in wall clock. Reported because the agent is
+        # the only party that can choose something cheaper, and it cannot weigh a
+        # score against a cost it is never shown.
+        "fit_seconds": result.fit_seconds,
         "model_type": model_type,
         "n_features": len(result.feature_names),
         "source_table": row["source_table"],
@@ -1365,7 +1378,7 @@ def explain_table(
 _LB_COLUMNS = [
     "id", "model_type", "params", "target_transform", "source_table", "metric",
     "val_score", "val_se", "cv_score", "fold_spread", "vs_baseline", "vs_source_table",
-    "n_features",
+    "n_features", "fit_seconds",
 ]
 
 _TABLE_COLUMNS = [
@@ -1404,6 +1417,8 @@ def _journal_frames(session: RunSession) -> dict:
             "vs_baseline": r.get("vs_baseline"),
             "vs_source_table": r.get("vs_source_table"),
             "n_features": len(r.get("features") or []),
+            # Null on rows written before this was recorded.
+            "fit_seconds": r.get("fit_seconds"),
         }
         for r in j.get("leaderboard") or []
     ], columns=_LB_COLUMNS)
