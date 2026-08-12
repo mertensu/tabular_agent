@@ -8,6 +8,170 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-12 — First classification run; the diagnostic model was unrunnable at scale
+
+**Machine:** MacBook Air | **Branch:** master | **309 tests pass** (was 306).
+
+Porto Seguro (`_runs/seguro_v1`), the project's first non-regression dataset, and
+the run found a library defect worth more than its score.
+
+### The run, and its Kaggle number
+
+595,212 rows, 3.6% positive, metric Normalized Gini. `scripts/run_seguro.py` reads
+`train.csv` **untouched** — no prep script, `id` left in, `-1` left as `-1`, `_cat`
+columns left as integers. Everything an agent could do for itself was left to it.
+
+**Metric is `auc`, not a new `gini` entry.** `gini.c` in the data folder confirms
+`gini = 2*auc - 1` for binary labels, a strictly increasing function, so every
+comparison the harness makes is identical under either. The driver prints gini.
+
+| | gini | rank /5157 |
+|---|---|---|
+| our val (e4) | 0.28480 | top 27% |
+| **public** | **0.268** | top 70% |
+| **private** | **0.272** | top 66% |
+
+Optimism **+0.0128 vs private = 1.5 `val_se`** on **5 experiments**. And a detail
+for 0023: `cv_score` was 0.25998, `val_score` 0.28480 — **the truth landed between
+them and nearer cv.** Random folds, so unlike Rossmann's forward chaining, val is
+the flatterer here and cv was nearly honest.
+
+### What the agent got right unprompted, in two tool calls
+
+`t1` was one `transform_features`: `-1 -> NaN` everywhere, **and all 20
+`ps_calc_*` columns dropped** — it was never told they are noise, only the naming
+convention. `t2` target-encoded all 14 `_cat` columns. Three of the run's four
+questions answered correctly and immediately. It did *not* drop `id`, which is in
+the winning model's 52 features.
+
+### The defect: elasticnet could not finish, and no guard noticed
+
+Experiment 6 sat at 100% of **one** core for 63 minutes with no journal write. A
+stack sample found `_sag_fast.sag64`. The agent was following the tool description,
+which says elasticnet is "worth one experiment on any table you care about".
+
+Measured: **0.23s per saga epoch** at 476k x 52, against `max_iter=20000`, so **one
+fit ~77 min** and the 400-fit `LogisticRegressionCV` search **~510 hours**. Killed;
+`e4` packaged by hand from the run dir; submission written and scored.
+
+**`_LINEAR_MAX_ITER = 20000` served both branches, and the two solvers do not share
+a unit.** Coordinate descent counts coordinate sweeps (cheap); saga counts full
+epochs over every row. sklearn's own defaults differ 10x for exactly this reason.
+The constant looked justified because a *correct* rationale sat above it — one
+with a scope the constant did not have.
+
+### The fix — see [0033](docs/decisions/0033-a-ceiling-in-the-wrong-unit-is-no-ceiling.md)
+
+- Ceiling split by solver: `_COORDINATE_DESCENT_MAX_ITER=20000`, `_SAGA_MAX_ITER=200`.
+- `_PenaltySearchThenRefit`: the **search** sees at most `PENALTY_SEARCH_MAX_ROWS
+  = 20_000` rows (stratified when classifying), the **refit** sees all of them.
+  Sampled inside the fold from training rows only, seeded.
+- Classification grid 400 -> 45 fits, on the same solver argument (saga cannot
+  warm-start along the path).
+
+**510 hours -> 4.6 min, and it answers**: elasticnet gini 0.25111 vs lgbm 0.28480,
+so trees win by ~4 `val_se` and the signal is not purely linear. It also beat
+catboost's 0.24644, i.e. `e5` was the misconfigured experiment.
+
+**Below the cap nothing changed** — verified bit-identical against the pre-change
+code on house v8's t11: 0.11356705 both, to 1e-12.
+
+**The under-fitting worry was checked, not assumed.** At the penalty the search
+selects (`C=0.01`) saga converges in **118 epochs**, same gini at ceilings of 200 /
+1000 / 3000. The earlier non-convergence was at `C=1.0` — weak regularisation the
+search never picks. Convergence is a property of the penalty. A warning now fires
+if any linear fit does stop on its ceiling, because under-fitting *this* model
+biases the verdict towards flattering the trees.
+
+### v2 on the fixed library — and the bigger finding: **`val` selection picked the wrong model**
+
+v2 ran clean: 11 experiments, 23 tool calls, agent called `finalize_run` itself,
+18.2 min (13.0 in fits). **It never called elasticnet.** Same prompt, model,
+settings and seed as v1, which called it at experiment 6 — so whether the
+diagnostic gets used is run-to-run variance, and 0033's fix is still untested by a
+real run.
+
+v2 also *tuned* rather than engineered: best was `e8`, lgbm on the **untouched**
+58-column table with hand-tuned params. Every feature table it built scored worse.
+
+Kaggle, all three models scored (**the two runs' val halves are byte-identical**,
+so these are directly comparable):
+
+| model | val | cv | **truth (private)** | val error | cv error | selected? |
+|---|---|---|---|---|---|---|
+| v1 `e4` | 0.28480 | 0.25998 | 0.27191 | +0.01289 | −0.01193 | yes |
+| v2 `e8` | 0.28350 | 0.25425 | 0.26522 | **+0.01828** | −0.01097 | yes |
+| **v2 `e11`** | 0.28311 | **0.26800** | **0.27724** | **+0.00587** | −0.00924 | **no** |
+
+**`cv` ranked all three correctly; `val` put the best one last.** cv is biased
+(−0.009 to −0.012, pessimistic — its fold models train on 80% of the rows) but the
+bias is near-constant, so order survives. val's bias is not constant.
+
+**And the inflation is specifically in the models that were selected.** `e8` and
+`e11` differ on val by 0.0004 — a twentieth of one `val_se` — yet their val errors
+differ 3x. Same run, same split, near-identical val: the only difference is which
+one the argmax crowned. That is the winner's curse with the confounds stripped out.
+
+So the harness **shipped the worse model**: `e11` beats `e8` by 0.0120 and v1's
+`e4` by 0.0053, and `best` is `argmax(val_score)` with no noise term.
+`submission_e11.csv` is in `_runs/seguro_v2/` (rebuilt from `experiments/e11/` +
+`tables/t6.pipeline.json`; replaying it reproduces the journalled val exactly).
+
+**Before changing the selection rule**, the proposed cv-tiebreak-within-`val_se`
+was replayed over every run on disk:
+
+- **It cannot fire on any Rossmann run** — ordered splits withhold `val_se`, so it
+  is inert exactly where cv and val diverge most structurally.
+- **On house-prices v8 it sweeps 8 of 14 experiments into the tie set**
+  (`val_se` 0.01116 against a score of 0.11171), i.e. it degenerates into
+  cv-selection on small data. Any real version wants a tighter window —
+  `StopPolicy.min_gain_ratio`'s existing quarter is the convention already here.
+- It changes the winner on all three runs that have a `val_se`, and only one of
+  those changes has been scored.
+
+**Do not implement it on one confirmed point.** The two cheap tests are
+`seguro_v1 e3` (val 0.28324 / cv 0.26123 vs shipped `e4`) and `house_prices_v8 e14`
+(val 0.11255 / cv 0.11217 vs shipped `e9`, Kaggle 0.12300) — both reconstructible
+the same way `e11` was, both against a known truth, and together they span two
+datasets, two task types and both metric directions.
+
+Leaderboard context, since the absolute numbers flatter: `e11` at 0.27359 public
+beats **37%** of 5157 teams and sits 0.0064 *below* the median. The field is
+extremely compressed — median 0.28001, winner 0.29154 — and an untuned lgbm on raw
+columns already gets ~0.28.
+
+### Gotchas
+
+- **A no-op table resets `table_patience`.** v2's `e11` exists because the agent
+  built `t6` = `def transform_features(df): return df.copy()` and got a fresh
+  tuning budget on identical features. 0014's redirect is circumventable, and the
+  circumvention produced the best model of the run.
+- **The wall-clock bound still cannot bound a single fold.** `train_cv` checks
+  between folds; here one fold outran the whole budget, so it never fired — and
+  would have discarded 510 hours when it finally did. `train_cv`'s docstring
+  rejects a subprocess timeout as buying little; that premise is now refuted but
+  **the guard is unchanged and the fix is unwritten** (0033, "What is left open").
+- **`python script.py > log` buffers.** `_runs/seguro_v1_console.log` is empty
+  because the process was killed before flushing. Use `python -u`. The journal is
+  the live view; a `Monitor` on the log sees nothing until exit.
+- **`params` can restore the pathology** — `{"max_iter": 20000}` still does exactly
+  that, by design (0029).
+- A killed run loses `transcript_N.json`: it is only written when `drive()` returns.
+  The journal, experiments and bundle survive, and `finalize_run` on the same run
+  dir packages the winner afterwards.
+
+### Owed, and next
+
+- **No notebook and no quiz for this chunk** — `_PenaltySearchThenRefit` and the
+  two-units argument are untaught. Still owed from the previous entry too:
+  `fit_seconds`, the time budget, `elasticnet` itself.
+- **Next, in order:** score `seguro_v1 e3` and `house_prices_v8 e14` to decide
+  whether the cv tiebreak is real; if it is, implement it (tighter than one
+  `val_se`) with its own record. Then the single-fold timeout (0033's open
+  question), then the `table_patience` no-op loophole.
+- **Not done, deliberately:** no selection-rule change, no elasticnet re-test.
+  Both are waiting on measurements rather than on time.
+
 ## 2026-08-12 — Thinking changed the behaviour and not the score; the ceiling is diversity, not blending
 
 **Machine:** MacBook Air | **Branch:** master | **306 tests pass** (was 291).

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator
 
 from .metrics import compute_metric
 from .target import apply_target, check_target_domain, invert_target
@@ -87,11 +88,58 @@ def _resolve_params(defaults: dict, params: dict | None, aliases=()) -> dict:
 #: difference between the ends was 18% of one standard error anyway. Offering
 #: `ridge` and `lasso` separately would be offering two ways to spend an
 #: experiment on noise.
+#:
+#: Eight points is affordable *here* because coordinate descent walks the alpha
+#: path with warm starts: the next penalty starts from the last one's solution, so
+#: a denser grid is close to free. That is a property of the solver, not of the
+#: model, which is why the classification grid below is a different length.
 _L1_RATIOS = (0.01, 0.1, 0.5, 0.7, 0.9, 0.95, 0.99, 1.0)
 
+#: The same mixes for `saga`, and shorter — three points rather than eight.
+#:
+#: `LogisticRegressionCV` has no path: it fits from scratch at every
+#: (mix, strength, inner fold), so the grid multiplies the cost directly where the
+#: regression grid above does not. Eight mixes x ten strengths x five inner folds
+#: is 400 independent fits, each a full pass structure over the data.
+#:
+#: Three points keep what the eight were for — finding which *end* of the family
+#: the data wants — and drop resolution that was already measured as noise: on
+#: house-prices the two endpoints differed by 18% of one standard error.
+_SAGA_L1_RATIOS = (0.1, 0.5, 0.9)
+
 #: Coordinate descent needs headroom on the weakly-regularised end of the path,
-#: where it otherwise emits a ConvergenceWarning per fold per alpha.
-_LINEAR_MAX_ITER = 20000
+#: where it otherwise emits a ConvergenceWarning per fold per alpha. One
+#: "iteration" here is a sweep over the *coordinates*, which is cheap.
+_COORDINATE_DESCENT_MAX_ITER = 20000
+
+#: The ceiling for `saga`, and it is a different number because it counts a
+#: different thing: one saga iteration is a full **epoch over every row**.
+#:
+#: The two were one constant until a 476,170-row classification run spent 63
+#: minutes inside the first fold of a single experiment and was killed before it
+#: could finish. Measured on that table: 0.23s per epoch, so the shared 20000
+#: meant ~77 minutes for *one* fit and ~510 hours for the 400 a search then made —
+#: while the cross-validated wall-clock bound, which only checks between folds,
+#: could not fire because no fold ever ended.
+#:
+#: A ceiling in the wrong unit is not a conservative choice. It is an unbounded
+#: one, and it read as reasonable because the constant's neighbour justified it
+#: for a solver that does not share its arithmetic.
+_SAGA_MAX_ITER = 200
+
+#: Rows the penalty **search** may see. The refit that follows always sees every
+#: row it was given, so this bounds the search and not the model.
+#:
+#: The distinction is the point. Selecting a penalty is choosing between a handful
+#: of candidates, and that verdict stabilises in far fewer rows than the fitted
+#: coefficients need — measured on a 476k-row table, a linear model scored gini
+#: 0.2367 on 25k rows and 0.2501 on all 376k, the same verdict against a GBDT's
+#: 0.2848 in a fortieth of the time. Cost of the search therefore stops growing
+#: with the table while the model it selects does not get worse.
+#:
+#: Below this the sample is the whole input and nothing changes, so every run at
+#: the sizes this library was built on behaves exactly as it did.
+PENALTY_SEARCH_MAX_ROWS = 20_000
 
 
 def _finite(X):
@@ -134,6 +182,127 @@ def _classifier_scoring(metric: str | None, task_type: str) -> str:
     return scorer
 
 
+def _scalar(value) -> float:
+    """A selected hyper-parameter as a number, whatever shape sklearn returned it in.
+
+    `LogisticRegressionCV` reports `C_` as a scalar under the post-1.10 attribute
+    layout and as a per-class array under the legacy one, and a caller may switch
+    that back on through `params`.
+    """
+    return float(np.ravel(value)[0])
+
+
+class _PenaltySearchThenRefit(BaseEstimator):
+    """Choose the penalty on a bounded sample of rows, then fit on all of them.
+
+    A self-tuning linear model does two jobs that scale differently. **Selecting**
+    a penalty compares a handful of candidates and needs only enough rows to rank
+    them; **fitting** at the chosen penalty wants every row there is. sklearn's
+    `*CV` estimators do both on whatever they are handed, so the search inherits
+    the size of the table and a model whose entire purpose is one cheap verdict
+    becomes the most expensive thing in the run.
+
+    Splitting them costs one extra fit and bounds the part that had no bound. When
+    the input is already at or below ``max_search_rows`` the sample *is* the input,
+    and the search estimator — which refits at its own choice anyway — is used as
+    it stands, so nothing about small-table behaviour changes.
+
+    The sample is drawn inside :func:`train_cv`'s fold, from that fold's training
+    rows only, so it crosses no fold boundary. It is seeded from the run's seed for
+    the reason every other estimate here is: a model that changes between identical
+    runs makes the leaderboard non-reproducible.
+    """
+
+    def __init__(self, search=None, final=None, selected=None,
+                 max_search_rows: int | None = PENALTY_SEARCH_MAX_ROWS,
+                 seed: int = 42, stratify: bool = False):
+        self.search = search
+        self.final = final
+        #: ``{our name: the fitted search estimator's attribute}`` — how the choice
+        #: is read back out. `ElasticNetCV` names it `alpha_`, `LogisticRegressionCV`
+        #: names the inverse of it `C_`, and neither is guessable.
+        self.selected = selected
+        self.max_search_rows = max_search_rows
+        self.seed = seed
+        self.stratify = stratify
+
+    def _sample(self, X, y):
+        n = len(X)
+        if not self.max_search_rows or n <= self.max_search_rows:
+            return None
+        from sklearn.model_selection import train_test_split
+
+        idx = np.arange(n)
+        keep, _ = train_test_split(
+            idx, train_size=int(self.max_search_rows), random_state=self.seed,
+            # Stratified for classification, and it matters most exactly where
+            # this cap bites: a heavily imbalanced target sampled uniformly can
+            # hand the inner cross-validation a fold with almost no positives.
+            stratify=np.asarray(y) if self.stratify else None,
+        )
+        return np.sort(keep)
+
+    def fit(self, X, y):
+        from sklearn.base import clone
+
+        X = np.asarray(X)
+        y = np.asarray(y)
+        keep = self._sample(X, y)
+        search = clone(self.search)
+        search.fit(X, y) if keep is None else search.fit(X[keep], y[keep])
+
+        self.search_rows_ = len(X) if keep is None else len(keep)
+        self.selected_ = {
+            name: _scalar(getattr(search, attr))
+            for name, attr in (self.selected or {}).items()
+        }
+        if keep is None:
+            # No sampling happened, so the search already fitted on everything it
+            # would be refitted on. Refitting would spend a fit to arrive back
+            # where we are.
+            self.estimator_ = search
+        else:
+            self.estimator_ = clone(self.final).set_params(**self.selected_).fit(X, y)
+        self.classes_ = getattr(self.estimator_, "classes_", None)
+        self._warn_if_unconverged()
+        return self
+
+    def _warn_if_unconverged(self) -> None:
+        """Say so when the fit stopped on its iteration ceiling rather than on tol.
+
+        This model is a *diagnostic*: a GBDT that cannot beat it means the signal
+        is in the features. An under-fitted linear model biases that verdict in the
+        one direction it must never be biased — towards flattering the tree — and
+        an iteration ceiling is exactly how it would happen silently.
+
+        Not an error, because a stopped fit is still a usable model and refusing
+        would cost the run an experiment over a warning. Measured on a 476k-row
+        table, the ceiling is not normally reached: at the strength the search
+        selects, saga converged in 118 epochs, while an unregularised fit on the
+        same data had not converged in 1000. Convergence is a property of the
+        penalty, and the search picks penalties that converge.
+        """
+        import warnings
+
+        limit = getattr(self.estimator_, "max_iter", None)
+        n_iter = getattr(self.estimator_, "n_iter_", None)
+        if limit is None or n_iter is None:
+            return
+        if int(np.max(np.asarray(n_iter))) >= int(limit):
+            warnings.warn(
+                f"the linear fit stopped at its {limit}-iteration ceiling rather "
+                "than converging, so it may be under-fitted — and this model type "
+                "is the yardstick other models are judged against",
+                stacklevel=2,
+            )
+
+    def predict(self, X):
+        return self.estimator_.predict(np.asarray(X))
+
+    def predict_proba(self, X):
+        return self.estimator_.predict_proba(np.asarray(X))
+
+
 def _make_elasticnet(task_type: str, params: dict | None, seed: int,
                      metric: str | None = None):
     """L1/L2-regularised linear model, self-tuning, with the preprocessing it needs.
@@ -152,13 +321,18 @@ def _make_elasticnet(task_type: str, params: dict | None, seed: int,
     cross-validation. That is deliberate: this model type exists to answer "do my
     features carry the signal, or does my model" in a single experiment, and a
     version needing three tuning runs first would not answer it.
+
+    That same argument bounds what the tuning is allowed to cost. A diagnostic
+    nobody can afford to run is not a diagnostic, so the inner search is capped at
+    `PENALTY_SEARCH_MAX_ROWS` rows by `_PenaltySearchThenRefit` while the model it
+    selects is still fitted on all of them.
     """
     from sklearn.impute import SimpleImputer
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import FunctionTransformer, StandardScaler
 
     if task_type == "regression":
-        from sklearn.linear_model import ElasticNetCV
+        from sklearn.linear_model import ElasticNet, ElasticNetCV
 
         # `alphas` as a count, not a grid: sklearn then derives the path from the
         # data. The useful range of penalty strengths depends on the scale and the
@@ -173,20 +347,29 @@ def _make_elasticnet(task_type: str, params: dict | None, seed: int,
         # is a manual path search rather than a keyword, and is not built.
         kw = _resolve_params(
             {"l1_ratio": list(_L1_RATIOS), "alphas": 60, "cv": 5,
-             "max_iter": _LINEAR_MAX_ITER, "random_state": seed},
+             "max_iter": _COORDINATE_DESCENT_MAX_ITER, "random_state": seed},
             params,
         )
-        estimator = ElasticNetCV(**kw)
+        estimator = _PenaltySearchThenRefit(
+            search=ElasticNetCV(**kw),
+            final=ElasticNet(max_iter=kw["max_iter"], random_state=seed),
+            selected={"alpha": "alpha_", "l1_ratio": "l1_ratio_"},
+            seed=seed,
+        )
     else:
-        from sklearn.linear_model import LogisticRegressionCV
+        from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
 
         # Same family, different parameterisation: `Cs` is inverse strength and the
         # mixes are `l1_ratios`. Fractional `l1_ratios` are what selects the
         # elasticnet penalty now — passing `penalty=` as well is deprecated — and
         # only `saga` implements it.
+        #
+        # Every default here is smaller than the regression branch's, and all three
+        # for one reason: saga pays for the whole grid because it cannot warm-start
+        # along it. 3 x 5 x 3 is 45 fits where 8 x 10 x 5 was 400.
         kw = _resolve_params(
-            {"l1_ratios": list(_L1_RATIOS), "Cs": 10, "cv": 5,
-             "solver": "saga", "max_iter": _LINEAR_MAX_ITER, "random_state": seed,
+            {"l1_ratios": list(_SAGA_L1_RATIOS), "Cs": 5, "cv": 3,
+             "solver": "saga", "max_iter": _SAGA_MAX_ITER, "random_state": seed,
              # Follows the *run's* metric, not a constant. sklearn's default is
              # accuracy; selecting a penalty by accuracy while the leaderboard ranks
              # on log loss or AUC tunes for an objective nobody is scoring.
@@ -197,7 +380,15 @@ def _make_elasticnet(task_type: str, params: dict | None, seed: int,
              "use_legacy_attributes": False},
             params,
         )
-        estimator = LogisticRegressionCV(**kw)
+        estimator = _PenaltySearchThenRefit(
+            search=LogisticRegressionCV(**kw),
+            final=LogisticRegression(
+                solver=kw["solver"], max_iter=kw["max_iter"], random_state=seed,
+            ),
+            selected={"C": "C_", "l1_ratio": "l1_ratio_"},
+            seed=seed,
+            stratify=True,
+        )
 
     return make_pipeline(
         FunctionTransformer(_finite, feature_names_out="one-to-one"),

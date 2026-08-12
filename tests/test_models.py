@@ -377,6 +377,90 @@ def test_elasticnet_survives_infinities_and_missing_values():
     assert not np.isnan(result.oof).any()
 
 
+def test_the_penalty_search_is_bounded_but_the_fit_is_not():
+    """The search sees at most `PENALTY_SEARCH_MAX_ROWS`; the model sees every row.
+
+    A self-tuning linear model has two costs that scale differently: choosing a
+    penalty ranks a handful of candidates, fitting at it wants all the data. Left
+    joined, the choosing inherits the size of the table — which is how a 476k-row
+    classification run spent an hour inside one fold of one experiment and was
+    killed before finishing it.
+    """
+    from tabular_agent.models import _make_model
+
+    rng = np.random.default_rng(0)
+    n = 400
+    X = pd.DataFrame(rng.normal(size=(n, 4)), columns=list("abcd"))
+    y = pd.Series(X["a"] * 2.0 + rng.normal(scale=0.3, size=n))
+
+    model = _make_model("elasticnet", "regression", None, seed=0)
+    # Far below the real cap, so the sampling path runs on a table small enough
+    # to assert about.
+    model[-1].set_params(max_search_rows=100)
+    model.fit(X, y)
+
+    chosen = model[-1]
+    assert chosen.search_rows_ == 100
+    # The fit that follows is not sampled: it is a `_finite`-cleaned view of every
+    # row, so the coefficients come from all 400.
+    assert chosen.estimator_.n_features_in_ == 4
+    assert chosen.selected_["alpha"] > 0
+    # What predicts is the plain refit at the chosen penalty, not the searching
+    # estimator — otherwise the model would be the one fitted on 100 rows.
+    from sklearn.linear_model import ElasticNet, ElasticNetCV
+
+    assert isinstance(chosen.estimator_, ElasticNet)
+    assert not isinstance(chosen.estimator_, ElasticNetCV)
+    assert chosen.estimator_.alpha == chosen.selected_["alpha"]
+    assert len(model.predict(X)) == n
+
+
+def test_the_penalty_search_sample_is_stratified_for_classification():
+    """A rare class must survive the cap, or the inner folds have nothing to score.
+
+    Uniform sampling of a heavily imbalanced target can hand the inner
+    cross-validation a fold with almost no positives, which selects a penalty on
+    noise — and the cap bites hardest exactly where imbalance is worst.
+    """
+    from tabular_agent.models import _make_model
+
+    rng = np.random.default_rng(1)
+    n = 2000
+    X = pd.DataFrame(rng.normal(size=(n, 3)), columns=list("abc"))
+    # 3% positive, close to the rate that motivated this.
+    y = pd.Series((rng.random(n) < 0.03).astype(int))
+    y.iloc[:60] = 1
+
+    model = _make_model("elasticnet", "binary", None, seed=0, metric="auc")
+    assert model[-1].stratify is True
+    model[-1].set_params(max_search_rows=500)
+    model.fit(X, y)
+
+    assert model[-1].search_rows_ == 500
+    assert set(model[-1].classes_) == {0, 1}
+
+
+def test_the_saga_iteration_ceiling_is_in_saga_s_own_unit():
+    """Coordinate-descent sweeps and saga epochs are not the same unit of work.
+
+    One constant served both until a 476k-row run measured 0.23s per saga epoch:
+    the shared 20000 meant ~77 minutes for a single fit, and the between-folds
+    wall-clock bound could not fire because no fold ever ended.
+    """
+    from tabular_agent.models import (_COORDINATE_DESCENT_MAX_ITER, _SAGA_MAX_ITER,
+                                      _make_model)
+
+    assert _SAGA_MAX_ITER < _COORDINATE_DESCENT_MAX_ITER
+
+    clf = _make_model("elasticnet", "binary", None, seed=0, metric="auc")[-1]
+    assert clf.search.max_iter == _SAGA_MAX_ITER
+    assert clf.final.max_iter == _SAGA_MAX_ITER
+    # saga pays for every grid point separately, so its grid is the smaller one.
+    reg = _make_model("elasticnet", "regression", None, seed=0)[-1]
+    assert reg.search.max_iter == _COORDINATE_DESCENT_MAX_ITER
+    assert len(clf.search.l1_ratios) < len(reg.search.l1_ratio)
+
+
 def test_elasticnet_tunes_its_own_penalty():
     """One model type covering ridge through lasso, so no experiment is spent
     choosing between endpoints that differ by a fraction of the noise."""
@@ -386,9 +470,13 @@ def test_elasticnet_tunes_its_own_penalty():
     result = train_cv(X, y, make_folds(y, "regression", n_splits=3), "regression",
                       "rmse", model_type="elasticnet", seed=1)
 
+    # Read off the wrapper that separates choosing the penalty from fitting at
+    # it, rather than off a bare `ElasticNetCV`.
     chosen = result.final_model[-1]
-    assert chosen.l1_ratio_ in _L1_RATIOS
-    assert chosen.alpha_ > 0
+    assert chosen.selected_["l1_ratio"] in _L1_RATIOS
+    assert chosen.selected_["alpha"] > 0
+    # Small table, so the search saw every row and no sampling happened.
+    assert chosen.search_rows_ == len(X)
 
 
 def test_elasticnet_scaling_is_fitted_inside_the_fold():
@@ -467,7 +555,7 @@ def test_the_linear_penalty_is_selected_by_the_run_s_own_metric():
     assert _classifier_scoring(None, "binary") == "neg_log_loss"
 
     built = _make_model("elasticnet", "binary", None, seed=0, metric="auc")
-    assert built[-1].scoring == "roc_auc"
+    assert built[-1].search.scoring == "roc_auc"
 
 
 def test_the_metric_reaches_the_model_through_train_cv():
@@ -479,5 +567,5 @@ def test_the_metric_reaches_the_model_through_train_cv():
     result = train_cv(X, y, make_folds(y, "binary", n_splits=3), "binary", "auc",
                       model_type="elasticnet", seed=1)
 
-    assert result.final_model[-1].scoring == "roc_auc"
-    assert all(m[-1].scoring == "roc_auc" for m in result.models)
+    assert result.final_model[-1].search.scoring == "roc_auc"
+    assert all(m[-1].search.scoring == "roc_auc" for m in result.models)

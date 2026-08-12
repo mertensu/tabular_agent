@@ -78,6 +78,9 @@ Vocabulary used throughout:
   *(the danger is real; its mechanism was decorative — see 0031)*
 - [0031 — The serialisation guard was decorative; correctness moves into the primitives](0031-the-guard-was-decorative.md)
 - [0013 — A refusal is a return value, not an exception](0013-refusal-as-return-value.md)
+- [0033 — A ceiling in the wrong unit is no ceiling; the search is bounded, the fit is not](0033-a-ceiling-in-the-wrong-unit-is-no-ceiling.md)
+  *(what a self-tuning model may cost at scale; and a wall-clock bound that still
+  cannot bound a single fold)*
 
 ### Knowing when to stop, and what worked
 
