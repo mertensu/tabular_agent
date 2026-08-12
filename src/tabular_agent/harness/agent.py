@@ -368,7 +368,12 @@ def build_agent(model=DEFAULT_MODEL):
 
         Args:
             table: Path to the feature table. Omit to use the run's work table.
-            model_type: One of "baseline", "lgbm", "xgb", "catboost".
+            model_type: One of "baseline", "elasticnet", "lgbm", "xgb",
+                "catboost". "elasticnet" is a regularised linear model that
+                tunes its own penalty; it is worth one experiment on any table
+                you care about, because a tree model that cannot clearly beat
+                it is telling you the signal is in the features rather than the
+                model.
             params: Optional model hyper-parameters.
             target_transform: What the model is fitted on — "none" (the target
                 as-is), "log1p", or "sqrt". Regression only, and "log1p"/"sqrt"
@@ -411,7 +416,12 @@ def build_agent(model=DEFAULT_MODEL):
 
         Args:
             table: Path to the feature table. Omit to use the run's work table.
-            model_type: One of "baseline", "lgbm", "xgb", "catboost".
+            model_type: One of "baseline", "elasticnet", "lgbm", "xgb",
+                "catboost". "elasticnet" is a regularised linear model that
+                tunes its own penalty; it is worth one experiment on any table
+                you care about, because a tree model that cannot clearly beat
+                it is telling you the signal is in the features rather than the
+                model.
             params: Optional model hyper-parameters.
             target_transform: Match the experiment you are explaining, or the
                 contributions describe a fit you never ran.

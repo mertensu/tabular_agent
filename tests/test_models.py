@@ -1,9 +1,17 @@
+import tempfile
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from tabular_agent.cv import make_folds
-from tabular_agent.models import TrainingTooSlow, train_cv, predict_model, TrainResult
+from tabular_agent.models import (
+    _L1_RATIOS,
+    TrainingTooSlow,
+    TrainResult,
+    predict_model,
+    train_cv,
+)
 from tabular_agent.pipeline import Pipeline, save_bundle, load_bundle, predict_bundle
 from tabular_agent.runctx import RunContext
 
@@ -333,3 +341,107 @@ def test_no_budget_means_no_ceiling():
                       time_budget_s=None)
 
     assert len(result.fold_metrics) == 3
+
+
+# --------------------------------------------------------------- elasticnet
+#
+# The linear entry is a *diagnostic*, not a bid for accuracy: a GBDT that cannot
+# clearly beat it says the signal is in the features. These tests cover what makes
+# it usable at all, which is the preprocessing GBDTs never needed.
+
+
+def _messy_frame(n=200, seed=0):
+    """A feature matrix with the two things a linear model cannot swallow."""
+    rng = np.random.default_rng(seed)
+    X = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n) * 500,
+                      "c": rng.normal(size=n)})
+    X.loc[3, "a"] = np.inf       # what `area / rooms` produces when rooms is 0
+    X.loc[4, "a"] = -np.inf
+    X.loc[7, "b"] = np.nan
+    return X
+
+
+def test_elasticnet_survives_infinities_and_missing_values():
+    """A GBDT splits on inf; a linear model raises. Ratio features produce inf.
+
+    `_finite` maps non-finite to NaN and the imputer fills it — reading "the ratio
+    is undefined for this row" as missing, which is what it means.
+    """
+    X = _messy_frame()
+    y = pd.Series(np.arange(len(X), dtype=float))
+
+    result = train_cv(X, y, make_folds(y, "regression", n_splits=3), "regression",
+                      "rmse", model_type="elasticnet", seed=1)
+
+    assert len(result.fold_metrics) == 3
+    assert not np.isnan(result.oof).any()
+
+
+def test_elasticnet_tunes_its_own_penalty():
+    """One model type covering ridge through lasso, so no experiment is spent
+    choosing between endpoints that differ by a fraction of the noise."""
+    X = _messy_frame()
+    y = pd.Series(X["a"].replace([np.inf, -np.inf], 0.0).fillna(0.0) * 3.0)
+
+    result = train_cv(X, y, make_folds(y, "regression", n_splits=3), "regression",
+                      "rmse", model_type="elasticnet", seed=1)
+
+    chosen = result.final_model[-1]
+    assert chosen.l1_ratio_ in _L1_RATIOS
+    assert chosen.alpha_ > 0
+
+
+def test_elasticnet_scaling_is_fitted_inside_the_fold():
+    """The preprocessing lives in the estimator so `train_cv` refits it per fold.
+
+    In a feature table instead, the median and the scale would be learned from
+    every row including the held-out ones — batch dependence in the one place
+    0011's stability check cannot see, because it never runs on a model.
+    """
+    X = _messy_frame()
+    y = pd.Series(np.arange(len(X), dtype=float))
+    folds = make_folds(y, "regression", n_splits=3)
+
+    result = train_cv(X, y, folds, "regression", "rmse", model_type="elasticnet", seed=1)
+
+    # Each fold model carries its own scaler, fitted on that fold's rows only.
+    means = [m.named_steps["standardscaler"].mean_ for m in result.models]
+    assert not np.allclose(means[0], means[1])
+
+
+def test_elasticnet_works_for_classification_too():
+    """Same family, different parameterisation (`LogisticRegressionCV`)."""
+    rng = np.random.default_rng(3)
+    X = _messy_frame(seed=3)
+    y = pd.Series((rng.random(len(X)) > 0.5).astype(int))
+
+    result = train_cv(X, y, make_folds(y, "binary", n_splits=3), "binary", "logloss",
+                      model_type="elasticnet", seed=1)
+
+    assert result.oof.shape == (len(X),)
+    assert ((result.oof >= 0) & (result.oof <= 1)).all()
+
+
+def test_an_elasticnet_bundle_predicts_a_single_row():
+    """The whole pipeline — imputer, scaler, estimator — has to survive joblib and
+    then answer for one row, which is the predict-time worst case."""
+    X = _messy_frame()
+    y = pd.Series(X["a"].replace([np.inf, -np.inf], 0.0).fillna(0.0) * 3.0)
+    result = train_cv(X, y, make_folds(y, "regression", n_splits=3), "regression",
+                      "rmse", model_type="elasticnet", seed=1)
+
+    ctx = RunContext(tempfile.mkdtemp())
+    bundle_dir = save_bundle(ctx, Pipeline("regression"), [result.final_model],
+                             np.array([1.0]), result.feature_names, "regression")
+    preds = predict_bundle(load_bundle(bundle_dir), X.iloc[[5]])
+
+    assert preds.shape == (1,)
+    assert np.isfinite(preds).all()
+
+
+def test_an_unknown_model_type_lists_the_real_ones():
+    X = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0]})
+    y = pd.Series([1.0, 2.0, 3.0, 4.0])
+    with pytest.raises(ValueError, match="elasticnet"):
+        train_cv(X, y, make_folds(y, "regression", n_splits=2), "regression", "rmse",
+                 model_type="ridge")

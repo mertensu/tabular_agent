@@ -1,5 +1,20 @@
-"""Model wrappers over LightGBM/XGBoost/CatBoost plus a trivial baseline,
-and cross-validated training that emits OOF predictions and fold metrics."""
+"""Model wrappers over LightGBM/XGBoost/CatBoost, a regularised linear model and a
+trivial baseline, plus cross-validated training that emits OOF predictions and fold
+metrics.
+
+The linear entry is not here for accuracy. It is the **diagnostic** a tabular run
+otherwise cannot make: if a tuned GBDT cannot clearly beat a self-tuning
+elasticnet on the same table, the signal is in the features and further work on
+the model is wasted. On house-prices that is exactly what happened — a plain
+elasticnet scored 0.11216 against a tuned catboost's 0.11171, a gap of 4% of one
+standard error — and the run had no way to find out, because there was no linear
+model to ask.
+
+It is also the only family here whose predictions decorrelate from the trees
+enough for averaging to do anything (GBDT-vs-GBDT residual correlation on that
+table: 0.86-0.88; elasticnet-vs-catboost: 0.84, and the blend moved the score
+where a three-GBDT blend did not).
+"""
 
 import time
 from dataclasses import dataclass
@@ -65,9 +80,107 @@ def _resolve_params(defaults: dict, params: dict | None, aliases=()) -> dict:
     return out
 
 
+#: The L1/L2 mixes an elasticnet searches. `1.0` is lasso, `0.01` is ridge in all
+#: but name, so **one model type covers the whole family** and the agent never has
+#: to pick an endpoint. Measured on house-prices: ridge 0.11420, lasso 0.11215,
+#: self-tuned elasticnet 0.11216 — it finds the better end unaided, and the
+#: difference between the ends was 18% of one standard error anyway. Offering
+#: `ridge` and `lasso` separately would be offering two ways to spend an
+#: experiment on noise.
+_L1_RATIOS = (0.01, 0.1, 0.5, 0.7, 0.9, 0.95, 0.99, 1.0)
+
+#: Coordinate descent needs headroom on the weakly-regularised end of the path,
+#: where it otherwise emits a ConvergenceWarning per fold per alpha.
+_LINEAR_MAX_ITER = 20000
+
+
+def _finite(X):
+    """Infinities to NaN, so the imputer downstream can deal with them.
+
+    Module-level (not a lambda) because the fitted pipeline is pickled into the
+    bundle and has to survive the round trip.
+
+    This exists because agents write ratio features constantly — ``area / rooms``,
+    ``finished / total`` — and any of them divides by zero somewhere. A GBDT splits
+    happily on ``inf``; a linear model raises ``Input contains infinity``. Treating
+    a non-finite value as missing is the honest reading: the ratio is undefined for
+    that row, which is what NaN means.
+    """
+    return np.where(np.isfinite(X), X, np.nan)
+
+
+def _make_elasticnet(task_type: str, params: dict | None, seed: int):
+    """L1/L2-regularised linear model, self-tuning, with the preprocessing it needs.
+
+    The preprocessing is the reason this cannot be one line. GBDTs take the raw
+    numeric matrix — NaNs, wild scales, infinities and all — and a linear model
+    takes none of those, so imputation and standardisation have to happen
+    *somewhere*. They happen here, inside the estimator, which puts them **inside
+    the fold**: `train_cv` builds a fresh model per fold and fits it on that fold's
+    training rows only, so the median and the scale are learned from training rows
+    and applied to held-out ones. Doing it in a feature table instead would learn
+    them from every row and leak across the fold boundary — the batch-dependence
+    0011 exists to catch, in the one place the stability check cannot see.
+
+    Self-tuning over both the penalty strength and the L1/L2 mix, by an inner
+    cross-validation. That is deliberate: this model type exists to answer "do my
+    features carry the signal, or does my model" in a single experiment, and a
+    version needing three tuning runs first would not answer it.
+    """
+    from sklearn.impute import SimpleImputer
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import FunctionTransformer, StandardScaler
+
+    if task_type == "regression":
+        from sklearn.linear_model import ElasticNetCV
+
+        # `alphas` as a count, not a grid: sklearn then derives the path from the
+        # data. The useful range of penalty strengths depends on the scale and the
+        # number of features, so a hardcoded grid would be wrong for both.
+        kw = _resolve_params(
+            {"l1_ratio": list(_L1_RATIOS), "alphas": 60, "cv": 5,
+             "max_iter": _LINEAR_MAX_ITER, "random_state": seed},
+            params,
+        )
+        estimator = ElasticNetCV(**kw)
+    else:
+        from sklearn.linear_model import LogisticRegressionCV
+
+        # Same family, different parameterisation: `Cs` is inverse strength and the
+        # mixes are `l1_ratios`. Fractional `l1_ratios` are what selects the
+        # elasticnet penalty now — passing `penalty=` as well is deprecated — and
+        # only `saga` implements it.
+        kw = _resolve_params(
+            {"l1_ratios": list(_L1_RATIOS), "Cs": 10, "cv": 5,
+             "solver": "saga", "max_iter": _LINEAR_MAX_ITER, "random_state": seed,
+             # Chosen by log loss, not accuracy. sklearn's default is accuracy and
+             # is changing anyway, but the reason to set it is correctness: picking
+             # the penalty by accuracy while the run is scored on `logloss` tunes
+             # for a different objective than the one on the leaderboard.
+             "scoring": "neg_log_loss",
+             # Opt into the post-1.10 attribute layout now. Nothing here reads the
+             # deprecated paths (`predict_model` only needs `classes_`), and leaving
+             # it unset emits a FutureWarning per fold into every run's log.
+             "use_legacy_attributes": False},
+            params,
+        )
+        estimator = LogisticRegressionCV(**kw)
+
+    return make_pipeline(
+        FunctionTransformer(_finite, feature_names_out="one-to-one"),
+        # `keep_empty_features` so an all-NaN column in one fold does not silently
+        # change the matrix width between folds.
+        SimpleImputer(strategy="median", keep_empty_features=True),
+        StandardScaler(),
+        estimator,
+    )
+
+
 def _make_model(model_type: str, task_type: str, params: dict | None, seed: int):
     if model_type == "baseline":
         return _Baseline(task_type)
+    if model_type == "elasticnet":
+        return _make_elasticnet(task_type, params, seed)
     if model_type == "lgbm":
         import lightgbm as lgb
 
@@ -90,7 +203,10 @@ def _make_model(model_type: str, task_type: str, params: dict | None, seed: int)
         )
         cls = CatBoostRegressor if task_type == "regression" else CatBoostClassifier
         return cls(**kw)
-    raise ValueError(f"unknown model_type: {model_type}")
+    raise ValueError(
+        f"unknown model_type: {model_type!r} (use 'baseline', 'elasticnet', 'lgbm', "
+        "'xgb' or 'catboost')"
+    )
 
 
 def predict_model(model, X: pd.DataFrame, task_type: str, classes=None) -> np.ndarray:
