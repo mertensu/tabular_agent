@@ -445,3 +445,39 @@ def test_an_unknown_model_type_lists_the_real_ones():
     with pytest.raises(ValueError, match="elasticnet"):
         train_cv(X, y, make_folds(y, "regression", n_splits=2), "regression", "rmse",
                  model_type="ridge")
+
+
+def test_the_linear_penalty_is_selected_by_the_run_s_own_metric():
+    """Not by a constant, and not by sklearn's accuracy default.
+
+    `LogisticRegressionCV` runs its own inner selection. Choosing a penalty by
+    accuracy while the leaderboard ranks on AUC tunes for an objective nobody is
+    scoring — the same category of error as scoring a log-target model on the
+    original scale.
+    """
+    from tabular_agent.models import _classifier_scoring, _make_model
+
+    assert _classifier_scoring("logloss", "binary") == "neg_log_loss"
+    assert _classifier_scoring("accuracy", "binary") == "accuracy"
+    # AUC needs the one-vs-rest spelling once there are more than two classes.
+    assert _classifier_scoring("auc", "binary") == "roc_auc"
+    assert _classifier_scoring("auc", "multiclass") == "roc_auc_ovr"
+    # An unmappable or absent metric falls back to probabilities, not accuracy.
+    assert _classifier_scoring("rmse", "binary") == "neg_log_loss"
+    assert _classifier_scoring(None, "binary") == "neg_log_loss"
+
+    built = _make_model("elasticnet", "binary", None, seed=0, metric="auc")
+    assert built[-1].scoring == "roc_auc"
+
+
+def test_the_metric_reaches_the_model_through_train_cv():
+    """`train_cv` already knows the metric; the model type that needs it gets it."""
+    rng = np.random.default_rng(4)
+    X = pd.DataFrame(rng.normal(size=(150, 3)), columns=list("abc"))
+    y = pd.Series((X["a"] + rng.normal(scale=0.4, size=150) > 0).astype(int))
+
+    result = train_cv(X, y, make_folds(y, "binary", n_splits=3), "binary", "auc",
+                      model_type="elasticnet", seed=1)
+
+    assert result.final_model[-1].scoring == "roc_auc"
+    assert all(m[-1].scoring == "roc_auc" for m in result.models)

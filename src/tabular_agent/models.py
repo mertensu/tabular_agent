@@ -109,7 +109,33 @@ def _finite(X):
     return np.where(np.isfinite(X), X, np.nan)
 
 
-def _make_elasticnet(task_type: str, params: dict | None, seed: int):
+#: How the run's metric names its sklearn equivalent, for the inner selection
+#: `LogisticRegressionCV` does. Following the run's own metric is the whole point:
+#: sklearn's default is accuracy, and selecting a penalty by accuracy while the
+#: leaderboard ranks on log loss tunes for an objective nobody is scoring. `auc` on
+#: more than two classes needs the one-vs-rest spelling.
+_SKLEARN_SCORERS = {
+    "logloss": "neg_log_loss",
+    "accuracy": "accuracy",
+    "auc": {"binary": "roc_auc", "multiclass": "roc_auc_ovr"},
+}
+
+
+def _classifier_scoring(metric: str | None, task_type: str) -> str:
+    """The sklearn scorer for this run's metric, or log loss when it has no name.
+
+    Falling back to `neg_log_loss` rather than to sklearn's accuracy default: a
+    probability-calibrated choice is the better guess for a metric we cannot map,
+    and every classification metric here except `accuracy` reads probabilities.
+    """
+    scorer = _SKLEARN_SCORERS.get(metric or "", "neg_log_loss")
+    if isinstance(scorer, dict):
+        return scorer.get(task_type, "roc_auc")
+    return scorer
+
+
+def _make_elasticnet(task_type: str, params: dict | None, seed: int,
+                     metric: str | None = None):
     """L1/L2-regularised linear model, self-tuning, with the preprocessing it needs.
 
     The preprocessing is the reason this cannot be one line. GBDTs take the raw
@@ -137,6 +163,14 @@ def _make_elasticnet(task_type: str, params: dict | None, seed: int):
         # `alphas` as a count, not a grid: sklearn then derives the path from the
         # data. The useful range of penalty strengths depends on the scale and the
         # number of features, so a hardcoded grid would be wrong for both.
+        #
+        # NOTE, and it is a real limitation: `ElasticNetCV` has no `scoring`
+        # parameter. It always selects alpha by squared error, whatever the run's
+        # metric is. Usually that is harmless or exactly right — under
+        # `target_transform="log1p"` the model is fitted on `log1p(y)`, so squared
+        # error on that scale *is* `rmsle`, and the selection matches the
+        # leaderboard by construction. It is wrong for `mae`, where the honest fix
+        # is a manual path search rather than a keyword, and is not built.
         kw = _resolve_params(
             {"l1_ratio": list(_L1_RATIOS), "alphas": 60, "cv": 5,
              "max_iter": _LINEAR_MAX_ITER, "random_state": seed},
@@ -153,11 +187,10 @@ def _make_elasticnet(task_type: str, params: dict | None, seed: int):
         kw = _resolve_params(
             {"l1_ratios": list(_L1_RATIOS), "Cs": 10, "cv": 5,
              "solver": "saga", "max_iter": _LINEAR_MAX_ITER, "random_state": seed,
-             # Chosen by log loss, not accuracy. sklearn's default is accuracy and
-             # is changing anyway, but the reason to set it is correctness: picking
-             # the penalty by accuracy while the run is scored on `logloss` tunes
-             # for a different objective than the one on the leaderboard.
-             "scoring": "neg_log_loss",
+             # Follows the *run's* metric, not a constant. sklearn's default is
+             # accuracy; selecting a penalty by accuracy while the leaderboard ranks
+             # on log loss or AUC tunes for an objective nobody is scoring.
+             "scoring": _classifier_scoring(metric, task_type),
              # Opt into the post-1.10 attribute layout now. Nothing here reads the
              # deprecated paths (`predict_model` only needs `classes_`), and leaving
              # it unset emits a FutureWarning per fold into every run's log.
@@ -176,11 +209,19 @@ def _make_elasticnet(task_type: str, params: dict | None, seed: int):
     )
 
 
-def _make_model(model_type: str, task_type: str, params: dict | None, seed: int):
+def _make_model(model_type: str, task_type: str, params: dict | None, seed: int,
+                metric: str | None = None):
+    """Build an unfitted model.
+
+    ``metric`` is only consulted by model types that run their own inner selection
+    — currently just `elasticnet`, whose classification branch would otherwise
+    choose a penalty by accuracy while the run is ranked on something else. The
+    GBDTs ignore it: their loss is set by `task_type` and their rounds are fixed.
+    """
     if model_type == "baseline":
         return _Baseline(task_type)
     if model_type == "elasticnet":
-        return _make_elasticnet(task_type, params, seed)
+        return _make_elasticnet(task_type, params, seed, metric)
     if model_type == "lgbm":
         import lightgbm as lgb
 
@@ -304,7 +345,7 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
     fold_metrics = []
     started = time.monotonic()
     for i, (tr, va) in enumerate(folds):
-        model = _make_model(model_type, task_type, params, seed)
+        model = _make_model(model_type, task_type, params, seed, metric)
         model.fit(X.iloc[tr], y_fit.iloc[tr])
         preds = predict_model(model, X.iloc[va], task_type, classes=classes)
         if target_transform != "none":
@@ -329,7 +370,7 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
                 f"expensive fit."
             )
 
-    final = _make_model(model_type, task_type, params, seed)
+    final = _make_model(model_type, task_type, params, seed, metric)
     final.fit(X, y_fit)
     return TrainResult(oof, fold_metrics, models, final, list(X.columns), model_type,
                        target_transform, round(time.monotonic() - started, 1))
