@@ -36,7 +36,14 @@ from . import journal, stop
 from .session import RunSession
 
 #: Column-level detail is capped so a wide table cannot blow up the context.
-MAX_REPORTED_COLUMNS = 60
+#:
+#: Raised from 60 once a dataset arrived with a real data dictionary. Descriptions
+#: ride on their column (0018's channel), so truncating the profile silently
+#: truncates the dictionary — house-prices has 80 columns and the 20 that fell off
+#: included four whose notes carry the level order an ordinal encoding needs. The
+#: cap exists to stop a 500-column table, not an 80-column one; a full profile here
+#: is a few thousand tokens, once per run.
+MAX_REPORTED_COLUMNS = 100
 
 #: Absolute floor on what a row filter may leave behind, on top of the
 #: fold-count floor. Fewer rows than this is not a smaller training set, it is a
