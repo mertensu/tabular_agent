@@ -498,7 +498,7 @@ def fit_encoding(
 ) -> dict:
     """Encode categorical columns into a new feature table (spec §5.2).
 
-    The only way to make a non-numeric column usable: ``train_tabular_model``
+    The only way to make a non-numeric column usable: every fit in this harness
     drops what it cannot feed to a GBDT, and there is no tool that casts a
     column in place. Writes ``tables/<id>.parquet`` (the source table plus the
     encoded columns) and, beside it, the lineage sidecar recording the fitted
@@ -570,7 +570,7 @@ def fit_encoding(
         "non_numeric_columns": still_dropped,
         **scored,
         "note": (
-            "Pass this table to train_tabular_model to use the new columns. "
+            "This table is scored above; build on it to keep the new columns. "
             + (
                 "The values stored here are out-of-fold; the encoder fitted on all "
                 "rows is kept in the table's lineage and is what runs at predict time."
@@ -683,7 +683,7 @@ def fit_group_stats(
     n_missing = int(out[column].isna().sum())
     value_unavailable = value in _unavailable_at_predict_time(session, df)
     note = (
-        "Pass this table to train_tabular_model to use the new column. The values "
+        "This table is scored above; build on it to keep the new column. The values "
         "here are out-of-fold; the statistics fitted on all rows are kept in the "
         "table's lineage and are what a prediction looks up."
     )
@@ -808,11 +808,10 @@ def filter_rows(
         "new_columns": [],
         **scored,
         "note": (
-            "Pass this table to train_tabular_model to fit on the kept rows only. "
-            "The filter is recorded as train-time-only and does not run at predict "
-            "time, so val_score is still measured on the whole validation half and "
-            "stays comparable to experiments on the unfiltered table. cv_score is "
-            "not: it is now the mean over the kept rows."
+            "The kept rows are what anything built on this table fits on. The filter "
+            "is recorded as train-time-only and does not run at predict time, so "
+            "probe_score is still measured on the whole validation half and stays "
+            "comparable to unfiltered tables."
         ),
     }
 
@@ -909,7 +908,7 @@ def transform_features(
         "non_numeric_columns": still_dropped,
         **scored,
         "note": (
-            "Pass this table to train_tabular_model to use the new columns. The code "
+            "This table is scored above; build on it to keep the new columns. The code "
             "is stored in the table's lineage and re-runs at predict time; the target "
             "column was not visible to it."
         ),

@@ -91,6 +91,9 @@ Vocabulary used throughout:
 - [0016 — Feature credit per tool call, not per column](0016-block-level-credit.md)
   *(superseded by 0017)*
 - [0017 — Credit is measured by refitting without the columns, not by importance](0017-credit-by-ablation.md)
+- [0037 — Residuals need folds; the ranking does not](0037-residuals-need-folds-the-ranking-does-not.md)
+  *(why `explore_table` refits across folds while the ranking path deliberately
+  does not, and why in-sample residuals are not the cheap version)*
 - [0019 — The leaderboard is a public leaderboard](0019-the-leaderboard-is-a-public-leaderboard.md)
 - [0022 — The yardstick must measure the quantity being ranked](0022-the-yardstick-must-measure-the-ranked-quantity.md)
   *(accepted and now implemented; one claim about what the fix achieves is corrected by 0028)*

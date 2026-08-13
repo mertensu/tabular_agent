@@ -1,7 +1,7 @@
 """The harness system prompt (spec §12 revision).
 
 Note what this prompt does *not* have to do. It does not say "please don't train
-a model outside `train_tabular_model`" or "please don't leak the target" — the
+a model at all" or "please don't leak the target" — the
 agent has no tool that could. The boundary is enforced by the tool set; the
 prompt only supplies the *order* of work and the iteration discipline.
 
@@ -32,7 +32,7 @@ These tools are the only way to touch the data, and you never see the raw table.
 Several of them run code you write, in a sandbox with no model libraries, and
 what happens to the result differs: what `transform_features` returns becomes
 columns, what `filter_rows` returns decides which rows are trained on, what
-`explore_experiment` returns is shown to you and thrown away.
+`explore_table` returns is shown to you and thrown away.
 
 Order of work on a run that has not started: `inspect_data` first, because it
 resolves the task type and the metric every later score is measured with. Then
