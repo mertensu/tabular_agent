@@ -180,3 +180,30 @@ def test_an_unservable_table_is_scored_as_unscorable(session):
     from tabular_agent.harness.stop import best_table
     j = journal.load(s.run_dir)
     assert best_table(j["tables"], "rmsle") is None
+
+
+def test_the_terminal_phase_reproduces_the_probe_exactly(session):
+    """The invariant, and the reason it is about the *fit* and not the model type.
+
+    Porto Seguro v4 put `PROBE_MODEL_TYPE` on the terminal ballot but fitted it
+    with the run's seed rather than the probe's, and the result came in 0.00279 of
+    gini under the probe on the table the probe had chosen — lgbm moves 0.003 of
+    auc between seeds at 476k rows. So this asserts equality, not membership.
+    """
+    from tabular_agent.probe import PROBE_MODEL_TYPE
+
+    tools.inspect_data(session)
+    t = tools.transform_features(session, "def transform_features(df):\n"
+                                          "    df = df.copy()\n"
+                                          "    df['z'] = df['x1'] * 2\n"
+                                          "    return df")
+    tools.finalize_run(session)
+
+    j = journal.load(session.run_dir)
+    winner = _table_row(session, t["table"])
+    row = next(r for r in j["leaderboard"]
+               if r["model_type"] == PROBE_MODEL_TYPE
+               and r["source_table"] == t["table"])
+    # `probe_score` is rounded to 6 dp on the journal row; the fit itself is
+    # bit-identical, so this is the storage precision and not a tolerance.
+    assert row["val_score"] == pytest.approx(winner["probe_score"], abs=5e-7)

@@ -194,6 +194,48 @@ lgbm moves 0.003 auc between seeds on 476k rows, a third of everything the searc
 gained. The phase-4 notebook's "seed variation measures nothing" is true only at
 house-prices' 1168 rows.
 
+### Seguro v4 — the re-run, and the same mistake one grain finer
+
+Record: **0040**. Kaggle private gini:
+
+    v4 shipped (lgbm)    0.27670   optimism +0.00838   top 57%
+    v2 shipped (e8)      0.26522   optimism +0.01828   top 72%
+    v2 discarded (e11)   0.27724   optimism +0.00587   top 57%
+
+**Claims 1, 3 and 4 passed; claim 2 failed.** v4 beat v2's shipped model unaided
+(+0.0115) and lands within 0.0005 of v2's *discarded* best — the new harness now
+delivers by construction what the old one only had by luck. Optimism less than
+half of v2's, and with house v9 that is two datasets, two task types, two metrics
+moving the same way.
+
+**The terminal-ballot fix is worth 0.0248 gini on val:** under v3's set this run
+would have shipped elasticnet at 0.26026; it shipped lgbm at 0.28508.
+
+**Claim 2 failed by 0.00279 — and 0039's "holds by construction" was wrong.**
+`train_tabular_model` fitted with the run's seed (42), the probe with its own
+(0), and lgbm moves 0.003 auc between seeds here. A near-copy of the ruler does
+not carry the guarantee. Fixed: `_terminal_fits` now passes `PROBE_PARAMS` and
+`PROBE_SEED`, `train_tabular_model` takes an explicit model seed (folds still
+come from `spec.seed` — the exam is 0029's and must not move), and the test
+asserts **equality** with the probe's score rather than membership in a list.
+
+Same error twice in two days at two grains: first the family missing from the
+ballot, then the configuration. **An invariant about a specific measurement
+cannot be enforced by reproducing the category it belonged to.**
+
+**0039's hypothesis held a second time.** On t8: lgbm (which chose it) +0.00838
+vs elasticnet +0.00377 — 2.2x, predicted direction. Tally now 3 direct pairs
+(3.1x, 3.3x, 2.2x), house v9 consistent, house v8 still contradicting. **The
+confound is unresolved and was named before the run**: in every pair the selected
+model is lgbm and the unselected is elasticnet, so "selection inflates" and "lgbm
+inflates more than a linear model" predict the same thing. Needs a run where the
+probe is not the selected family.
+
+**Also:** v3 and v4 are identical setups and searched differently (8 tables vs 11,
+best table +0.0087 vs +0.0060 gini). Run-to-run search variation confounds every
+A/B here — another argument for 0023, which would let us run a config three times
+and report a spread.
+
 ### Gotchas / owed
 
 - **Order settled: 0035 before 0023.** Building the third split first would take
@@ -201,9 +243,9 @@ house-prices' 1168 rows.
   honest number for house-prices and seguro, so the A/B needs a submission, not
   new machinery. Pre-register the comparison before submitting: v8 was val
   0.11354 → Kaggle **0.12298**.
-- **Seguro v3 is not re-run.** Its journal holds the buggy terminal fit; the
-  corrected number came from `scripts/fit_table_and_submit.py`, not from a run.
-  A v4 under the fixed harness is owed before seguro's A/B counts as clean.
+- **Separate the lgbm/selection confound** — every selected-measurement pair so
+  far is lgbm-vs-elasticnet. Needs a probe of a different family, or a run where
+  the probe's family does not win.
 - **Terminal fairness is open.** Enumerating library defaults measures the
   libraries. Needs a common budget or early stopping, and a record.
 - 0035 collapses 0014's two-level stop, which also closes the `df.copy()`

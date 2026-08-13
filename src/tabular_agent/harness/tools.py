@@ -1144,6 +1144,7 @@ def train_tabular_model(
     params: dict | None = None,
     target_transform: str | None = None,
     enforce_stop: bool = True,
+    seed: int | None = None,
 ) -> dict:
     """Cross-validated training — the only way to fit a model in this harness.
 
@@ -1176,6 +1177,11 @@ def train_tabular_model(
     # because the baseline and the tests both need to pin it.
     if target_transform is None:
         target_transform = spec.target_transform
+    # The *model's* seed, which is not the run's exam. Folds below still use
+    # `spec.seed`, because which rows are held out is the harness's business
+    # (0029) and must not move between fits. This exists so the terminal phase
+    # can reproduce the probe exactly — see `_terminal_fits`.
+    model_seed = spec.seed if seed is None else seed
     journal.set_split(session.run_dir, session.split_record())
     df = load_table(path)
 
@@ -1204,7 +1210,7 @@ def train_tabular_model(
         spec.metric,
         model_type=model_type,
         params=params,
-        seed=spec.seed,
+        seed=model_seed,
         target_transform=target_transform,
         # `None` unless this run set one. Raises `TrainingTooSlow` (a ValueError,
         # so the agent gets a correction rather than the run ending) and records
@@ -1790,12 +1796,13 @@ def explore_table(
 #: 0.11207, and a linear model matching a boosted one says the signal is in the
 #: features.
 #:
-#: **The probe's own model type must be in this set.** It is what makes the
-#: invariant hold: *the shipped model is never worse than the number the search
-#: was ranked on*. The probe fitted `PROBE_MODEL_TYPE` at `PROBE_PARAMS` on the
-#: winning table and scored it on the validation half, so that score is already
-#: demonstrated to be achievable; leaving the ruler off the ballot means the run
-#: can package something worse than the number it selected by, and it did.
+#: **The probe's own fit must be in this set** — its model type, its parameters
+#: and its seed. That is what makes the invariant hold: *the shipped model is
+#: never worse than the number the search was ranked on*, because the very fit
+#: that produced that number is a candidate. Anything less is a near-copy of the
+#: ruler and not the ruler: v4 put the model *type* on the ballot with the run's
+#: seed underneath, and the terminal lgbm came in 0.00279 of gini below the probe
+#: on the table the probe had chosen.
 #: Porto Seguro v3 measured a table at gini 0.29066 with the probe and shipped
 #: elasticnet at 0.25389 — a loss three times the largest selection-noise effect
 #: this project has recorded.
@@ -1837,9 +1844,18 @@ def _terminal_fits(session: RunSession) -> list[dict]:
 
     done = []
     for model_type in TERMINAL_MODEL_TYPES:
+        # The probe's candidate is the probe's *fit*, not merely its model type:
+        # same parameters and same seed. Porto Seguro v4 is why the distinction
+        # is spelled out — with the type alone on the ballot and the run's seed
+        # underneath it, the terminal lgbm scored 0.00279 of gini below the probe
+        # on the very table the probe had chosen, because lgbm moves 0.003 of auc
+        # between seeds at that scale. A near-copy of the ruler is not the ruler.
+        probe_fit = model_type == PROBE_MODEL_TYPE
         try:
             out = train_tabular_model(
-                session, table=table, model_type=model_type, enforce_stop=False
+                session, table=table, model_type=model_type, enforce_stop=False,
+                params=dict(PROBE_PARAMS) if probe_fit else None,
+                seed=PROBE_SEED if probe_fit else None,
             )
         except Exception as e:  # noqa: BLE001 - one bad family must not end the run
             done.append({"model_type": model_type, "trained": False, "error": str(e)})

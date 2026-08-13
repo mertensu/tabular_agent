@@ -118,7 +118,11 @@ Vocabulary used throughout:
   the table" hypothesis is rejected by 0039)*
 - [0039 — Seguro v3: two defects, and 0038's hypothesis falsified](0039-seguro-v3-two-defects-and-a-falsified-hypothesis.md)
   *(the ruler must be on the terminal ballot; removing a tool removes the
-  guarantees it carried; optimism attaches to the selected measurement)*
+  guarantees it carried; optimism attaches to the selected measurement — and its
+  "holds by construction" claim is corrected by 0040)*
+- [0040 — Seguro v4: a near-copy of the ruler is not the ruler](0040-seguro-v4-a-near-copy-of-the-ruler-is-not-the-ruler.md)
+  *(the invariant needs the probe's fit, not its model type; and the
+  selected-measurement pattern holds a second time, confound still open)*
 
 ### Keeping the agent's surface small
 
