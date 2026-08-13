@@ -102,7 +102,11 @@ Vocabulary used throughout:
   *(a measurement: 1 win, 1 loss, 1 null — and why the real conclusion is 0023)*
 - [0035 — The search is over features; models are enumerated, not searched](0035-the-search-is-over-features.md)
   *(accepted, not yet implemented; supersedes 0021 on where the target scale is
-  chosen, and collapses 0014's two-level stop)*
+  chosen, and collapses 0014's two-level stop — its central mechanism is
+  corrected by 0036)*
+- [0036 — The pairing asymmetry was not there; the probe is justified by coverage](0036-the-pairing-asymmetry-was-not-there.md)
+  *(a measurement: every comparison is paired, model or table alike — and a
+  candidate yardstick for 0028's open `min_gain_ratio`)*
 
 ### Keeping the agent's surface small
 
