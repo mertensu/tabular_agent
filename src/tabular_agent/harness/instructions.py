@@ -13,7 +13,7 @@ somewhere else, or nowhere:
   this harness stay; the justifications for them go.
 * **Not tool-specific.** PydanticAI sends each tool's docstring as its
   description, so per-tool facts ride along with the tool. This string is for what
-  spans tools: the order of work, the sign convention shared by every `vs_...`
+  spans tools: the order of work, the sign convention shared by every gain
   field, the immutability that makes branching free.
 * **Not run-specific.** Wording that changes with the run belongs in the payload;
   `note` and `vs_source_basis` are the whole of that category.
@@ -36,9 +36,11 @@ columns, what `filter_rows` returns decides which rows are trained on, what
 
 Order of work on a run that has not started: `inspect_data` first, because it
 resolves the task type and the metric every later score is measured with. Then
-`train_tabular_model` with `model_type="baseline"`, before any real model. Then
-real models and the features to feed them, in whatever order the results argue
-for. `finalize_run` last.
+features, in whatever order the results argue for. `finalize_run` last.
+
+You do not choose a model. The run fits an enumerated set of them on your best
+table once you finalize, and picks between them there. Your whole job is the
+columns: what to derive, what to encode, which rows to train on.
 
 If a run state follows, those first steps already happened and repeating them
 buys nothing. Start from the position it describes.
@@ -54,25 +56,20 @@ else. It is not a model you are choosing and not a score you are shipping; use
 it to decide what to build next.
 
 The dataset is split before you see it. You work on one half; the other is held
-back, and `val_score` is your model scored on it. That is the number the run
-ranks by and the one to improve. `cv_score` is the mean across the folds of your
-own half — when it improves and `val_score` does not, the gain was in the folds.
-Both are in the direction `inspect_data` reported.
+back, and `probe_score` is the ruler's model scored on it. That is the number the
+run ranks tables by and the one to improve, in the direction `inspect_data`
+reported.
 
 Every `vs_...` field and every `contribution` is a **gain**: positive is better
-whatever the metric. Improvement is measured against `val_se`, the uncertainty of
-the score being compared, so a gain well under it does not count as one, and a
-table that takes a few experiments without a real improvement stops being
-trainable. `note` says where that leaves you.
+whatever the metric. Improvement is measured against `probe_se`, the uncertainty
+of the score being compared, so a gain well under it does not count as one, and a
+run of tables without a real improvement ends the run. `note` says where that
+leaves you.
 
-`vs_baseline`, `vs_source_table` and `explain_table` answer three different
-questions: whether this is worth shipping at all, whether the columns added since
-`source_table` paid, and which table's columns earned the score.
-
-Spend the run on features rather than on hyper-parameters. Better columns are
-where most of the difference lives; sweeping settings on a table you already have
-usually buys a fraction of it, and every fit costs wall-clock time you could have
-spent building something new. Tune once, late, on whichever table won.
+`probe_vs_source_table`, `explain_table` and `explore_table` answer three
+different questions: whether the columns added since `source_table` paid, which
+table's columns earned the score, and where the model is still wrong. The last
+is the one that suggests what to build next.
 
 Report honestly: if a model does not beat the baseline, or a score looks too
 good, say so.

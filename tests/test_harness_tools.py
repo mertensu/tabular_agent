@@ -338,24 +338,30 @@ def _stalled_session(tmp_path, patience=1, max_refusals=3):
         stop_policy=StopPolicy(patience=patience, max_refusals=max_refusals),
     )
     inspect_data(s)
-    train_tabular_model(s, model_type="baseline")
-    train_tabular_model(s, model_type="lgbm")
-    # Identical model, identical table: cannot possibly be an improvement.
-    train_tabular_model(s, model_type="lgbm")
+    # Tables that add a constant column: real tables, and none of them can
+    # possibly improve the score.
+    for i in range(patience + 1):
+        transform_features(s, f"def transform_features(df):\n"
+                              f"    df = df.copy()\n"
+                              f"    df['c{i}'] = {i}\n"
+                              f"    return df")
     return s
 
 
-def test_a_stalled_run_stops_being_allowed_to_train(tmp_path):
+def test_a_stalled_run_stops_being_allowed_to_build(tmp_path):
     s = _stalled_session(tmp_path)
-    before = len(journal.load(s.run_dir)["leaderboard"])
+    before = len(journal.load(s.run_dir)["tables"])
 
-    out = train_tabular_model(s, model_type="lgbm")
+    out = transform_features(s, "def transform_features(df):\n"
+                                "    df = df.copy()\n"
+                                "    df['z'] = 1\n"
+                                "    return df")
 
-    assert out["trained"] is False
+    assert out["refused"] is True
     assert out["next"] == "finalize_run"
     assert "no real improvement" in out["reason"]
-    # Refused means refused: no model fitted, no leaderboard row.
-    assert len(journal.load(s.run_dir)["leaderboard"]) == before
+    # Refused means refused: no table written, no journal row.
+    assert len(journal.load(s.run_dir)["tables"]) == before
 
 
 def test_a_refusal_is_a_return_value_not_an_exception(tmp_path):
@@ -364,8 +370,10 @@ def test_a_refusal_is_a_return_value_not_an_exception(tmp_path):
     from tabular_agent.harness.agent import _retryable
 
     s = _stalled_session(tmp_path)
-    out = _retryable(lambda: train_tabular_model(s, model_type="lgbm"))
-    assert out["trained"] is False
+    out = _retryable(lambda: transform_features(
+        s, "def transform_features(df):\n    df = df.copy()\n    df['z'] = 1\n    return df"
+    ))
+    assert out["refused"] is True
 
 
 #: Every key `train_tabular_model` may return. This dict ships on *every*
@@ -423,89 +431,43 @@ def test_a_training_result_carries_nothing_beyond_its_agreed_fields(session):
 
 def test_every_result_says_where_the_run_stands(session):
     """One prose line, not a set of counters restating it — `note` carries both."""
+    from tabular_agent.harness.stop import advisory
+    from tabular_agent.harness.tools import _progress
+
     inspect_data(session)
-    first = train_tabular_model(session, model_type="lgbm")
-    assert "best result so far" in first["note"]
+    transform_features(session, "def transform_features(df):\n"
+                                "    df = df.copy()\n"
+                                "    df['z'] = df['x1'] * 2\n"
+                                "    return df")
+    assert "best table so far" in advisory(_progress(session))
 
-    second = train_tabular_model(session, model_type="lgbm")
-    assert "1 experiment(s) on this table without an improvement" in second["note"]
-    assert "experiments remain in this run's budget" in second["note"]
-
-
-def test_an_exhausted_table_is_refused_but_the_run_continues(tmp_path):
-    """The redirect: a table is cheap to give up on, a run is not."""
-    from tabular_agent.harness.stop import StopPolicy
-
-    rng = np.random.default_rng(3)
-    n = 200
-    x1 = rng.normal(size=n)
-    path = str(tmp_path / "d.csv")
-    pd.DataFrame(
-        {
-            "x1": x1,
-            "city": rng.choice(["a", "b", "c"], size=n),
-            "y": (x1 + rng.normal(scale=0.4, size=n) > 0).astype(int),
-        }
-    ).to_csv(path, index=False)
-    s = RunSession(
-        str(tmp_path / "run"),
-        path,
-        TaskSpec(target="y", n_splits=3),
-        stop_policy=StopPolicy(table_patience=2),
-    )
-    inspect_data(s)
-    for _ in range(3):
-        train_tabular_model(s, model_type="lgbm")  # same table, same model
-
-    refused = train_tabular_model(s, model_type="lgbm")
-    assert refused["trained"] is False
-    assert refused["table_exhausted"] is True
-    assert "transform_features" in refused["note"]
-
-    # The run is emphatically not over: new features, and training resumes.
-    enc = fit_encoding(s, ["city"], "frequency")
-    ok = train_tabular_model(s, table=enc["table"], model_type="lgbm")
-    assert ok["trained"] is True
+    transform_features(session, "def transform_features(df):\n"
+                                "    df = df.copy()\n"
+                                "    df['c'] = 1\n"
+                                "    return df")
+    note = advisory(_progress(session))
+    assert "since the last real improvement" in note
+    assert "tables remain in this run's budget" in note
 
 
-def test_asking_for_the_same_dead_table_over_and_over_ends_the_run(tmp_path):
-    from tabular_agent.harness.stop import StopPolicy
-
-    rng = np.random.default_rng(4)
-    n = 150
-    x1 = rng.normal(size=n)
-    path = str(tmp_path / "d.csv")
-    pd.DataFrame({"x1": x1, "y": (x1 > 0).astype(int)}).to_csv(path, index=False)
-    s = RunSession(
-        str(tmp_path / "run"),
-        path,
-        TaskSpec(target="y", n_splits=3),
-        stop_policy=StopPolicy(table_patience=1, max_refusals=2),
-    )
-    inspect_data(s)
-    train_tabular_model(s, model_type="lgbm")
-    train_tabular_model(s, model_type="lgbm")
-
-    outs = [train_tabular_model(s, model_type="lgbm") for _ in range(3)]
-    assert all(o["trained"] is False for o in outs)
-    # Stuck, not redirected — so it ends the way a finished run should: with a bundle.
-    assert outs[-1]["harness_finalized"] is True
-
-
-def test_a_model_that_will_not_stop_gets_the_run_packaged_for_it(tmp_path):
+def test_an_agent_that_will_not_stop_gets_the_run_packaged_for_it(tmp_path):
     """The bundle is the deliverable; a loop that ends without one is the failure."""
     s = _stalled_session(tmp_path, max_refusals=2)
+    code = ("def transform_features(df):\n"
+            "    df = df.copy()\n"
+            "    df['z'] = 1\n"
+            "    return df")
 
-    first = train_tabular_model(s, model_type="lgbm")
-    assert first["trained"] is False and "bundle_dir" not in first
+    first = transform_features(s, code)
+    assert first["refused"] is True and "bundle_dir" not in first
 
-    second = train_tabular_model(s, model_type="lgbm")
+    second = transform_features(s, code)
     assert second["harness_finalized"] is True
     assert os.path.exists(os.path.join(s.run_dir, second["bundle_dir"], "pipeline.json"))
 
     # And now the run really is over.
     with pytest.raises(RuntimeError, match="this run is finished"):
-        train_tabular_model(s, model_type="lgbm")
+        transform_features(s, code)
 
 
 def test_finalize_can_still_train_the_baseline_it_needs(tmp_path):
@@ -531,15 +493,23 @@ def test_finalize_can_still_train_the_baseline_it_needs(tmp_path):
     assert out["baseline_score"] is not None
 
 
-def test_finalize_packages_the_best_experiment(session):
+def test_finalize_fits_the_enumerated_set_and_packages_the_best(session):
+    """No model was chosen during the run (0035). finalize fits the whole small
+    set on the winning table and picks between them there — one argmax over
+    three, in place of the 97 model-variation experiments it replaces."""
+    from tabular_agent.harness.tools import TERMINAL_MODEL_TYPES
+
     inspect_data(session)
-    train_tabular_model(session, model_type="baseline")
-    train_tabular_model(session, model_type="lgbm")
+    transform_features(session, RATIO_CODE)
 
     out = finalize_run(session)
 
-    assert out["best_experiment_id"] == "e2"
-    assert out["n_experiments"] == 2
+    lb = journal.load(session.run_dir)["leaderboard"]
+    fitted = {r["model_type"] for r in lb}
+    assert set(TERMINAL_MODEL_TYPES) <= fitted
+    assert "baseline" in fitted
+    winner = next(r for r in lb if r["id"] == out["best_experiment_id"])
+    assert winner["model_type"] in TERMINAL_MODEL_TYPES
     assert os.path.exists(os.path.join(session.run_dir, out["report_path"]))
     assert os.path.exists(
         os.path.join(session.run_dir, out["bundle_dir"], "pipeline.json")
@@ -548,13 +518,13 @@ def test_finalize_packages_the_best_experiment(session):
 
 def test_finalize_autotrains_a_baseline_if_the_run_never_did(session):
     inspect_data(session)
-    train_tabular_model(session, model_type="lgbm")
+    transform_features(session, RATIO_CODE)
 
     out = finalize_run(session)
 
     # The report can always answer "did this beat doing nothing?".
     assert out["baseline_score"] is not None
-    assert out["best_experiment_id"] == "e1"
+    assert journal.load(session.run_dir)["baseline"] is not None
 
 
 def test_results_are_attributed_per_tool_call_not_per_column(session):
@@ -833,26 +803,41 @@ def test_columns_by_table_does_not_depend_on_the_model_exposing_importances(sess
     assert [b["table"] for b in out["columns_by_table"]] == [RAW]
 
 
-def test_finalize_flags_a_table_that_was_never_trained_on(session):
-    """The t5/t6 case: build, extend, train only the child — the link is unmeasured.
+def test_the_attribution_gap_closes_when_every_table_is_scored(session):
+    """The t5/t6 case, and why 0035 mostly ends it.
 
-    The score of `t6` then cannot be split between what `t5` added and what `t6`
-    added, because nothing ever scored `t5`. The run stays valid; the report has
-    to stop short of claiming which features earned it.
+    Build, extend, and train only the child: the score of `t6` could not be split
+    between what `t5` added and what `t6` added, because nothing ever scored
+    `t5`. Across the runs in `_runs/` that hole swallowed 22 of the 24 tables
+    that recombined an abandoned branch. The ruler now scores each table as it is
+    written, so the chain is measured link by link with one estimator on one set
+    of rows.
     """
     inspect_data(session)
-    train_tabular_model(session, model_type="baseline")
-
     t1 = transform_features(session, RATIO_CODE)              # built...
     t2 = fit_encoding(session, ["city"], "frequency", table=t1["table"])  # ...and extended
-    train_tabular_model(session, table=t2["table"], model_type="lgbm")
+
+    out = finalize_run(session)
+    assert out["unmeasured_tables"] == []
+
+    credit = journal.attribution(journal.load(session.run_dir), t2["table"])
+    assert [c["measured"] for c in credit if c["table"] != RAW] == [True, True]
+
+
+def test_a_table_the_ruler_could_not_score_still_leaves_a_gap(session):
+    """The hole is rarer, not impossible — so the report still has to say it."""
+    inspect_data(session)
+    t1 = transform_features(session, RATIO_CODE)
+    fit_encoding(session, ["city"], "frequency", table=t1["table"])
+    j = journal.load(session.run_dir)
+    j["tables"][0]["probe_score"] = None
+    journal.save(session.run_dir, j)
 
     out = finalize_run(session)
     assert out["unmeasured_tables"] == [t1["table"]]
 
     report = open(os.path.join(session.run_dir, out["report_path"])).read()
     assert "Attribution gap" in report
-    assert "never trained on" in report
 
 
 def test_a_fully_measured_chain_has_no_gap(session):
@@ -873,20 +858,27 @@ def test_attribution_walks_the_whole_chain(session):
     inspect_data(session)
     t1 = transform_features(session, RATIO_CODE)
     t2 = fit_encoding(session, ["city"], "frequency", table=t1["table"])
-    train_tabular_model(session, table=t2["table"], model_type="lgbm")
 
     j = journal.load(session.run_dir)
     chain = journal.attribution(j, t2["table"])
     assert [s["table"] for s in chain] == [t2["table"], t1["table"]]
-    assert chain[0]["measured"] and not chain[1]["measured"]
+    assert chain[0]["measured"] and chain[1]["measured"]
     # The raw input table is not a derived table and has no row of its own.
     assert journal.ancestry(j, session.rel(session.data_path)) == []
 
 
-def test_finalize_refuses_an_empty_run(session):
+def test_finalize_on_a_run_that_built_nothing_ships_the_work_table(session):
+    """The bundle is the deliverable, and the data as given is always a model.
+
+    Before 0035 this raised: the agent had trained nothing, so there was nothing
+    to package. Now the terminal fit runs on the best table, and with no derived
+    tables that is the work table — a run that achieved nothing still hands back
+    something that predicts.
+    """
     inspect_data(session)
-    with pytest.raises(ValueError, match="no model has been trained"):
-        finalize_run(session)
+    out = finalize_run(session)
+    assert out["val_score"] is not None
+    assert os.path.exists(os.path.join(session.run_dir, out["bundle_dir"], "pipeline.json"))
 
 
 def test_bundle_predicts_on_raw_rows(session):
@@ -1255,7 +1247,7 @@ def test_the_transform_is_recorded_and_the_scores_stay_comparable(priced_session
     """Two experiments differing only by target scale must land on one leaderboard
     with scores that mean the same thing, or the run cannot choose between them."""
     inspect_data(priced_session)
-    raw = train_tabular_model(priced_session, model_type="lgbm")
+    raw = train_tabular_model(priced_session, model_type="lgbm", target_transform="none")
     log = train_tabular_model(priced_session, model_type="lgbm", target_transform="log1p")
 
     rows = journal.load(priced_session.run_dir)["leaderboard"]
@@ -1276,10 +1268,15 @@ def test_an_impossible_transform_is_a_correction_not_a_dead_run(session):
 def test_vs_source_table_does_not_compare_across_target_scales(priced_session):
     """0017's rule: a comparison must differ by exactly one thing. A log fit on a
     child table measured against a raw fit on its source would credit the
-    transform to the columns."""
+    transform to the columns.
+
+    Since 0035 the scale is a property of the run rather than of an experiment,
+    so this can no longer happen by accident — but the guard stays, because the
+    terminal fit and the baseline still pass one explicitly.
+    """
     inspect_data(priced_session)
     enc = fit_encoding(priced_session, ["grade"], "frequency")
-    train_tabular_model(priced_session, model_type="lgbm")  # raw, on the source
+    train_tabular_model(priced_session, model_type="lgbm", target_transform="none")
     child = train_tabular_model(
         priced_session, table=enc["table"], model_type="lgbm", target_transform="log1p"
     )
@@ -1730,17 +1727,17 @@ def test_it_sees_no_data_at_all(session):
 
 def test_it_costs_nothing_and_works_after_finalize(session):
     inspect_data(session)
-    train_tabular_model(session, model_type="baseline")
-    train_tabular_model(session, model_type="lgbm")
+    transform_features(session, RATIO_CODE)
     finalize_run(session)
     before = journal.load(session.run_dir)
+    n_rows = len(before["leaderboard"])
 
     out = tools.explore_journal(session, _journal_code(
         "    print('best is', run['best']['experiment_id'])\n"
         "    return len(lb)"
     ))
-    assert out["result"] == 2
-    assert "best is e2" in out["stdout"]
+    assert out["result"] == n_rows
+    assert "best is" in out["stdout"]
     assert journal.load(session.run_dir) == before
 
 

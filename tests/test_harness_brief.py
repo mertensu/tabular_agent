@@ -64,58 +64,59 @@ def test_it_states_the_task_the_metric_and_its_direction(session):
 
 def test_it_reports_the_position_not_the_history(session):
     inspect_data(session)
-    train_tabular_model(session, model_type="baseline")
     enc = fit_encoding(session, ["city"], "frequency")
-    train_tabular_model(session, table=enc["table"], model_type="lgbm")
 
     brief = render_brief(session)
-    assert "2 experiments" in brief and "1 feature tables" in brief
-    assert "Baseline: e1" in brief
-    assert "Best so far: e2" in brief
-    # The winner's table is on the leaderboard row, not on the `best` pointer,
-    # and it is the actionable half: the next idea gets built on top of it.
-    assert enc["table"] in brief
+    assert "1 feature tables" in brief
+    # The best *table*, which is the actionable half: the next idea gets built
+    # on top of it. There are no experiments to point at until finalize.
+    assert "Best table so far" in brief and enc["table"] in brief
 
 
-def test_it_names_tables_nobody_ever_trained_on(session):
-    """The trace an episode cut mid-idea leaves behind (0024's "seam, not a
-    count"). The next agent did not build it and has no memory of meaning to."""
+def test_it_names_tables_the_ruler_could_not_measure(session):
+    """Since 0035 every table is scored as it is written, so a table without a
+    number is one the ruler failed on — and it is invisible to the ranking
+    unless the brief says so."""
     inspect_data(session)
-    train_tabular_model(session, model_type="baseline")
     enc = fit_encoding(session, ["city"], "frequency")
+    j = journal.load(session.run_dir)
+    j["tables"][0]["probe_score"] = None
+    journal.save(session.run_dir, j)
 
     brief = render_brief(session)
-    assert "never trained on" in brief and enc["table"] in brief
+    assert "never scored" in brief and enc["table"] in brief
 
 
 def test_the_list_of_idle_tables_is_capped(session):
     """The one list in the brief, and the one place run length could leak in."""
     inspect_data(session)
-    train_tabular_model(session, model_type="baseline")
     for i in range(MAX_LISTED_TABLES + 2):
         transform_features(session, f"def transform_features(df):\n"
                                     f"    df = df.copy()\n"
                                     f"    df['c{i}'] = df['area'] * {i + 1}\n"
                                     f"    return df")
+    j = journal.load(session.run_dir)
+    for t in j["tables"]:
+        t["probe_score"] = None
+    journal.save(session.run_dir, j)
 
     brief = render_brief(session)
     assert "and 2 more" in brief
     assert brief.count("tables/t") == MAX_LISTED_TABLES
 
 
-def _fake_experiment(session, i: int, score: float):
-    """One leaderboard row, appended without training a model.
+def _fake_table(session, i: int, score: float):
+    """One table row, appended without building a table.
 
-    Synthetic on purpose: the claim under test is about 150 experiments, and
-    fitting 150 models to assert a string length would make the test cost more
-    than the property is worth. Nothing in the brief reads an artifact.
+    Synthetic on purpose: the claim under test is about 150 tables, and building
+    150 of them to assert a string length would make the test cost more than the
+    property is worth. Nothing in the brief reads an artifact.
     """
-    journal.append_experiment(session.run_dir, {
-        "id": f"e{i}", "model_type": "lgbm", "params": {"n_estimators": 50},
-        "target_transform": "none", "source_table": "data/work.parquet",
-        "metric": "rmsle", "val_score": score, "cv_score": score,
-        "fold_spread": 0.001, "features": ["area", "rooms"],
-        "artifact_path": f"experiments/e{i}",
+    journal.append_table(session.run_dir, {
+        "id": f"t{i}", "path": f"tables/t{i}.parquet",
+        "source_table": "data/work.parquet", "method": "transform",
+        "new_columns": [f"c{i}"], "n_steps": 1,
+        "probe_score": score, "probe_se": 0.001,
     })
 
 
@@ -127,20 +128,19 @@ def test_the_brief_does_not_grow_with_the_run(session):
     The scores improve steadily so the run never stalls — otherwise this measures
     the stop-line branch flipping rather than growth.
     """
-    session.stop_policy = StopPolicy(max_experiments=200)
+    session.stop_policy = StopPolicy(max_tables=200)
     inspect_data(session)
-    train_tabular_model(session, model_type="baseline")
-    _fake_experiment(session, 2, 0.500)
+    _fake_table(session, 2, 0.500)
     short = render_brief(session)
 
     score = 0.500
     for i in range(3, 152):
         score -= 0.001
-        _fake_experiment(session, i, score)
+        _fake_table(session, i, score)
     long = render_brief(session)
 
-    assert len(journal.load(session.run_dir)["leaderboard"]) == 151
-    assert "151 experiments" in long
+    assert len(journal.load(session.run_dir)["tables"]) == 150
+    assert "150 feature tables" in long
     # Same lines in the same order; only counters and scores moved.
     assert len(long.splitlines()) == len(short.splitlines())
     assert abs(len(long) - len(short)) < 20
@@ -150,15 +150,15 @@ def test_it_carries_the_stop_state(session):
     """An agent that does not know it is nearly out of budget spends what is left
     orienting; one that thinks the run is over stops early. Neither is inferable
     from the leaderboard without also knowing the policy."""
-    session.stop_policy = StopPolicy(max_experiments=4)
+    session.stop_policy = StopPolicy(max_tables=4)
     inspect_data(session)
-    train_tabular_model(session, model_type="baseline")
-    train_tabular_model(session, model_type="lgbm")
+    _fake_table(session, 1, 0.30)
+    _fake_table(session, 2, 0.20)
 
-    assert "2 experiments left of 4" in render_brief(session)
+    assert "2 tables left of 4" in render_brief(session)
 
-    train_tabular_model(session, model_type="lgbm", params={"n_estimators": 30})
-    train_tabular_model(session, model_type="lgbm", params={"n_estimators": 40})
+    _fake_table(session, 3, 0.10)
+    _fake_table(session, 4, 0.05)
     assert "stopping this run" in render_brief(session)
     assert "finalize_run" in render_brief(session)
 
@@ -166,8 +166,7 @@ def test_it_carries_the_stop_state(session):
 def test_it_says_when_the_run_is_already_over(session):
     """The one state in which every tool call left is wasted."""
     inspect_data(session)
-    train_tabular_model(session, model_type="baseline")
-    train_tabular_model(session, model_type="lgbm")
+    fit_encoding(session, ["city"], "frequency")
     finalize_run(session)
 
     assert "finalized" in render_brief(session)

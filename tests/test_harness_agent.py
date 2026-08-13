@@ -24,14 +24,16 @@ EXPECTED_TOOLS = {
     # because nothing it produces is replayed: it selects work-half rows to fit
     # on, and the validation half never passes through it.
     "filter_rows",
-    "train_tabular_model",
+    # No model tool: since 0035 the agent builds tables and the harness fits the
+    # enumerated set once, at finalize. There is nothing here that chooses a
+    # model, which is the point rather than an omission.
     # Refits on columns the agent already has, and returns scores. It cannot
-    # reach anything `train_tabular_model` cannot.
+    # reach anything building a table cannot.
     "explain_table",
-    # Runs agent-written code, but read-only: the frame it builds comes from an
-    # experiment that already exists, and its result has no persistence path, so
-    # it cannot produce a feature or reach a row training could not.
-    "explore_experiment",
+    # Runs agent-written code, but read-only: the frame it builds comes from a
+    # table that already exists, and its result has no persistence path, so it
+    # cannot produce a feature or reach a row training could not.
+    "explore_table",
     # Sees the run's records only — no rows at all, so nothing to gate.
     "explore_journal",
     "finalize_run",
@@ -104,7 +106,7 @@ def test_the_run_state_reaches_the_model_only_once_there_is_a_run(tmp_path):
 
     from tabular_agent.harness.agent import Deps
     from tabular_agent.harness.session import RunSession
-    from tabular_agent.harness.tools import inspect_data, train_tabular_model
+    from tabular_agent.harness.tools import fit_encoding, inspect_data
     from tabular_agent.taskspec import TaskSpec
 
     rng = np.random.default_rng(0)
@@ -127,12 +129,12 @@ def test_the_run_state_reaches_the_model_only_once_there_is_a_run(tmp_path):
     assert "RUN STATE" not in system_text(session)
 
     inspect_data(session)
-    train_tabular_model(session, model_type="baseline")
+    fit_encoding(session, ["rooms"], "frequency")
 
     # A *fresh agent* on the same run dir: the episode boundary, in one call.
     resumed = RunSession(session.run_dir, session.source_path, TaskSpec(target="price"))
     text = system_text(resumed)
-    assert "RUN STATE" in text and "rmsle" in text and "Baseline: e1" in text
+    assert "RUN STATE" in text and "rmsle" in text and "Best table so far" in text
 
 
 def test_default_model_is_swappable():

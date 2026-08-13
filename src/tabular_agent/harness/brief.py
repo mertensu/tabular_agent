@@ -38,14 +38,16 @@ def _fmt(x, places=4):
 
 
 def _never_trained(j: dict) -> list[str]:
-    """Tables that exist and have no experiment on them.
+    """Tables that exist and could not be scored.
 
-    The most useful thing the brief can say that is not a number: an episode cut
-    mid-idea leaves exactly this trace (0024 calls episode length "a seam, not a
-    count"), and the next agent has no memory of having meant to train it.
+    The most useful thing the brief can say that is not a number: since 0035
+    every table is scored as it is written, so a table without a number is one
+    the ruler failed on — an episode cut mid-idea, or a lineage that could not be
+    replayed. The next agent has no memory of either.
     """
-    trained = {r.get("source_table") for r in j.get("leaderboard") or []}
-    return [t["path"] for t in j.get("tables") or [] if t.get("path") not in trained]
+    return [
+        t["path"] for t in j.get("tables") or [] if t.get("probe_score") is None
+    ]
 
 
 def render_brief(session: RunSession) -> str | None:
@@ -67,7 +69,7 @@ def render_brief(session: RunSession) -> str | None:
 
     metric = task.get("metric")
     direction = "higher is better" if greater_is_better(metric) else "lower is better"
-    status = stop.evaluate(lb, metric, session.stop_policy)
+    status = stop.evaluate(tables, metric, session.stop_policy)
 
     # The heading earns its tokens by saying where this came from: an agent told
     # facts about a run it does not remember should know they were read off disk
@@ -85,9 +87,7 @@ def render_brief(session: RunSession) -> str | None:
             f"{split.get('n_val')} held back for val_score ({split.get('mode')})."
         )
 
-    lines.append(
-        f"Done so far: {len(lb)} experiments, {len(tables)} feature tables built."
-    )
+    lines.append(f"Done so far: {len(tables)} feature tables built.")
 
     baseline, best = j.get("baseline"), j.get("best")
     if baseline:
@@ -95,15 +95,15 @@ def render_brief(session: RunSession) -> str | None:
             f"Baseline: {baseline['experiment_id']} at val_score "
             f"{_fmt(baseline.get('val_score'))}."
         )
-    if best:
-        # `best` is a pointer, not a row — the table it was trained on lives on
-        # the leaderboard row, and it is the half of "best" that is actionable:
-        # the next idea is usually built on top of whatever is currently winning.
-        row = next((r for r in lb if r.get("id") == best["experiment_id"]), {})
+    # The best *table*, which is the actionable half: the next idea is usually
+    # built on top of whatever is currently winning. `best` on the journal points
+    # at an experiment and only exists after finalize, so it is not what a
+    # mid-run agent needs.
+    winner = stop.best_table(tables, metric)
+    if winner:
         lines.append(
-            f"Best so far: {best['experiment_id']} at val_score "
-            f"{_fmt(best.get('val_score'))}, trained on "
-            f"{row.get('source_table') or 'the work table'}."
+            f"Best table so far: {winner['path']} at probe_score "
+            f"{_fmt(winner.get('probe_score'))}."
         )
 
     # The stop state is the one thing an agent cannot infer and will act wrongly
@@ -113,8 +113,8 @@ def render_brief(session: RunSession) -> str | None:
         lines.append(f"The harness is stopping this run: {status['reason']}. Call finalize_run.")
     else:
         lines.append(
-            f"Budget: {status['experiments_remaining']} experiments left of "
-            f"{session.stop_policy.max_experiments}; "
+            f"Budget: {status['tables_remaining']} tables left of "
+            f"{session.stop_policy.max_tables}; "
             f"{status['since_improvement']} since the last real improvement "
             f"(the run ends at {status['patience']})."
         )
@@ -138,9 +138,9 @@ def render_brief(session: RunSession) -> str | None:
         shown = ", ".join(idle[:MAX_LISTED_TABLES])
         more = len(idle) - MAX_LISTED_TABLES
         lines.append(
-            f"Built but never trained on: {shown}"
+            f"Built but never scored: {shown}"
             + (f", and {more} more" if more > 0 else "")
-            + " — an earlier episode may have stopped mid-idea."
+            + " — the ruler could not measure them, so they are not in the ranking."
         )
 
     if j.get("stop", {}).get("finalized"):

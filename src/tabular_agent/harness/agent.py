@@ -347,55 +347,6 @@ def build_agent(model=DEFAULT_MODEL):
         return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table))
 
     @agent.tool
-    def train_tabular_model(
-        ctx: RunContext[Deps],
-        table: str | None = None,
-        model_type: str = "lgbm",
-        params: dict | None = None,
-        target_transform: str = "none",
-    ) -> dict:
-        """Train a model with k-fold cross-validation and record the experiment.
-
-        `vs_baseline` compares against the trivial constant model.
-        `vs_source_table` compares against the same model, params and
-        `target_transform` on this table's `source_table`, so the columns you
-        added are the only difference — it is `null` when you change more than
-        one of those at once, and `vs_source_basis` then says what would
-        produce it.
-
-        Returns `trained: false` instead of an experiment once this run has
-        stopped making progress; call `finalize_run` at that point.
-
-        Args:
-            table: Path to the feature table. Omit to use the run's work table.
-            model_type: One of "baseline", "elasticnet", "lgbm", "xgb",
-                "catboost". "elasticnet" is a regularised linear model that
-                tunes its own penalty; it is worth one experiment on any table
-                you care about, because a tree model that cannot clearly beat
-                it is telling you the signal is in the features rather than the
-                model.
-            params: Optional model hyper-parameters.
-            target_transform: What the model is fitted on — "none" (the target
-                as-is), "log1p", or "sqrt". Regression only, and "log1p"/"sqrt"
-                need a non-negative target. Changes only what is *fitted*: every
-                score is still reported on the original scale, so a transformed
-                and an untransformed experiment stay directly comparable. Worth
-                an experiment when the target is strongly skewed, or when the
-                metric already works on a compressed scale — fitting on the
-                scale the metric measures makes the model optimise the thing it
-                is judged on.
-        """
-        return _retryable(
-            lambda: tools.train_tabular_model(
-                ctx.deps.session,
-                table=table,
-                model_type=model_type,
-                params=params,
-                target_transform=target_transform,
-            )
-        )
-
-    @agent.tool
     def explain_table(
         ctx: RunContext[Deps],
         table: str | None = None,
@@ -437,28 +388,27 @@ def build_agent(model=DEFAULT_MODEL):
         )
 
     @agent.tool
-    def explore_experiment(
+    def explore_table(
         ctx: RunContext[Deps],
-        exp_id: str,
-        code: str,
+        table: str | None = None,
+        code: str = "",
     ) -> dict:
-        """Look at where a trained model was wrong, by running your own code on its rows.
+        """Look at where the ruler is wrong on a table, by running your own code on its rows.
 
-        Answers "which rows is this model failing on", which is the question a
-        score cannot answer and the fastest route to the next feature worth
-        building. Nothing computed here is kept or can become a feature — the
-        result is shown to you and discarded — so group by the target freely.
+        Answers "which rows is this failing on", which is the question a score
+        cannot answer and the fastest route to the next feature worth building.
+        Nothing computed here is kept or can become a feature — the result is
+        shown to you and discarded — so group by the target freely.
 
-        Costs nothing and records no experiment, including on a table training
-        was declined for.
+        Records nothing and costs no budget, but it does refit across folds to
+        get honest out-of-fold errors, so it is slower than building a table.
 
         Args:
-            exp_id: The `experiment_id` of an earlier `train_tabular_model` call.
+            table: Path to the table to diagnose. Omit for the run's work table.
             code: Python defining `explore(df)`, returning a small summary — a
                 number, a dict, or a DataFrame/Series (capped at 200 rows).
-                Anything printed comes back too. `df` is the experiment's whole
-                source table — including the string columns the model could not
-                use — plus:
+                Anything printed comes back too. `df` is the whole table —
+                including the string columns the model could not use — plus:
 
                     oof_pred    the out-of-fold prediction for that row
                                 (multiclass: `oof_pred_<class>` per class,
@@ -474,7 +424,7 @@ def build_agent(model=DEFAULT_MODEL):
                         return by_city.round(3).to_dict("index")
         """
         return _retryable(
-            lambda: tools.explore_experiment(ctx.deps.session, exp_id=exp_id, code=code)
+            lambda: tools.explore_table(ctx.deps.session, table=table, code=code)
         )
 
     @agent.tool

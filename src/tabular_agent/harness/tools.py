@@ -27,7 +27,7 @@ from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
-from ..probe import fit_probe
+from ..probe import PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_probe
 from ..report import build_report, write_report
 from ..rows import select_rows
 from ..sandbox import SandboxError, run_readonly
@@ -390,17 +390,37 @@ def _probe_and_compare(session: RunSession, table_path: str, source_rel: str) ->
     out = probe_table(session, table_path)
     if out.get("probe_score") is None:
         return out
-    j = journal.load(session.run_dir)
-    parent = next(
-        (t for t in (j.get("tables") or []) if t.get("path") == source_rel),
-        None,
-    )
-    before = (parent or {}).get("probe_score")
-    if before is None and source_rel == session.rel(session.data_path):
-        before = (j.get("baseline") or {}).get("val_score")
+    before = _source_reference(session, source_rel)
     if before is not None:
         out["probe_vs_source_table"] = _gain(out["probe_score"], before, session.resolved().metric)
     return out
+
+
+def _source_reference(session: RunSession, source_rel: str) -> float | None:
+    """The probe score of the table a new one was derived from.
+
+    Derived tables carry theirs on their journal row. The **work table** has no
+    row — nothing derived it — so its score is computed the first time anything
+    is built on it and cached in the journal. That number is the run's real
+    reference point: "the data as given, measured by the same ruler", which is
+    what every later table is implicitly claiming to beat.
+
+    Distinct from `baseline`, which is a trivial predictor and answers a
+    different question — whether modelling this data beats predicting its mean.
+    """
+    j = journal.load(session.run_dir)
+    if source_rel != session.rel(session.data_path):
+        parent = next(
+            (t for t in (j.get("tables") or []) if t.get("path") == source_rel), None
+        )
+        return (parent or {}).get("probe_score")
+
+    cached = (j.get("work_probe") or {}).get("probe_score")
+    if cached is not None:
+        return cached
+    scored = probe_table(session, session.data_path)
+    journal.set_work_probe(session.run_dir, scored)
+    return scored.get("probe_score")
 
 
 def inspect_data(session: RunSession, table: str | None = None) -> dict:
@@ -492,6 +512,10 @@ def fit_encoding(
     target; ``ordinal`` needs ``categories`` — the level order per column, which
     is never inferred.
     """
+    refusal = _refuse_if_finished(session)
+    if refusal is not None:
+        return refusal
+
     path = session.resolve_table(table)
     spec = session.resolved()
     df = load_table(path)
@@ -589,6 +613,10 @@ def fit_group_stats(
     It is still not usable as itself, so drop it before training if the run's
     serving schema says it will not be there.
     """
+    refusal = _refuse_if_finished(session)
+    if refusal is not None:
+        return refusal
+
     path = session.resolve_table(table)
     spec = session.resolved()
     df = load_table(path)
@@ -712,6 +740,10 @@ def filter_rows(
     comparable to an unfiltered one. ``cv_score`` does not: it is now the mean
     over the kept rows only.
     """
+    refusal = _refuse_if_finished(session)
+    if refusal is not None:
+        return refusal
+
     path = session.resolve_table(table)
     spec = session.resolved()
     df = load_table(path)
@@ -813,6 +845,10 @@ def transform_features(
     step is re-run at predict, so a stored feature can never drift from the code
     that made it.
     """
+    refusal = _refuse_if_finished(session)
+    if refusal is not None:
+        return refusal
+
     path = session.resolve_table(table)
     spec = session.resolved()
     df = load_table(path)
@@ -1025,43 +1061,10 @@ def _vs_source_table(
 
 
 def _progress(session: RunSession) -> dict:
-    """This run's stop status, from the leaderboard as it currently stands."""
+    """The run's stop status, read from the journal's tables (0035)."""
     j = journal.load(session.run_dir)
     metric = (j.get("task") or {}).get("metric") or session.resolved().metric
-    return stop.evaluate(j["leaderboard"], metric, session.stop_policy)
-
-
-def _refuse_if_table_exhausted(session: RunSession, path: str) -> dict | None:
-    """``None`` if this table may still be trained on, otherwise the redirect.
-
-    Distinct from :func:`_refuse_if_finished` in what it costs the agent: nothing.
-    The run is not over, and the next call on a *new* table goes straight
-    through. That asymmetry is the point — a table is cheap to give up on, a run
-    is not.
-    """
-    rel = session.rel(path)
-    label = _table_label(session, rel)
-    j = journal.load(session.run_dir)
-    metric = (j.get("task") or {}).get("metric") or session.resolved().metric
-    status = stop.table_status(j["leaderboard"], metric, session.stop_policy, rel, label)
-    if not status["exhausted"]:
-        return None
-
-    # A model that keeps asking for the same refused table is not being
-    # redirected, it is stuck. Escalate it into the run-level path, which knows
-    # how to end things with a bundle on disk.
-    repeats = journal.record_table_refusal(session.run_dir, rel)
-    if repeats >= session.stop_policy.max_refusals:
-        return _refuse_if_finished(session, force=True)
-
-    return {
-        "trained": False,
-        "table": label,
-        "table_exhausted": True,
-        "reason": status["reason"],
-        "next": "transform_features or fit_encoding, then train on the new table",
-        "note": stop.advisory(_progress(session), status),
-    }
+    return stop.evaluate(j.get("tables") or [], metric, session.stop_policy)
 
 
 def _refuse_if_finished(session: RunSession, force: bool = False) -> dict | None:
@@ -1076,17 +1079,15 @@ def _refuse_if_finished(session: RunSession, force: bool = False) -> dict | None
     status = _progress(session)
     # Checked before the progress gate, not after. A finalized run is over
     # whatever the stop rule thinks: the bundle is packaged and the winner picked,
-    # so another fit could only add a leaderboard row nothing will ever read, or
-    # tempt a second `finalize_run` against the same validation rows.
+    # so another table could only add a row nothing will ever read, or tempt a
+    # second `finalize_run` against the same validation rows.
     if journal.stop_state(session.run_dir).get("finalized"):
         raise RuntimeError(
             "this run is finished: the harness has already packaged it and will not "
-            "train again"
+            "build on it again"
         )
     if not status["should_stop"] and not force:
         return None
-    if force and status["reason"] is None:
-        status = dict(status, reason="the same exhausted table was requested repeatedly")
 
     refusals = journal.record_refusal(session.run_dir)
     policy = session.stop_policy
@@ -1095,12 +1096,12 @@ def _refuse_if_finished(session: RunSession, force: bool = False) -> dict | None
     if refusals >= policy.max_refusals and not finalized:
         final = finalize_run(session)
         return {
-            "trained": False,
+            "refused": True,
             "reason": status["reason"],
             "harness_finalized": True,
             "note": (
-                "Asked to train after the run was over, so the harness packaged the "
-                "run itself. Nothing further will be trained. Report what you found "
+                "Asked to keep building after the run was over, so the harness "
+                "packaged it. Nothing further will be built. Report what you found "
                 "and stop."
             ),
             **final,
@@ -1108,13 +1109,13 @@ def _refuse_if_finished(session: RunSession, force: bool = False) -> dict | None
     if finalized:
         raise RuntimeError(
             "this run is finished: the harness has already packaged it and will not "
-            f"train again ({status['reason']})"
+            f"build on it again ({status['reason']})"
         )
 
     return {
-        "trained": False,
+        "refused": True,
         "reason": status["reason"],
-        "n_experiments": status["n_experiments"],
+        "n_tables": status["n_tables"],
         "since_improvement": status["since_improvement"],
         "next": "finalize_run",
         "note": stop.advisory(status),
@@ -1126,7 +1127,7 @@ def train_tabular_model(
     table: str | None = None,
     model_type: str = "lgbm",
     params: dict | None = None,
-    target_transform: str = "none",
+    target_transform: str | None = None,
     enforce_stop: bool = True,
 ) -> dict:
     """Cross-validated training — the only way to fit a model in this harness.
@@ -1154,12 +1155,12 @@ def train_tabular_model(
             return refusal
 
     path = session.resolve_table(table)
-    if enforce_stop:
-        refusal = _refuse_if_table_exhausted(session, path)
-        if refusal is not None:
-            return refusal
-
     spec = session.resolved()
+    # `None` means "whatever the run resolved", which since 0035 is derived from
+    # the metric rather than chosen per experiment. An explicit value still wins,
+    # because the baseline and the tests both need to pin it.
+    if target_transform is None:
+        target_transform = spec.target_transform
     journal.set_split(session.run_dir, session.split_record())
     df = load_table(path)
 
@@ -1292,12 +1293,6 @@ def train_tabular_model(
     )
 
     status = _progress(session)
-    table_state = stop.table_status(
-        journal.load(session.run_dir)["leaderboard"],
-        spec.metric,
-        session.stop_policy,
-        session.rel(path),
-    )
 
     # What is *not* here is deliberate. This dict ships on every training call, so
     # anything constant for the whole run (the metric and its direction) is said
@@ -1338,7 +1333,7 @@ def train_tabular_model(
         "artifact_path": row["artifact_path"],
         # The advisory half of the stop rule (§19.3): where the run stands after
         # every experiment, so a cooperative model never has to be refused at all.
-        "note": stop.advisory(status, table_state),
+        "note": stop.advisory(status),
     }
     if vs_source is None:
         # Only when there is no gain. A missing number is a fixable state and the
@@ -1396,6 +1391,11 @@ def explain_table(
     """
     path = session.resolve_table(table)
     spec = session.resolved()
+    # `None` means "whatever the run resolved", which since 0035 is derived from
+    # the metric rather than chosen per experiment. An explicit value still wins,
+    # because the baseline and the tests both need to pin it.
+    if target_transform is None:
+        target_transform = spec.target_transform
     journal.set_split(session.run_dir, session.split_record())
     df = load_table(path)
 
@@ -1699,6 +1699,121 @@ def explore_experiment(
     return result
 
 
+def explore_table(
+    session: RunSession,
+    table: str | None = None,
+    code: str = "",
+    timeout: float = 10.0,
+) -> dict:
+    """Read-only code over a table's rows and the ruler's out-of-fold errors.
+
+    This closes the one arc of the loop that would otherwise be missing. The
+    agent can inspect, build and score, but the step from a score back to the
+    next hypothesis needs something to work with: a single number per table
+    leaves it guessing which feature to try next from column names alone. Here it
+    can ask *where* the model is wrong — which fold, which segment, which end of
+    which distribution — and let the answer pick the next table.
+
+    **This is the one place cross-validation is still run during a search.** The
+    ranking number needs one fit (see `probe.py`); honest residuals need
+    out-of-fold predictions, and there is no way around ``n_splits`` fits for
+    that. It is charged to nothing and refused by nothing, but it is not free in
+    wall clock, which is why it happens when asked for rather than on every
+    table.
+
+    The frame is the **whole source table**, not just the numeric columns the
+    model trained on. Deliberate: the string columns a model cannot consume are
+    exactly the ones worth grouping residuals by, and "the error is concentrated
+    in one city" is how the agent discovers that a column is worth encoding at
+    all. They cost nothing here because nothing here becomes a feature.
+
+    Nothing it computes can be persisted. That is the whole guard, and it is the
+    same one :mod:`~tabular_agent.explore` documents: the result is shown and
+    discarded, so a per-segment target mean read here has no route back into the
+    model except `fit_encoding`, which fits per fold.
+    """
+    spec = session.resolved()
+    path = session.resolve_table(table)
+    df = load_table(path)
+    X, _ = _feature_frame(df, spec.target)
+    if X.shape[1] == 0:
+        raise ValueError(
+            "no numeric feature columns on this table, so there is no model to "
+            "take residuals from; build features first"
+        )
+    y = df[spec.target]
+    folds = make_folds(y, spec.task_type, n_splits=spec.n_splits, seed=spec.seed,
+                       order=_fold_order(session, df))
+    # The same ruler the table was ranked with, so the residuals belong to the
+    # number the agent is reacting to rather than to some other model.
+    result = train_cv(
+        X, y, folds, spec.task_type, spec.metric,
+        model_type=PROBE_MODEL_TYPE, params=dict(PROBE_PARAMS), seed=PROBE_SEED,
+        target_transform=spec.target_transform,
+        time_budget_s=session.fit_time_budget_s,
+    )
+    oof = pd.DataFrame({"oof_pred": result.oof}) if result.oof.ndim == 1 else pd.DataFrame(
+        result.oof, columns=[f"oof_pred_{c}" for c in range(result.oof.shape[1])]
+    )
+    frame = _residual_frame(
+        df, oof, y, spec.task_type, spec.n_splits, spec.seed,
+        order=_fold_order(session, df),
+    )
+
+    out = run_readonly({"df": frame}, code, func_name="explore", timeout=timeout)
+    res = {"table": session.rel(path), "result": out["result"]}
+    if out["stdout"]:
+        res["stdout"] = out["stdout"]
+    return res
+
+
+#: Fitted on the winning table when the search is over, and never during it
+#: (0035). Enumerated rather than searched: the set is small enough to train all
+#: of, and spending search queries choosing among four things is the waste that
+#: record exists to stop. `elasticnet` earns its place by being from a different
+#: family — on v8's winning table it scored 0.11217 against catboost's 0.11207,
+#: and a linear model matching a boosted one says the signal is in the features.
+TERMINAL_MODEL_TYPES = ("xgb", "catboost", "elasticnet")
+
+
+def _terminal_fits(session: RunSession) -> list[dict]:
+    """Fit the enumerated set on the best table and let the leaderboard rank them.
+
+    The one selection event a run still makes over models, and it is bounded: an
+    argmax over three candidates costs about `sqrt(2*ln 3)` = 1.5 standard errors
+    of luck, against the 97 model-variation experiments across `_runs/` that this
+    replaces.
+
+    **Deliberately not a blend.** Averaging the three would mine no luck at all
+    and is the better answer in theory, but our own measurements disagree —
+    Rossmann's OOF-weighted blend scored 0.12991 against 0.12741 for the best
+    single model, and house-prices' three-family blend bought +0.00024 — because
+    boosted trees on one feature matrix have residual correlations of 0.86-0.88.
+    Written as one function with every candidate left on the leaderboard so that
+    pick-best against equal-weight is a one-line experiment once 0023's third
+    split can judge it.
+
+    A model type that fails is skipped, not fatal: three candidates exist so that
+    the run survives one of them being wrong for this data.
+    """
+    j = journal.load(session.run_dir)
+    metric = (j.get("task") or {}).get("metric") or session.resolved().metric
+    winner = stop.best_table(j.get("tables") or [], metric)
+    table = winner["path"] if winner else None
+
+    done = []
+    for model_type in TERMINAL_MODEL_TYPES:
+        try:
+            out = train_tabular_model(
+                session, table=table, model_type=model_type, enforce_stop=False
+            )
+        except Exception as e:  # noqa: BLE001 - one bad family must not end the run
+            done.append({"model_type": model_type, "trained": False, "error": str(e)})
+            continue
+        done.append(out)
+    return done
+
+
 def finalize_run(session: RunSession) -> dict:
     """Package the best experiment: deployable bundle + human-readable report.
 
@@ -1712,12 +1827,15 @@ def finalize_run(session: RunSession) -> dict:
             "this run has already been finalized: the bundle and report are on disk "
             "and the winner will not be re-picked"
         )
-    if not j["leaderboard"]:
-        raise ValueError("nothing to finalize: no model has been trained yet")
 
     if j.get("baseline") is None:
         train_tabular_model(session, model_type="baseline", enforce_stop=False)
         j = journal.load(session.run_dir)
+
+    _terminal_fits(session)
+    j = journal.load(session.run_dir)
+    if not j["leaderboard"]:
+        raise ValueError("nothing to finalize: nothing could be fitted")
 
     best = j["best"]
     exp_dir = os.path.join(session.run_dir, best["artifact_path"])

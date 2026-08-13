@@ -85,6 +85,20 @@ def set_split(run_dir: str, record: dict) -> dict:
     return journal
 
 
+def set_work_probe(run_dir: str, scored: dict) -> dict:
+    """The ruler's score for the data as given, before any table was built.
+
+    Written once. It is the reference every derived table is implicitly measured
+    against, and it has no row in ``tables`` because no tool produced it — the
+    work half is what the run started with.
+    """
+    journal = load(run_dir)
+    if journal.get("work_probe") is None:
+        journal["work_probe"] = scored
+        save(run_dir, journal)
+    return journal
+
+
 def next_table_id(run_dir: str) -> str:
     """Claim the next free table id, atomically, by creating its file first.
 
@@ -266,36 +280,38 @@ def ancestry(journal: dict, table_path: str) -> list[str]:
 def attribution(journal: dict, table_path: str) -> list[dict]:
     """Which links in a table's history were actually measured (spec §19.4).
 
-    A feature table that was built and then extended without ever being trained
-    on leaves a gap: the score of the later table cannot be attributed to its own
-    columns rather than its source's, because nothing ever scored the source. The
-    run is still correct — the model that ships is the model that scored best —
-    but the *explanation* has a hole in it, and the report should say so rather
-    than let the winning table take credit for all of its columns.
+    A feature table that was built and then extended without ever being scored
+    leaves a gap: the score of the later table cannot be attributed to its own
+    columns rather than its source's, because nothing ever measured the source.
+    The run is still correct — the model that ships is the model that scored
+    best — but the *explanation* has a hole in it, and the report should say so
+    rather than let the winning table take credit for all of its columns.
+
+    Since 0035 the ruler scores every table as it is written, so the gap this
+    exists to report is normally empty and the numbers along a lineage are
+    directly comparable: one estimator, one set of validation rows, one column
+    per link. It stays because a table the ruler could not measure still leaves
+    the same hole, and because "normally empty" is a property of the current
+    design rather than a guarantee.
 
     Nothing here constrains the search. It only records what the run does and
     does not entitle you to conclude.
     """
     by_path = {t["path"]: t for t in journal.get("tables") or []}
-    rows = journal.get("leaderboard") or []
-    metric = (journal.get("task") or {}).get("metric")
-    pick = max if (metric and greater_is_better(metric)) else min
     out = []
     for path in ancestry(journal, table_path):
-        experiments = [
-            r for r in rows if r.get("source_table") == path and r.get("val_score") is not None
-        ]
         table = by_path.get(path, {})
+        score = table.get("probe_score")
         out.append(
             {
                 "table": path,
                 "added": table.get("new_columns") or [],
                 "method": table.get("method"),
-                "n_experiments": len(experiments),
-                "best_score": (
-                    pick(r["val_score"] for r in experiments) if experiments else None
-                ),
-                "measured": bool(experiments),
+                # Kept as a count so the report's wording still works; every
+                # scored table has exactly the one measurement the ruler made.
+                "n_experiments": 1 if score is not None else 0,
+                "best_score": score,
+                "measured": score is not None,
             }
         )
     return out
