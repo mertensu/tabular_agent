@@ -10,11 +10,35 @@
 
 ## 2026-08-13 — 44% of the search budget went to a set we could have enumerated
 
-**Machine:** MacBook Air | **Branch:** master | No `src/` change yet — two
-decision records and one script.
+**Machine:** MacBook Air | **Branch:** master | **329 tests pass** (was 309).
 
-A session of analysis, no library code. Two records written, both
-**accepted, not yet implemented**: **0034** and **0035**.
+Three records — **0034**, **0035** (accepted, not yet implemented) and **0036** —
+plus `scripts/rebuild_submission.py` and `src/tabular_agent/probe.py`.
+
+### 0036 — and a claim of 0035's that did not survive contact
+
+0035 argued model-vs-model is the noisiest comparison we make, because different
+estimators have less correlated errors. Paired bootstrap on v8 (292 val rows,
+B=400) says pairing is worth **3-5x** and is **not asymmetric**: tables 0.18-0.30,
+models 0.29-0.37. What drives the covariance is how similar the two *predictors*
+are — and our own GBDT residual correlation of 0.86-0.88 already said so.
+
+0035 stands as written (never edit an accepted record); **0036 corrects it**. Its
+decision is unaffected: the waste of spending 44% of a budget on four enumerable
+options never depended on the pairing argument.
+
+**`probe.py` is in.** One fixed estimator (lgbm, library defaults, seed a module
+constant not `TaskSpec.seed`), justified by coverage rather than pairing: scoring
+v8's tables with one ruler gave numbers for **16 tables where the run had 8**.
+**One fit per table, not k+1** — the val score comes from a model fitted on all
+the table's rows, so folds never enter the ranking number. That is what makes
+automatic scoring affordable. Target scale now derives from the metric
+(`rmsle`/`rmspe` → `log1p`, everything else `none`, caller overrides).
+
+Loose finding, in 0036, not acted on: v8's `val_se` is 0.01116 but the paired sd
+of a *difference* is 0.0024-0.0041. Comparing a table to its parent by paired
+bootstrap is ~3x tighter than two point scores against a pooled `val_se`, with no
+fitted constant — a candidate for **0028's open `min_gain_ratio`**.
 
 ### 0034 — the cv tiebreak: tested, rejected
 
@@ -63,8 +87,14 @@ rather than by an allowlist. Worth stealing.
 
 ### Gotchas / owed
 
-- **Neither record is implemented.** 0023 comes first: a feature-only search will
-  report a different `val_score` and that number is not evidence.
+- **Order settled: 0035 before 0023.** Building the third split first would take
+  rows out of training and make v9 incomparable to v8. Kaggle is already the
+  honest number for house-prices and seguro, so the A/B needs a submission, not
+  new machinery. Pre-register the comparison before submitting: v8 was val
+  0.11354 → Kaggle **0.12298**.
+- **The probe is not wired to the agent.** Next decision is its call site —
+  on-demand `evaluate_table` vs automatic on table creation. Ulf chose
+  automatic; the argument is the 22-of-24 coverage hole.
 - 0035 collapses 0014's two-level stop, which also closes the `df.copy()`
   no-op-table loophole that reset `table_patience` — the loophole that produced
   e11, the best model this harness has made. Closing it is not a pure win.
