@@ -7,6 +7,8 @@ that make the coverage trustworthy — that the score arrives without being aske
 for, and that failing to score never costs the agent the table.
 """
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -121,3 +123,60 @@ def test_an_empty_run_still_has_the_probe_columns(session):
     must return nothing rather than raise."""
     frames = tools._journal_frames(session)
     assert list(frames["tables"].columns) == tools._TABLE_COLUMNS
+
+
+def test_the_ruler_is_on_the_terminal_ballot(session):
+    """The invariant: a run never ships a model worse than the number it selected by.
+
+    It holds by construction rather than by an assertion — the probe's own model
+    type and parameters are a terminal candidate, so the score the search was
+    ranked on is already demonstrated achievable. Porto Seguro v3 is what the
+    other arrangement costs: a table measured at gini 0.29066 by the probe,
+    packaged at 0.25389 because the ruler was not on the ballot.
+    """
+    from tabular_agent.probe import PROBE_MODEL_TYPE
+
+    assert PROBE_MODEL_TYPE in tools.TERMINAL_MODEL_TYPES
+
+
+def test_the_shipped_model_is_not_worse_than_the_winning_table_probe(session):
+    tools.inspect_data(session)
+    t = tools.transform_features(session, "def transform_features(df):\n"
+                                          "    df = df.copy()\n"
+                                          "    df['z'] = df['x1'] * 2\n"
+                                          "    return df")
+    out = tools.finalize_run(session)
+
+    winner = _table_row(session, t["table"])
+    # rmsle here, so lower is better; the shipped score must not be worse than
+    # the ruler's on the table it was chosen from.
+    assert out["val_score"] <= winner["probe_score"] + 1e-9
+
+
+def test_an_unservable_table_is_scored_as_unscorable(session):
+    """0030 at its new home.
+
+    A table whose lineage needs a column that will not exist at predict time
+    cannot be packaged into a bundle. `train_tabular_model` used to refuse it and
+    tell the agent; since 0035 the ruler is the first thing to touch a table, so
+    it is the only place left to say so. Left *unscored* rather than scored: an
+    unservable table must not be able to win `best_table`.
+    """
+    s = RunSession(
+        session.run_dir + "_srv", session.source_path,
+        TaskSpec(target="y", n_splits=3),
+        serving_columns=["x1", "city"],   # x2 will not exist at predict time
+    )
+    tools.inspect_data(s)
+    out = tools.transform_features(s, "def transform_features(df):\n"
+                                      "    df = df.copy()\n"
+                                      "    df['from_x2'] = df['x2'] * 2\n"
+                                      "    return df")
+    assert out["probe_score"] is None
+    assert out["unservable"] is True
+    assert "x2" in json.dumps(out["columns_not_available_at_predict_time"])
+
+    # and it cannot win the terminal fit
+    from tabular_agent.harness.stop import best_table
+    j = journal.load(s.run_dir)
+    assert best_table(j["tables"], "rmsle") is None

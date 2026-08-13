@@ -359,6 +359,22 @@ def probe_table(session: RunSession, table_path: str) -> dict:
         X, _ = _feature_frame(df, spec.target)
         if X.empty or not len(X.columns):
             return {"probe_score": None, "probe_unavailable": "no numeric feature columns"}
+        # 0030, at its new home. This used to be checked by `train_tabular_model`
+        # and refused there; since 0035 removed that tool from the agent, the
+        # ruler is the first thing to touch a table and therefore the only place
+        # the agent can still be told. Left unscored rather than scored: an
+        # unservable table must not be able to win `best_table` and be packaged
+        # into a bundle that cannot answer a prediction.
+        refusal = _refuse_if_unservable(session, table_path, df, list(X.columns))
+        if refusal is not None:
+            return {
+                "probe_score": None,
+                "probe_unavailable": refusal["reason"],
+                "unservable": True,
+                "columns_not_available_at_predict_time":
+                    refusal.get("columns_not_available_at_predict_time"),
+                "next": refusal.get("next"),
+            }
         y = df[spec.target]
         fit = fit_probe(X, y, spec.task_type, spec.metric, spec.target_transform)
         score, se, why_not = _score_on_val(
@@ -1770,9 +1786,28 @@ def explore_table(
 #: (0035). Enumerated rather than searched: the set is small enough to train all
 #: of, and spending search queries choosing among four things is the waste that
 #: record exists to stop. `elasticnet` earns its place by being from a different
-#: family — on v8's winning table it scored 0.11217 against catboost's 0.11207,
-#: and a linear model matching a boosted one says the signal is in the features.
-TERMINAL_MODEL_TYPES = ("xgb", "catboost", "elasticnet")
+#: family — on house v8's winning table it scored 0.11217 against catboost's
+#: 0.11207, and a linear model matching a boosted one says the signal is in the
+#: features.
+#:
+#: **The probe's own model type must be in this set.** It is what makes the
+#: invariant hold: *the shipped model is never worse than the number the search
+#: was ranked on*. The probe fitted `PROBE_MODEL_TYPE` at `PROBE_PARAMS` on the
+#: winning table and scored it on the validation half, so that score is already
+#: demonstrated to be achievable; leaving the ruler off the ballot means the run
+#: can package something worse than the number it selected by, and it did.
+#: Porto Seguro v3 measured a table at gini 0.29066 with the probe and shipped
+#: elasticnet at 0.25389 — a loss three times the largest selection-noise effect
+#: this project has recorded.
+#:
+#: Note what that episode is *not* evidence for. Refitted with comparable
+#: capacity on that table, the families are close — xgb 0.27409 and catboost
+#: 0.28351 against lgbm's 0.29066 — so the 0.08 spread at library defaults was
+#: mostly `n_estimators=200` meaning very different things to three libraries,
+#: not one family being better. Enumerating *defaults* measures the libraries;
+#: comparing families fairly needs a common budget or early stopping, which is a
+#: design and a record, not a constant picked off this table.
+TERMINAL_MODEL_TYPES = (PROBE_MODEL_TYPE, "xgb", "catboost", "elasticnet")
 
 
 def _terminal_fits(session: RunSession) -> list[dict]:
