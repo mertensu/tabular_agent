@@ -46,6 +46,13 @@ buys nothing. Start from the position it describes.
 Every tool that writes a table leaves the one it read untouched, so each table
 you build stays available to extend or train on again, however it scored.
 
+Every table you build is scored as it is written, by one fixed model that never
+changes: `probe_score`, with `probe_vs_source_table` against the table it came
+from. That number compares *tables* — the model behind it is held constant on
+purpose, so a difference between two tables is about the columns and nothing
+else. It is not a model you are choosing and not a score you are shipping; use
+it to decide what to build next.
+
 The dataset is split before you see it. You work on one half; the other is held
 back, and `val_score` is your model scored on it. That is the number the run
 ranks by and the one to improve. `cv_score` is the mean across the folds of your

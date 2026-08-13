@@ -27,6 +27,7 @@ from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
+from ..probe import fit_probe
 from ..report import build_report, write_report
 from ..rows import select_rows
 from ..sandbox import SandboxError, run_readonly
@@ -330,6 +331,78 @@ def _score_on_val(
     return score, se, None
 
 
+def probe_table(session: RunSession, table_path: str) -> dict:
+    """Score a just-created table with the run's fixed ruler (0035, 0036).
+
+    Every table is scored the moment it exists, rather than only the ones an
+    agent chooses to spend an experiment on. The reason is coverage: agents build
+    chains — t12 then t13 then t14 — and train on the endpoint, so across the runs
+    in `_runs/` **22 of the 24 tables that recombined an abandoned branch could
+    not be compared to the branch they continued**, because that parent was never
+    trained. A table with no number cannot take part in any comparison, and the
+    missing ones were concentrated exactly where the interesting comparisons are.
+
+    Affordable because the ranking number is the validation score, which comes
+    from a model fitted on all of the table's rows: **one fit per table, not
+    ``n_splits + 1``.** Cross-validation still happens for the terminal fit and
+    for ablation credit; it is not on this path.
+
+    **Never raises.** A table is a real artifact whether or not it could be
+    scored, and the tool that produced it has already succeeded by the time this
+    runs. Anything that goes wrong is returned as `probe_unavailable` with a
+    reason — a table the agent can still build on beats a tool call that dies
+    after writing its output.
+    """
+    spec = session.resolved()
+    try:
+        df = load_table(table_path)
+        X, _ = _feature_frame(df, spec.target)
+        if X.empty or not len(X.columns):
+            return {"probe_score": None, "probe_unavailable": "no numeric feature columns"}
+        y = df[spec.target]
+        fit = fit_probe(X, y, spec.task_type, spec.metric, spec.target_transform)
+        score, se, why_not = _score_on_val(
+            session, table_path, fit.model, fit.feature_names, spec, y,
+            target_transform=fit.target_transform,
+        )
+    except Exception as e:  # noqa: BLE001 - see the docstring: this cannot fail loudly
+        return {"probe_score": None, "probe_unavailable": f"{type(e).__name__}: {e}"}
+
+    if score is None:
+        return {"probe_score": None, "probe_unavailable": why_not}
+    return {
+        "probe_score": round(score, 6),
+        "probe_se": None if se is None else round(se, 6),
+        "probe_fit_seconds": fit.fit_seconds,
+        "probe_target_transform": fit.target_transform,
+    }
+
+
+def _probe_and_compare(session: RunSession, table_path: str, source_rel: str) -> dict:
+    """`probe_table`, plus the only comparison that is actually a decision.
+
+    A table's score on its own says little; what a run needs to know is whether
+    this table improved on **the one it was derived from**, which is the
+    comparison the agent is implicitly making when it builds anything. Reporting
+    it here means the agent does not have to reconstruct it from a leaderboard,
+    and means it is denominated the same way every time.
+    """
+    out = probe_table(session, table_path)
+    if out.get("probe_score") is None:
+        return out
+    j = journal.load(session.run_dir)
+    parent = next(
+        (t for t in (j.get("tables") or []) if t.get("path") == source_rel),
+        None,
+    )
+    before = (parent or {}).get("probe_score")
+    if before is None and source_rel == session.rel(session.data_path):
+        before = (j.get("baseline") or {}).get("val_score")
+    if before is not None:
+        out["probe_vs_source_table"] = _gain(out["probe_score"], before, session.resolved().metric)
+    return out
+
+
 def inspect_data(session: RunSession, table: str | None = None) -> dict:
     """Profile a table and pin down the task type and selection metric.
 
@@ -459,6 +532,8 @@ def fit_encoding(
         "new_columns": new_columns,
         "n_steps": len(lineage.steps),
     }
+    scored = _probe_and_compare(session, out_path, row["source_table"])
+    row.update(scored)
     journal.append_table(session.run_dir, row)
 
     _, still_dropped = _feature_frame(out, spec.target)
@@ -469,6 +544,7 @@ def fit_encoding(
         "n_rows": int(len(out)),
         "source_table": row["source_table"],
         "non_numeric_columns": still_dropped,
+        **scored,
         "note": (
             "Pass this table to train_tabular_model to use the new columns. "
             + (
@@ -561,6 +637,7 @@ def fit_group_stats(
         json.dump(lineage.to_dict(), f, indent=2)
 
     new_columns = list(train_features.columns)
+    scored = _probe_and_compare(session, out_path, session.rel(path))
     journal.append_table(session.run_dir, {
         "id": table_id,
         "path": session.rel(out_path),
@@ -571,6 +648,7 @@ def fit_group_stats(
         "stat": stat,
         "new_columns": new_columns,
         "n_steps": len(lineage.steps),
+        **scored,
     })
 
     column = new_columns[0]
@@ -594,6 +672,7 @@ def fit_group_stats(
         "n_groups": len(encoder.mapping_),
         "n_rows": int(len(out)),
         "source_table": session.rel(path),
+        **scored,
         # Out-of-fold values are missing wherever a row was in no fold's held-out
         # block, which under an ordered split is the whole first period. Said
         # plainly because the column looks broken otherwise, and the models
@@ -669,6 +748,7 @@ def filter_rows(
     with open(_lineage_path(out_path), "w") as f:
         json.dump(lineage.to_dict(), f, indent=2)
 
+    scored = _probe_and_compare(session, out_path, session.rel(path))
     journal.append_table(session.run_dir, {
         "id": table_id,
         "path": session.rel(out_path),
@@ -683,6 +763,7 @@ def filter_rows(
         "n_rows": int(summary["n_kept"]),
         "n_dropped": int(summary["n_dropped"]),
         "n_steps": len(lineage.steps),
+        **scored,
     })
 
     return {
@@ -693,6 +774,7 @@ def filter_rows(
         "fraction_dropped": round(summary["n_dropped"] / summary["n_rows"], 4),
         "source_table": session.rel(path),
         "new_columns": [],
+        **scored,
         "note": (
             "Pass this table to train_tabular_model to fit on the kept rows only. "
             "The filter is recorded as train-time-only and does not run at predict "
@@ -777,6 +859,8 @@ def transform_features(
         "new_columns": list(summary["new_columns"]),
         "n_steps": len(lineage.steps),
     }
+    scored = _probe_and_compare(session, out_path, row["source_table"])
+    row.update(scored)
     journal.append_table(session.run_dir, row)
 
     _, still_dropped = _feature_frame(out, spec.target)
@@ -787,6 +871,7 @@ def transform_features(
         "n_cols": len(out.columns),
         "source_table": row["source_table"],
         "non_numeric_columns": still_dropped,
+        **scored,
         "note": (
             "Pass this table to train_tabular_model to use the new columns. The code "
             "is stored in the table's lineage and re-runs at predict time; the target "
@@ -1390,6 +1475,10 @@ _LB_COLUMNS = [
 
 _TABLE_COLUMNS = [
     "id", "path", "method", "source_table", "n_columns", "columns", "code", "n_dropped",
+    # Every table carries a score now (0035): the ruler runs on creation, so this
+    # frame is the run's feature search, complete, and `tables.sort_values(
+    # "probe_score")` is the question the search is actually asking.
+    "probe_score", "probe_se", "probe_vs_source_table",
 ]
 
 
@@ -1446,6 +1535,11 @@ def _journal_frames(session: RunSession) -> dict:
             # which is also how to find the filters. Without it a filter looks
             # like a table that added no columns, i.e. like a wasted call.
             "n_dropped": t.get("n_dropped"),
+            # Null on tables written before the ruler existed, and on tables it
+            # could not score — a missing number here is not a bad score.
+            "probe_score": t.get("probe_score"),
+            "probe_se": t.get("probe_se"),
+            "probe_vs_source_table": t.get("probe_vs_source_table"),
         }
         for t in j.get("tables") or []
     ], columns=_TABLE_COLUMNS)

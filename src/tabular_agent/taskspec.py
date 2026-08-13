@@ -36,6 +36,15 @@ class TaskSpec:
     column_notes: dict[str, str] | None = None
     n_splits: int = 5
     seed: int = 42
+    #: Scale the target is fitted on, overriding what the metric implies (0035).
+    #:
+    #: `None` means derive it: `rmsle` and `rmspe` measure relative error, and
+    #: squared loss on `log1p` is that metric, so the derivation is available.
+    #: Nothing derives a scale for `rmse` or `mae` — a target that should be
+    #: logged under `mae` is a fact about the data, which is what this field and
+    #: this class are for. Names come from the same validated menu 0021 defined;
+    #: free-form code over the target is still impossible.
+    target_transform: str | None = None
 
 
 @dataclass
@@ -48,6 +57,9 @@ class ResolvedSpec:
     column_notes: dict[str, str] | None
     n_splits: int
     seed: int
+    #: Always concrete after resolution — derived from the metric when the spec
+    #: left it open, so no caller has to repeat the derivation.
+    target_transform: str = "none"
 
 
 def detect_task_type(y: pd.Series) -> str:
@@ -70,8 +82,17 @@ def default_metric(task_type: str, y: pd.Series) -> str:
 
 
 def resolve_taskspec(spec: TaskSpec, y: pd.Series) -> ResolvedSpec:
+    from .probe import default_target_transform
+    from .target import TARGET_TRANSFORMS
+
     task_type = spec.task_type or detect_task_type(y)
     metric = spec.metric or default_metric(task_type, y)
+    if spec.target_transform is not None and spec.target_transform not in TARGET_TRANSFORMS:
+        raise ValueError(
+            f"unknown target_transform: {spec.target_transform!r} "
+            f"(use one of {sorted(TARGET_TRANSFORMS)})"
+        )
+    target_transform = spec.target_transform or default_target_transform(metric, task_type)
     return ResolvedSpec(
         target=spec.target,
         task_type=task_type,
@@ -81,4 +102,5 @@ def resolve_taskspec(spec: TaskSpec, y: pd.Series) -> ResolvedSpec:
         column_notes=spec.column_notes,
         n_splits=spec.n_splits,
         seed=spec.seed,
+        target_transform=target_transform,
     )
