@@ -85,6 +85,71 @@ minimal tuning, selection by OOF only, 677 columns. Their held-out labels are
 **not on the machine the agent runs on**, which is 0023 enforced physically
 rather than by an allowlist. Worth stealing.
 
+### 0035 is implemented, and 0037 covers what it nearly broke
+
+**The agent's menu is now:** `inspect_data`, the four table tools, `explain_table`,
+`explore_table`, `explore_journal`, `finalize_run`. Nothing that picks a model.
+`finalize_run` fits xgb/catboost/elasticnet on the best table by `probe_score`
+and packages the winner. Stop rule counts **tables**, patience 6, `table_patience`
+gone with the move it existed to refuse.
+
+**0037** — removing the model tools silently removed `explore_experiment` (it
+needs an `exp_id` that no longer exists mid-run), which is the only arc turning a
+score back into a hypothesis. `explore_table` replaces it and refits across folds
+**on request**. The asymmetry is the record's point: ranking needs one fit (folds
+never enter a val score), residuals need `n_splits`. The shortcut that looks free
+— reuse the ranking fit's residuals — is wrong because they are in-sample:
+measured in the notebook, mean |error| **1711 in-sample vs 6172 out-of-fold**.
+And `explore_table` reads the **work half only**; val-half residuals would let an
+agent fit features to the ranking set by hand.
+
+**The no-op loophole closed itself.** Verified end to end: a `df.copy()`-style
+table scores a gain of exactly **0.0** and counts against patience. No check
+needed — with one counter there is nothing to reset.
+
+`notebooks/phase4_probe_and_feature_search.ipynb` ships unexecuted, every cell
+smoke-tested in order. Writing it caught a bug no test would have: four tool
+results and a prompt line still said "pass this table to `train_tabular_model`".
+
+### v9 ran, and both pre-registered claims passed
+
+| | val | Kaggle | optimism | rank /3765 |
+|---|---|---|---|---|
+| v8 catboost | 0.11171 | 0.12298 | +0.01127 | 756 (top 20%) |
+| **v9 elasticnet** | 0.11579 | **0.12037** | **+0.00458** | **336 (top 9%)** |
+| v9 runner-up catboost | 0.12078 | 0.12553 | +0.00475 | 1149 (top 31%) |
+
+**v9's val was worse and its Kaggle was better** — which is what less
+self-deception looks like. 10 tables, all scored, **2.3 min and 17 tool calls**
+against v8's 14 experiments. Full record: **0038**.
+
+**A prediction of mine failed and it is the useful part.** Mid-run I read
+elasticnet's val-cv gap (0.11579 vs 0.13015) as a winner's-curse signature and
+called catboost the safer pick. Catboost scored **0.12553** — worse by 0.005.
+The gap was cv's *structural pessimism*: fold models train on 80% of 1168 rows,
+and a linear model at ~930 rows is on a steep learning curve. Val ranked the two
+correctly; **cv ranked them backwards** — a fourth data point against preferring
+cv, and the first at a margin that was not a tie.
+
+**Ablation: the features did it.** v9's terminal set on v8's own winning table
+t11 — catboost val 0.11207, elasticnet 0.11217, xgb 0.13131. Elasticnet on v8's
+features scored Kaggle **0.12934**; the same family on v9's features scored
+**0.12037**. Nine thousandths apart, four times the gap between the two runs'
+headlines. So the gain is the **feature search**, not the terminal enumeration.
+`scripts/ablate_terminal_set.py` reproduces it.
+
+**And the finding nobody was looking for: optimism belongs to the table.** Four
+models with both numbers, two per table:
+
+    v8 t11  catboost   +0.01127      v9 t10  elasticnet +0.00458
+    v8 t11  elasticnet +0.01717      v9 t10  catboost   +0.00475
+
+They cluster **by table, not by model** — the two pairs do not overlap. Swapping
+the model family moves optimism by <0.006; swapping the table moves it 3x. The
+winner's curse attaches to the *feature set* a search selected, and is handed on
+to whatever is fitted afterwards. Prediction for 0023 to test: optimism should
+track how hard the table search worked and barely track the model.
+
 ### Gotchas / owed
 
 - **Order settled: 0035 before 0023.** Building the third split first would take

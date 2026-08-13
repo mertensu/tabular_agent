@@ -87,6 +87,8 @@ Vocabulary used throughout:
 
 - [0012 — The harness decides when the run is over](0012-harness-owns-the-stop.md)
 - [0014 — Exploration is cheap; tuning one table is not](0014-two-level-stop.md)
+  *(its two levels collapse into one under 0035: there are no model experiments
+  left for the per-table budget to refuse)*
 - [0015 — Attribution gaps are reported, not prevented](0015-report-attribution-gaps.md)
 - [0016 — Feature credit per tool call, not per column](0016-block-level-credit.md)
   *(superseded by 0017)*
@@ -104,12 +106,15 @@ Vocabulary used throughout:
 - [0034 — Breaking a `val_se` tie with `cv_score` was tested and rejected](0034-the-tiebreak-was-tested-and-rejected.md)
   *(a measurement: 1 win, 1 loss, 1 null — and why the real conclusion is 0023)*
 - [0035 — The search is over features; models are enumerated, not searched](0035-the-search-is-over-features.md)
-  *(accepted, not yet implemented; supersedes 0021 on where the target scale is
+  *(accepted and implemented; supersedes 0021 on where the target scale is
   chosen, and collapses 0014's two-level stop — its central mechanism is
-  corrected by 0036)*
+  corrected by 0036, and 0038 is the first run under it)*
 - [0036 — The pairing asymmetry was not there; the probe is justified by coverage](0036-the-pairing-asymmetry-was-not-there.md)
   *(a measurement: every comparison is paired, model or table alike — and a
   candidate yardstick for 0028's open `min_gain_ratio`)*
+- [0038 — The first feature-only run: less optimism, and a prediction that failed](0038-the-first-feature-only-run.md)
+  *(a measurement: optimism +0.01127 -> +0.00458 on a pre-registered A/B; why a
+  val-cv gap is not a diagnostic for selection noise)*
 
 ### Keeping the agent's surface small
 
