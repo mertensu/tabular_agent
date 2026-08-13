@@ -124,6 +124,9 @@ Vocabulary used throughout:
 - [0040 — Seguro v4: a near-copy of the ruler is not the ruler](0040-seguro-v4-a-near-copy-of-the-ruler-is-not-the-ruler.md)
   *(the invariant needs the probe's fit, not its model type; and the
   selected-measurement pattern holds a second time, confound still open)*
+- [0043 — On ordered data the seal costs the freshest rows, not a random tenth](0043-on-ordered-data-the-seal-costs-the-freshest-rows.md)
+  *(corrects 0041's cost section: an ordered seal trades recency, not sample
+  size — v7's shipped model forecasts 3-5 months past its own data)*
 - [0042 — The terminal argmax shipped the worst model, and the seal caught it](0042-the-terminal-argmax-shipped-the-worst-model.md)
   *(a measurement: ranking one contiguous period is n=1 in the unit that varies;
   equal-weight blending beat every single model on sealed rows — registered for

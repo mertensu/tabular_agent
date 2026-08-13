@@ -94,6 +94,34 @@ Replay of `val` vs `cv` across every run with a known truth is in 0042. Neither
 wins outright and **the line is not split type** — seguro v2 is a random split
 where cv was right.
 
+### 0043 — a cost of the seal that 0041 missed
+
+On **ordered** data the sealed slice is not a random tenth, it is the **most
+recent** tenth, and on a forecasting task recency is most of what a row is worth.
+
+    work (all the shipped model ever saw)   2013-01-01 -> 2015-05-01
+    validation                              2015-05-02 -> 2015-06-15
+    sealed                                  2015-06-16 -> 2015-07-31
+    Kaggle's test set                       2015-08-01 -> 2015-09-17
+
+v7's model forecasts **3-5 months past the end of its own data** where the field
+forecasts six weeks. So **v5's Kaggle 0.135 is not a fair control for v7's
+submission** — different forecast horizons, not two harnesses. Rejected as fixes:
+shrinking the seal on ordered data (makes the honesty number noisy exactly where
+0042 showed it was needed) and refitting the winner on work+val before packaging
+(the sealed score would then describe a different model than the one that ships).
+
+### Blend submissions are written and unscored
+
+`scripts/blend_submission.py` packages equal-weight blends of a finished run's
+terminal fits. Five CSVs in `_runs/rossmann_v7/`, 41,088 rows each, no nulls, no
+negatives, alongside the run's own `submission.csv` (the argmax winner).
+
+**Kaggle is a seal we have not burned.** 0042's claim 1 can be tested on it now,
+on rows nothing here has touched, rather than waiting for a fresh sealed run.
+Implied ranks *if Kaggle agreed with the sealed numbers* (it will not — see 0043):
+shipped xgb ~2497/3300, 3-GBDT blend ~2153, lgbm+catboost ~2133.
+
 ### Gotchas
 
 - **A hung request has no timeout anywhere in the library.** v7 attempt 1 sat
