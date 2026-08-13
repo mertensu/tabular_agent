@@ -150,6 +150,50 @@ winner's curse attaches to the *feature set* a search selected, and is handed on
 to whatever is fitted afterwards. Prediction for 0023 to test: optimism should
 track how hard the table search worked and barely track the model.
 
+### Seguro v3 — two defects, and 0038's hypothesis dead
+
+Full record: **0039**. Kaggle private gini:
+
+    v3 as shipped   (elasticnet)  0.24907   <- FAILED claim 1
+    v3 with the fix (lgbm)        0.27470   <- passes, +0.0095 over v2
+    v2 shipped e8                 0.26522
+    v2 discarded e11              0.27724   <- still 0.0025 better than v3
+
+**Defect 1: the ruler was not on the terminal ballot.** TERMINAL_MODEL_TYPES was
+(xgb, catboost, elasticnet); the probe is lgbm. The run ranked tables with lgbm,
+picked t3, then shipped the best of a set excluding lgbm. **Cost 0.02563 gini** —
+twice the tiebreak effect in 0034. Fixed by putting PROBE_MODEL_TYPE in the set,
+which makes "never ship worse than the number you selected by" hold by
+construction.
+
+Not evidence lgbm is better: at comparable capacity the families are close (xgb
+0.27409, catboost 0.28351, lgbm 0.29066). The terminal phase enumerates *library
+defaults*, so it measures the libraries. A fair comparison needs a common budget
+or early stopping — **left open, deliberately**, rather than copying a learning
+rate off one table.
+
+**Defect 2: `_refuse_if_unservable` sits behind `if enforce_stop:`** and the
+terminal phase passes `enforce_stop=False`, so 0030's guarantee was bypassed —
+and 0035 had deleted the only place the agent heard about it. Latent since 0035
+with a green suite; surfaced only because adding lgbm changed which model won.
+The check moved into the probe; an unservable table is left **unscored** so it
+cannot win `best_table`.
+
+**0038's "optimism belongs to the table" is rejected.** Same table, same rows:
+lgbm +0.01596 vs elasticnet +0.00482 — 3.3x, against a registered 0.002.
+
+What replaces it, fitting 3 of 4 pairs: **optimism attaches to the *selected*
+measurement.** Both seguro runs show the selected model at ~3x an unselected one
+(v2: e8 +0.01828 vs e11 +0.00587; v3: lgbm +0.01596 vs elasticnet +0.00482), and
+house v9 fits because *neither* shipped model was the probe. House v8's t11 does
+not fit and is recorded as such.
+
+**Also:** 0033's elasticnet fix carried its first real run (3.0 min on 476k rows
+vs v1's projected 510 hours). And **the probe's seed is load-bearing at scale** —
+lgbm moves 0.003 auc between seeds on 476k rows, a third of everything the search
+gained. The phase-4 notebook's "seed variation measures nothing" is true only at
+house-prices' 1168 rows.
+
 ### Gotchas / owed
 
 - **Order settled: 0035 before 0023.** Building the third split first would take
@@ -157,9 +201,11 @@ track how hard the table search worked and barely track the model.
   honest number for house-prices and seguro, so the A/B needs a submission, not
   new machinery. Pre-register the comparison before submitting: v8 was val
   0.11354 → Kaggle **0.12298**.
-- **The probe is not wired to the agent.** Next decision is its call site —
-  on-demand `evaluate_table` vs automatic on table creation. Ulf chose
-  automatic; the argument is the 22-of-24 coverage hole.
+- **Seguro v3 is not re-run.** Its journal holds the buggy terminal fit; the
+  corrected number came from `scripts/fit_table_and_submit.py`, not from a run.
+  A v4 under the fixed harness is owed before seguro's A/B counts as clean.
+- **Terminal fairness is open.** Enumerating library defaults measures the
+  libraries. Needs a common budget or early stopping, and a record.
 - 0035 collapses 0014's two-level stop, which also closes the `df.copy()`
   no-op-table loophole that reset `table_patience` — the loophole that produced
   e11, the best model this harness has made. Closing it is not a pure win.

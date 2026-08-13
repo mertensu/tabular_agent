@@ -114,7 +114,11 @@ Vocabulary used throughout:
   candidate yardstick for 0028's open `min_gain_ratio`)*
 - [0038 — The first feature-only run: less optimism, and a prediction that failed](0038-the-first-feature-only-run.md)
   *(a measurement: optimism +0.01127 -> +0.00458 on a pre-registered A/B; why a
-  val-cv gap is not a diagnostic for selection noise)*
+  val-cv gap is not a diagnostic for selection noise — its "optimism belongs to
+  the table" hypothesis is rejected by 0039)*
+- [0039 — Seguro v3: two defects, and 0038's hypothesis falsified](0039-seguro-v3-two-defects-and-a-falsified-hypothesis.md)
+  *(the ruler must be on the terminal ballot; removing a tool removes the
+  guarantees it carried; optimism attaches to the selected measurement)*
 
 ### Keeping the agent's surface small
 
