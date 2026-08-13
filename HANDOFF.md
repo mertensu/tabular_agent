@@ -8,6 +8,122 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-13 (later) — The sealed split is in, and it immediately caught us shipping the worst model
+
+**Machine:** MacBook Air | **Branch:** master | **353 tests pass** (was 329).
+
+0023 implemented (**0041**), Rossmann v7 run against it, and the run produced
+**0042** — a finding that should change the terminal phase and deliberately has
+not yet.
+
+### 0041 — the third split, built
+
+`RunSession(holdout_fraction=...)`, **opt-in and off by default**. Four calls 0023
+left open, all argued in the record:
+
+- **Opt-in**, because turning it on takes rows out of the work half and makes the
+  first sealed run incomparable to every run before it. That belongs in a driver,
+  not in a library default.
+- **A fraction of the whole input**, not a slice of the val half — otherwise
+  `val_se` grows ~1.4x on the number that ranks every table. Under a random split
+  the validation rows come out **byte-identical** with the seal on or off; only
+  work shrinks.
+- **Ordered splits cut `work | val | holdout` in time order**, so the seal is the
+  latest period. Price: val moves earlier, and the gap mixes selection with drift.
+- **Every terminal candidate is scored, not just the winner** — the fits already
+  exist, and it is 0039's selected-vs-unselected pair without a Kaggle submission.
+
+The seal is held by ordering (`_score_on_holdout` takes the winner as an
+*argument*), by `journal.set_holdout` being **write-once**, and by
+`resolve_table`'s existing allowlist. `tests/test_holdout.py` is 17 tests.
+`notebooks/phase4_sealed_holdout.ipynb` ships unexecuted, all 12 code cells
+smoke-tested in order. **0023's "`build_report` already takes a `holdout_score`
+parameter" was stale** — it did not; it does now.
+
+### Rossmann v7, and the finding: **val picked the worst GBDT**
+
+| model | val | **sealed** | optimism | |
+|---|---|---|---|---|
+| **xgb** | **0.12980** | **0.15253** | **+0.02273** | shipped |
+| lgbm | 0.13202 | 0.14145 | +0.00943 | |
+| catboost | 0.14329 | 0.14113 | −0.00217 | |
+| elasticnet | 0.20556 | 0.19493 | −0.01063 | |
+
+Seguro v2's e8/e11 failure again — except v2 needed Kaggle to find out and **v7
+found it itself**. 15 tables, 5 terminal fits, 40 min, agent finalized on its own.
+`submission.csv` written, unscored.
+
+**Not noise: val is 50,175 rows.** Under `split_on` it is *one period*, so ranking
+by it is n=1 in the unit that varies. `_score_on_val`'s own comment says exactly
+this — it is why `val_se` is `None` on ordered splits — and the argmax then ranks
+by that number with no yardstick at all, one function away.
+
+**Registered claims: 1 passed, 2 failed (+0.0227, our worst optimism ever), 3
+passed with the confound finally broken** (probe is lgbm, selected was xgb, and
+optimism still ordered by selection), **4 passed** (`Customers` guarded, bundle
+predicts).
+
+**Drift is bounded and smaller than 0041 feared:** all four are scored on the same
+sealed rows, so drift is a common shift — and two of four gaps are *negative*. The
+spread across the ballot is selection, not the calendar.
+
+### 0042 — and why nothing was implemented
+
+Equal-weight blends of the same four fits, on the same sealed rows:
+
+    xgb (shipped)              0.15253
+    catboost (best single)     0.14113
+    lgbm + catboost            0.13432
+    lgbm + xgb + catboost      0.13610
+
+**Every blend beat every single model**; the 3-family average is 0.0164 better
+than what shipped, ~7x what the feature search bought from t8 on. An argmax over
+k costs ~`sqrt(2*ln k)` SEs by construction; an average costs none.
+
+0035 rejected blending on two measurements that **do not apply to this blend** —
+both were OOF-*weighted* and scored on **val**. Equal weights against sealed rows
+had never been tried.
+
+**Implementing this from these numbers would fit the harness to v7's holdout**,
+which is 0023's own failure one level up. So 0042 registers it for the next run
+instead. Also rejected, with reasons: agent-chooses (would choose on the broken
+signal, and reopens what 0035 closed), cv-always (house v9 refutes it), cv-above-
+a-row-threshold (a constant fitted to four points), probe-always.
+
+Replay of `val` vs `cv` across every run with a known truth is in 0042. Neither
+wins outright and **the line is not split type** — seguro v2 is a random split
+where cv was right.
+
+### Gotchas
+
+- **A hung request has no timeout anywhere in the library.** v7 attempt 1 sat
+  **105 minutes on one gateway POST** — socket ESTABLISHED, 0% CPU, no bytes, 6
+  tables on disk. Drivers retry provider *errors*; a hang is not an error.
+  Patched only in `run_rossmann_v7_sealed.py` (`MODEL_SETTINGS["timeout"]`, and
+  `drive()` now classifies timeouts as provider failures so they retry). **Every
+  other driver is still exposed and the library is unguarded.**
+- **`scripts/run_rossmann.py` has been broken since 0035** — it passes
+  `StopPolicy(max_experiments=...)`, renamed to `max_tables`. Dies on
+  construction. Not fixed; v7 is a fresh driver built from `run_seguro_v4.py`.
+- **The agent reads the sealed number.** `finalize_run` returns `holdout_score`
+  and `optimism`, and v7's agent reasoned about them in its summary. Harmless
+  today because the run is over — but that is call ordering, not a structural
+  bar. Named as open in 0042.
+- **The work table is unservable on Rossmann** (`Customers`), so `work_probe` has
+  no score. My summary code formatted it with `:.5f` and crashed *after* a
+  successful run. Fixed; nothing was lost.
+- v7's val is **not comparable to v5/v6's** — with a seal, val is the 45 days
+  *before* the last 45, not the last 45.
+- **No quiz done** for 0041/0042 yet. One question was asked and is unanswered.
+
+### Next
+
+- **The blend A/B**, pre-registered in 0042, on a fresh sealed run. This is the
+  highest-value open item and it needs a seal that has not been consulted.
+- Score `_runs/rossmann_v7/submission.csv` on Kaggle — gives the sealed number an
+  external check, and v5 (0.135) is the comparison.
+- Lift the request timeout out of the driver into the library, with a record.
+
 ## 2026-08-13 — 44% of the search budget went to a set we could have enumerated
 
 **Machine:** MacBook Air | **Branch:** master | **329 tests pass** (was 309).

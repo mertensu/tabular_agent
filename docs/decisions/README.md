@@ -124,6 +124,10 @@ Vocabulary used throughout:
 - [0040 — Seguro v4: a near-copy of the ruler is not the ruler](0040-seguro-v4-a-near-copy-of-the-ruler-is-not-the-ruler.md)
   *(the invariant needs the probe's fit, not its model type; and the
   selected-measurement pattern holds a second time, confound still open)*
+- [0042 — The terminal argmax shipped the worst model, and the seal caught it](0042-the-terminal-argmax-shipped-the-worst-model.md)
+  *(a measurement: ranking one contiguous period is n=1 in the unit that varies;
+  equal-weight blending beat every single model on sealed rows — registered for
+  the next run, deliberately not implemented)*
 - [0041 — The sealed split scores the ballot, not just the winner](0041-the-sealed-split-scores-the-ballot-not-the-winner.md)
   *(0023 implemented: opt-in per run, why the holdout comes out of the work half,
   why an ordered split seals the latest period — and why every terminal candidate
