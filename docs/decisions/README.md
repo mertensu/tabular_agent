@@ -102,7 +102,8 @@ Vocabulary used throughout:
 - [0028 — `val_se` is implemented; the bar it is a quarter of is still open](0028-the-yardstick-is-fixed-the-bar-is-not.md)
   *(accepted; `min_gain_ratio` deliberately left open pending a second dataset)*
 - [0023 — The third split has evidence now](0023-the-third-split-has-evidence-now.md)
-  *(accepted, not yet implemented)*
+  *(accepted; implemented by 0041 — its "`build_report` already takes a
+  `holdout_score` parameter" was stale when written)*
 - [0034 — Breaking a `val_se` tie with `cv_score` was tested and rejected](0034-the-tiebreak-was-tested-and-rejected.md)
   *(a measurement: 1 win, 1 loss, 1 null — and why the real conclusion is 0023)*
 - [0035 — The search is over features; models are enumerated, not searched](0035-the-search-is-over-features.md)
@@ -123,6 +124,10 @@ Vocabulary used throughout:
 - [0040 — Seguro v4: a near-copy of the ruler is not the ruler](0040-seguro-v4-a-near-copy-of-the-ruler-is-not-the-ruler.md)
   *(the invariant needs the probe's fit, not its model type; and the
   selected-measurement pattern holds a second time, confound still open)*
+- [0041 — The sealed split scores the ballot, not just the winner](0041-the-sealed-split-scores-the-ballot-not-the-winner.md)
+  *(0023 implemented: opt-in per run, why the holdout comes out of the work half,
+  why an ordered split seals the latest period — and why every terminal candidate
+  is scored, which is 0039's confound removed without a Kaggle submission)*
 
 ### Keeping the agent's surface small
 

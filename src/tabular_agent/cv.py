@@ -37,13 +37,17 @@ def _change_positions(order_sorted):
     return np.flatnonzero(order_sorted[1:] != order_sorted[:-1]) + 1
 
 
-def boundary_cut(order_sorted, target: int) -> int:
+def boundary_cut(order_sorted, target: int, exclude: tuple[int, ...] = ()) -> int:
     """The honest cut position nearest ``target``, for a single split.
 
     Used by the work/validation split, which wants one boundary rather than a set.
     The realised fraction moves to wherever the nearest value boundary is, which
     is a rounding error on a panel with a thousand rows per day and a coarse jump
     on a column with few distinct values.
+
+    ``exclude`` is for the second cut of a three-way ordered split (0023): a
+    boundary already spent on the work/validation edge cannot also be the
+    validation/holdout edge, or one of the two slices is empty.
     """
     changes = _change_positions(order_sorted)
     if len(changes) == 0:
@@ -51,7 +55,13 @@ def boundary_cut(order_sorted, target: int) -> int:
             "cannot split on this column: every row shares one value, so any cut "
             "would put that value on both sides"
         )
-    return int(changes[np.argmin(np.abs(changes - target))])
+    available = changes[~np.isin(changes, exclude)] if exclude else changes
+    if len(available) == 0:
+        raise ValueError(
+            f"cannot split on this column: it has {len(changes)} value boundary/ies "
+            "and they are already spent on earlier cuts"
+        )
+    return int(available[np.argmin(np.abs(available - target))])
 
 
 def _boundary_cuts(order_sorted, n_blocks: int) -> list[int]:

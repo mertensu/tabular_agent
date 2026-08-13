@@ -5,8 +5,10 @@ pointers needed to find it again, so a fresh process (or a fresh agent after a
 context reset) can be handed the same ``run_dir`` and continue.
 
 The input table is split once, before any tool runs, into a **work** half the
-agent builds features on and a **validation** half it is scored against. Both
-live in ``run_dir/data/``, so a run directory stays movable (0003).
+agent builds features on and a **validation** half it is scored against —
+optionally with a third, **sealed** slice no tool can reach, scored once at
+`finalize_run` (0023). All of them live in ``run_dir/data/``, so a run directory
+stays movable (0003).
 """
 
 import os
@@ -41,6 +43,7 @@ class RunSession:
         spec: TaskSpec,
         stop_policy: StopPolicy | None = None,
         val_fraction: float = 0.2,
+        holdout_fraction: float | None = None,
         split_on: str | None = None,
         serving_columns: list[str] | None = None,
         fit_time_budget_s: float | None = None,
@@ -56,6 +59,19 @@ class RunSession:
         # a property of *this* run's budget, not of the library.
         self.stop_policy = stop_policy or StopPolicy()
         self.val_fraction = val_fraction
+        # The sealed third slice (0023). `None` — off — is the default, and the
+        # default is deliberate rather than lazy: turning it on takes rows out of
+        # the work half, so the first run with a holdout is not comparable to the
+        # runs before it. That is a decision belonging to whoever is running the
+        # experiment, and it should be visible in their driver script rather than
+        # arriving as a library default that silently re-cuts everyone's data.
+        #
+        # A fraction of the *whole* input, like `val_fraction`, not a slice taken
+        # out of the validation half. Under a random split that keeps the
+        # validation rows themselves unchanged (see `_ensure_split`), so `val_se`
+        # and every val-denominated comparison mean the same thing with the
+        # holdout on as off — only the work half shrinks.
+        self.holdout_fraction = holdout_fraction
         # Column to order by when splitting. Left `None` on purpose rather than
         # auto-detected: guessing which column is time and being wrong produces a
         # split that looks principled and is not, and the failure is silent.
@@ -83,7 +99,7 @@ class RunSession:
         # and no cap on parameters would have caught it. Only wall clock does.
         self.fit_time_budget_s = fit_time_budget_s
         self._resolved: ResolvedSpec | None = None
-        self._split: tuple[str, str] | None = None
+        self._split: tuple[str, str, str | None] | None = None
 
     @property
     def run_dir(self) -> str:
@@ -98,10 +114,11 @@ class RunSession:
                 f"columns are {list(df.columns)}"
             )
 
-    def _ensure_split(self) -> tuple[str, str]:
-        """Materialise ``data/work.parquet`` and ``data/val.parquet`` once.
+    def _ensure_split(self) -> tuple[str, str, str | None]:
+        """Materialise ``data/work.parquet``, ``data/val.parquet`` and — when
+        ``holdout_fraction`` is set — ``data/holdout.parquet``, once.
 
-        Idempotent, and re-reads what is on disk when both files already exist —
+        Idempotent, and re-reads what is on disk when the files already exist —
         a resumed run must get the *same* split, or its leaderboard compares
         scores measured against different rows.
         """
@@ -110,8 +127,16 @@ class RunSession:
 
         work_path = os.path.join(self.run_dir, "data", "work.parquet")
         val_path = os.path.join(self.run_dir, "data", "val.parquet")
+        holdout_path = os.path.join(self.run_dir, "data", "holdout.parquet")
         if os.path.exists(work_path) and os.path.exists(val_path):
-            self._split = (work_path, val_path)
+            # What is on disk wins over what this object was constructed with.
+            # Re-splitting to honour a `holdout_fraction` the original run did not
+            # have would move the validation rows under a leaderboard already
+            # written against them, and refusing to resume would strand a run dir
+            # over a constructor argument. A run that was cut without a sealed
+            # slice simply does not have one to score.
+            on_disk = holdout_path if os.path.exists(holdout_path) else None
+            self._split = (work_path, val_path, on_disk)
             return self._split
 
         df = load_table(self.source_path)
@@ -122,10 +147,20 @@ class RunSession:
         self._require_target(df)
         n = len(df)
         n_val = int(round(n * self.val_fraction))
-        if n_val < MIN_SPLIT_ROWS or n - n_val < MIN_SPLIT_ROWS:
+        n_holdout = int(round(n * (self.holdout_fraction or 0.0)))
+        n_work = n - n_val - n_holdout
+        parts = {"work": n_work, "val": n_val}
+        if self.holdout_fraction:
+            parts["holdout"] = n_holdout
+        if min(parts.values()) < MIN_SPLIT_ROWS:
+            fractions = f"val_fraction={self.val_fraction}"
+            if self.holdout_fraction:
+                fractions += f", holdout_fraction={self.holdout_fraction}"
             raise ValueError(
-                f"cannot split {n} rows at val_fraction={self.val_fraction}: both halves "
-                f"must have at least {MIN_SPLIT_ROWS} rows (got work={n - n_val}, val={n_val})"
+                f"cannot split {n} rows at {fractions}: every part must have at least "
+                f"{MIN_SPLIT_ROWS} rows (got "
+                + ", ".join(f"{k}={v}" for k, v in parts.items())
+                + ")"
             )
 
         if self.split_on is not None:
@@ -148,16 +183,54 @@ class RunSession:
             # prevent. The realised fraction moves to the nearest honest boundary.
             values = df[self.split_on].to_numpy()
             order = np.argsort(values, kind="stable")
-            cut = boundary_cut(values[order], n - n_val)
-            val_pos = order[cut:]
+            # work | val | holdout, in time order: the sealed slice is the *latest*
+            # period, because it is the one asked to stand in for unseen data and
+            # the competition's test set is always the future. The price is that
+            # turning the holdout on moves the validation rows earlier, so an
+            # ordered run with a holdout is not comparable row-for-row to one
+            # without — unlike the random case below, where val is unchanged.
+            #
+            # It also means val and holdout are *different periods*, so the gap
+            # between them carries drift as well as selection optimism. That
+            # confound is real, it is named in the report, and it is the price of
+            # keeping the sealed slice the most test-like rows in the file.
+            cut_work = boundary_cut(values[order], n_work)
+            if self.holdout_fraction:
+                # A second boundary, and it must not land on the first: two cuts
+                # in the same place is an empty slice, which would look like a
+                # split that worked and produce a sealed score over no rows.
+                cut_val = boundary_cut(
+                    values[order], n_work + n_val, exclude=(cut_work,)
+                )
+                if cut_val <= cut_work:
+                    raise ValueError(
+                        f"cannot cut {n} rows ordered by {self.split_on!r} into "
+                        f"work/val/holdout: the nearest honest boundary to the "
+                        f"validation end lands at or before the work end "
+                        f"({cut_val} <= {cut_work}), so a slice would be empty. "
+                        "Order on a finer column, or drop holdout_fraction."
+                    )
+            else:
+                cut_val = n
+            val_pos = order[cut_work:cut_val]
+            holdout_pos = order[cut_val:]
         else:
-            val_pos = np.random.default_rng(self.spec.seed).permutation(n)[:n_val]
+            # One permutation, validation taken off the front of it, so which rows
+            # are validation depends only on `n` and the seed — not on whether a
+            # holdout was asked for. Adding one takes rows out of *work* and
+            # leaves every val-denominated number comparable to a run without it.
+            perm = np.random.default_rng(self.spec.seed).permutation(n)
+            val_pos = perm[:n_val]
+            holdout_pos = perm[n_val : n_val + n_holdout]
 
-        mask = np.zeros(n, dtype=bool)
-        mask[val_pos] = True
-        save_parquet(df.iloc[np.flatnonzero(~mask)].reset_index(drop=True), work_path)
-        save_parquet(df.iloc[np.flatnonzero(mask)].reset_index(drop=True), val_path)
-        self._split = (work_path, val_path)
+        held = np.zeros(n, dtype=bool)
+        held[val_pos] = True
+        held[holdout_pos] = True
+        save_parquet(df.iloc[np.flatnonzero(~held)].reset_index(drop=True), work_path)
+        save_parquet(df.iloc[np.sort(val_pos)].reset_index(drop=True), val_path)
+        if self.holdout_fraction:
+            save_parquet(df.iloc[np.sort(holdout_pos)].reset_index(drop=True), holdout_path)
+        self._split = (work_path, val_path, holdout_path if self.holdout_fraction else None)
         return self._split
 
     @property
@@ -170,19 +243,45 @@ class RunSession:
         """The validation half. Scored by the harness; never handed to a tool."""
         return self._ensure_split()[1]
 
+    @property
+    def holdout_path(self) -> str | None:
+        """The sealed slice, or ``None`` when this run has none (0023).
+
+        Read by exactly one caller, `finalize_run`, exactly once. Every other
+        consumer of held-out rows — `probe_table`, `train_tabular_model`,
+        `explain_table` — goes through `val_path`, and that asymmetry is the
+        whole mechanism: a number consulted repeatedly is a number the search
+        starts optimising against, which is why the validation half stopped being
+        an independent check in the first place.
+
+        It is not defended by an allowlist entry of its own. `resolve_table`
+        admits nothing outside ``tables/``, so ``data/holdout.parquet`` is
+        unreachable to a tool for the same reason ``data/val.parquet`` is.
+        """
+        return self._ensure_split()[2]
+
     def split_record(self) -> dict:
         """What the split was, for the journal — so two runs can be compared."""
-        work, val = self._ensure_split()
+        work, val, holdout = self._ensure_split()
         n_val = len(load_table(val))
+        n_holdout = len(load_table(holdout)) if holdout else 0
         return {
             "source_path": self.source_path,
             "mode": "ordered" if self.split_on else "random",
             "split_on": self.split_on,
             "seed": self.spec.seed,
             "val_fraction": self.val_fraction,
+            "holdout_fraction": self.holdout_fraction,
             "n_work": len(load_table(work)),
             "n_val": n_val,
+            "n_holdout": n_holdout,
             "val_is_thin": n_val < SMALL_VAL_ROWS,
+            # Flagged separately from `val_is_thin` because it is a different
+            # failure: a thin validation half makes the *ranking* noise, a thin
+            # holdout makes the honesty number itself noise. Both can be true,
+            # and a run can have a trustworthy leaderboard and an untrustworthy
+            # gap, or the reverse.
+            "holdout_is_thin": bool(holdout) and n_holdout < SMALL_VAL_ROWS,
         }
 
     # ------------------------------------------------------------------ specs

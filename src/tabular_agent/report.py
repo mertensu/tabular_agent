@@ -11,6 +11,88 @@ def _beats_baseline(metric: str, selection_score: float, baseline_score: float) 
     return selection_score <= baseline_score
 
 
+def selected_holdout(holdout: dict | None) -> dict | None:
+    """The sealed score belonging to the model that actually shipped, if it has one."""
+    for entry in (holdout or {}).get("scores") or []:
+        if entry.get("selected") and entry.get("holdout_score") is not None:
+            return entry
+    return None
+
+
+def _holdout_section(holdout: dict, split: dict | None) -> list[str]:
+    """The gap, which is the whole reason the third split is worth its rows (0023).
+
+    Printed as a table over every model scored, not just the winner: the run
+    selected one of these on the validation half, and seeing what the sealed rows
+    made of the others is what tells a reader whether the *selection* was the
+    expensive part or the model was.
+    """
+    scores = holdout.get("scores") or []
+    selected = selected_holdout(holdout)
+    lines = ["", "## What the search cost", ""]
+    if selected is not None and selected.get("optimism") is not None:
+        gap = selected["optimism"]
+        # Signed like every other `vs_*` number in the harness — positive is
+        # "better" — which here means positive is *bad news about the headline*.
+        # Spelled out in words rather than left to the sign, because a reader who
+        # gets the direction backwards reads a flattered run as an honest one.
+        reading = (
+            "the validation half overstated this model by that much"
+            if gap > 0
+            else "the sealed rows scored it *better* than the validation half did, "
+            "so the headline was not inflated"
+        )
+        lines += [
+            f"The shipped model scored **{selected['val_score']:.4f}** on the "
+            f"validation half the search ranked by, and "
+            f"**{selected['holdout_score']:.4f}** on {holdout.get('n_rows')} sealed "
+            f"rows nothing in this run could read — a gap of **{gap:+.4f}**, meaning "
+            f"{reading}. That is how much of the headline was the search finding "
+            "signal rather than finding luck.",
+            "",
+        ]
+    lines += [
+        "| model | experiment | validation | sealed holdout | optimism |",
+        "|---|---|---|---|---|",
+    ]
+    for e in scores:
+        mark = " (shipped)" if e.get("selected") else ""
+        val = "n/a" if e.get("val_score") is None else f"{e['val_score']:.4f}"
+        if e.get("holdout_score") is None:
+            sealed, gap = f"not scored: {e.get('holdout_unavailable')}", ""
+        else:
+            sealed = f"{e['holdout_score']:.4f}"
+            gap = "" if e.get("optimism") is None else f"{e['optimism']:+.4f}"
+        lines.append(
+            f"| `{e.get('model_type')}`{mark} | `{e['experiment_id']}` | {val} | {sealed} | {gap} |"
+        )
+    lines += [
+        "",
+        "> **These rows ranked nothing.** The winner was already picked, on the "
+        "validation half, before any of them existed. Choosing between them by "
+        "this column would spend the third split the same way the second one was "
+        "spent, and the next run would have no honest number at all.",
+    ]
+    if split and split.get("holdout_is_thin"):
+        lines += [
+            "",
+            f"> **WARNING:** {split['n_holdout']} sealed rows is thin. The gap above "
+            "has its own standard error and a small one should not be read as a "
+            "clean bill of health.",
+        ]
+    if split and split.get("split_on"):
+        lines += [
+            "",
+            f"> **The gap is not purely selection here.** Split on "
+            f"`{split['split_on']}`, the sealed rows are a *later period* than the "
+            "validation rows, which are themselves later than the rows the model "
+            "trained on. So the difference mixes how much the search gamed the "
+            "validation half with how much the world moved between the two "
+            "periods, and this run cannot separate them.",
+        ]
+    return lines
+
+
 def build_report(
     *,
     task_type: str,
@@ -24,6 +106,7 @@ def build_report(
     split: dict | None = None,
     attribution: list[dict] | None = None,
     val_se: float | None = None,
+    holdout: dict | None = None,
 ) -> str:
     fold_std = float(np.std(fold_metrics))
     # The headline number's own uncertainty, printed beside it (0022). A score
@@ -44,10 +127,23 @@ def build_report(
     ]
     if cv_score is not None:
         lines.insert(5, f"- **CV score:** {cv_score:.3f} (fold std {fold_std:.3f})")
+    selected = selected_holdout(holdout)
+    if selected is not None:
+        sealed = f"{selected['holdout_score']:.3f}"
+        if selected.get("holdout_se") is not None:
+            sealed += f" (+/- {selected['holdout_se']:.3f})"
+        # Beside the validation score, never instead of it (0023). The pair is
+        # the point: one number is what the search steered towards, the other is
+        # what it was worth, and the reader needs both to read the third.
+        lines.insert(5, f"- **Holdout score (sealed, scored once):** {sealed}")
     if split:
         where = f"ordered by `{split['split_on']}`" if split.get("split_on") else "random"
+        sealed_rows = (
+            f" / {split['n_holdout']} sealed holdout" if split.get("n_holdout") else ""
+        )
         lines.append(
-            f"- **Split:** {split['n_work']} work / {split['n_val']} validation ({where})"
+            f"- **Split:** {split['n_work']} work / {split['n_val']} validation"
+            f"{sealed_rows} ({where})"
         )
         lines += [
             "",
@@ -82,6 +178,8 @@ def build_report(
             "> **WARNING:** the model does not beat the trivial baseline. "
             "Suspect a bug, leakage, or an unlearnable target.",
         ]
+    if holdout:
+        lines += _holdout_section(holdout, split)
     lines.append("")
     lines.append("## Per-fold metrics")
     for i, m in enumerate(fold_metrics):

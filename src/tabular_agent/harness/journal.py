@@ -99,6 +99,23 @@ def set_work_probe(run_dir: str, scored: dict) -> dict:
     return journal
 
 
+def set_holdout(run_dir: str, record: dict) -> dict:
+    """The sealed split's verdict, written once at finalize (0023).
+
+    Deliberately **not** on the leaderboard and deliberately write-once. These
+    scores exist to tell a reader afterwards how much the search gamed the
+    validation half; the moment they can be consulted twice, or ranked by,
+    they become another number to optimise against and the third split has
+    bought nothing. Write-once is what makes "scored exactly once" auditable
+    from the journal alone rather than a property of the calling code.
+    """
+    journal = load(run_dir)
+    if journal.get("holdout") is None:
+        journal["holdout"] = record
+        save(run_dir, journal)
+    return journal
+
+
 def next_table_id(run_dir: str) -> str:
     """Claim the next free table id, atomically, by creating its file first.
 

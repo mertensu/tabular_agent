@@ -28,7 +28,7 @@ from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..probe import PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_probe
-from ..report import build_report, write_report
+from ..report import build_report, selected_holdout, write_report
 from ..rows import select_rows
 from ..sandbox import SandboxError, run_readonly
 from ..target import TARGET_TRANSFORMS, invert_target
@@ -260,8 +260,9 @@ def _bootstrap_se(metric: str, y, preds, labels, seed: int) -> float | None:
     return float(np.std(scores))
 
 
-def _score_on_val(
+def _score_on_held_out(
     session: RunSession,
+    rows_path: str,
     source_path: str,
     model,
     feature_names,
@@ -269,9 +270,15 @@ def _score_on_val(
     y_work: pd.Series,
     target_transform: str = "none",
 ) -> tuple[float | None, float | None, str | None]:
-    """Score a just-fitted model on the validation half. ``(score, se, why_not)``.
+    """Score a just-fitted model on held-out rows. ``(score, se, why_not)``.
 
-    The validation rows are **raw**: no tool ever wrote them, so the columns the
+    ``rows_path`` is the validation half for everything the agent can reach, and
+    the sealed holdout for the single call `finalize_run` makes (0023). The
+    machinery is deliberately identical: the sealed score is only worth printing
+    beside `val_score` if it was produced the same way, so that the gap between
+    the two measures selection and not a difference in how they were computed.
+
+    The held-out rows are **raw**: no tool ever wrote them, so the columns the
     model expects do not exist on them yet and have to be rebuilt by replaying
     the lineage of the table it trained on — the same pipeline ``finalize_run``
     packages into a bundle. Encoders replay their fitted parameters, so nothing
@@ -281,7 +288,7 @@ def _score_on_val(
     model's columns: a leaderboard row with a missing validation score is worth
     more than a training call that dies.
     """
-    val = load_table(session.val_path)
+    val = load_table(rows_path)
     y_val = val[spec.target]
     pipeline = _load_lineage(source_path, spec.task_type)
     # The target is dropped before the pipeline sees the rows (0009): a transform
@@ -329,6 +336,26 @@ def _score_on_val(
         else _bootstrap_se(spec.metric, y_val, preds, classes, spec.seed)
     )
     return score, se, None
+
+
+def _score_on_val(
+    session: RunSession,
+    source_path: str,
+    model,
+    feature_names,
+    spec,
+    y_work: pd.Series,
+    target_transform: str = "none",
+) -> tuple[float | None, float | None, str | None]:
+    """`_score_on_held_out` against the validation half — the leaderboard's exam.
+
+    Kept as its own name because every caller in the run is this one, and the
+    single caller that is *not* has to say so at its call site.
+    """
+    return _score_on_held_out(
+        session, session.val_path, source_path, model, feature_names, spec, y_work,
+        target_transform=target_transform,
+    )
 
 
 def probe_table(session: RunSession, table_path: str) -> dict:
@@ -1864,6 +1891,81 @@ def _terminal_fits(session: RunSession) -> list[dict]:
     return done
 
 
+def _score_on_holdout(
+    session: RunSession, exp_ids: list[str], selected_id: str | None = None
+) -> dict | None:
+    """Break the seal: score already-fitted experiments on the third split (0023).
+
+    **The only reader of `session.holdout_path` in the library**, called once,
+    from `finalize_run`, after the winner has already been picked. Nothing here
+    can change which model ships — the argument is the list of experiments that
+    were *already* chosen, and the return value goes to the journal and the
+    report, never to `best`.
+
+    Every terminal candidate is scored, not only the winner. The fits exist
+    either way, so the extra numbers are free, and they are the measurement three
+    records in a row have wanted and could only get from a Kaggle submission:
+    0039 and 0040 argued that optimism attaches to the *selected* measurement
+    rather than to the model or the table, on three pairs that all happened to be
+    lgbm-vs-elasticnet. A winner and its runners-up on the same table, scored on
+    the same sealed rows, is that comparison without the confound.
+
+    The rest of the harness must keep treating these as unrankable. They are
+    written under `holdout`, not onto the leaderboard, and `selected` records
+    which one the run had already crowned — so a later reader can tell the
+    difference between "the number the search steered towards" and "the number
+    that judged it".
+
+    The models are **not refitted**. Each is scored exactly as it shipped, fitted
+    on the work half alone, so the difference between its `val_score` and its
+    holdout score is two sets of rows and nothing else. Refitting on work+val
+    would produce a better model and a meaningless gap.
+    """
+    holdout_path = session.holdout_path
+    if holdout_path is None:
+        return None
+
+    spec = session.resolved()
+    scored = []
+    for exp_id in exp_ids:
+        row = _experiment_row(session.run_dir, exp_id)
+        exp_dir = session.ctx.path("experiments", exp_id)
+        entry = {
+            "experiment_id": exp_id,
+            "model_type": row.get("model_type"),
+            "val_score": row.get("val_score"),
+            # Which one the run had already crowned, on the row rather than by
+            # position, so the distinction survives anything that reorders this
+            # list. It is the variable 0039's hypothesis is about.
+            "selected": exp_id == selected_id,
+        }
+        try:
+            with open(os.path.join(exp_dir, "meta.json")) as f:
+                meta = json.load(f)
+            model = joblib.load(os.path.join(exp_dir, "final_model.joblib"))
+            source_path = session.resolve_table(meta["source_table"])
+            y_work = load_table(source_path)[spec.target]
+            score, se, why_not = _score_on_held_out(
+                session, holdout_path, source_path, model, meta["feature_names"], spec,
+                y_work, target_transform=meta.get("target_transform", "none"),
+            )
+        except Exception as e:  # noqa: BLE001 - a run must still finalize
+            score, se, why_not = None, None, f"{type(e).__name__}: {e}"
+        if score is None:
+            entry["holdout_unavailable"] = why_not
+        else:
+            entry["holdout_score"] = round(score, 6)
+            entry["holdout_se"] = None if se is None else round(se, 6)
+            if entry["val_score"] is not None:
+                # How much the validation half flattered this model. Signed the
+                # same way as every other `vs_*` number in the harness — positive
+                # is "the val score was better than the truth", which is the
+                # direction every measurement we have has pointed so far.
+                entry["optimism"] = _gain(entry["val_score"], score, spec.metric)
+        scored.append(entry)
+    return {"n_rows": len(load_table(holdout_path)), "scores": scored}
+
+
 def finalize_run(session: RunSession) -> dict:
     """Package the best experiment: deployable bundle + human-readable report.
 
@@ -1882,12 +1984,22 @@ def finalize_run(session: RunSession) -> dict:
         train_tabular_model(session, model_type="baseline", enforce_stop=False)
         j = journal.load(session.run_dir)
 
-    _terminal_fits(session)
+    terminal = _terminal_fits(session)
     j = journal.load(session.run_dir)
     if not j["leaderboard"]:
         raise ValueError("nothing to finalize: nothing could be fitted")
 
     best = j["best"]
+    # After `best` is read, and it could not be otherwise: the sealed split is
+    # allowed to judge the choice, never to make it (0023). The winner first, then
+    # the runners-up it was picked over.
+    candidates = [best["experiment_id"]] + [
+        out["experiment_id"] for out in terminal
+        if out.get("experiment_id") and out["experiment_id"] != best["experiment_id"]
+    ]
+    holdout = _score_on_holdout(session, candidates, selected_id=best["experiment_id"])
+    if holdout is not None:
+        journal.set_holdout(session.run_dir, holdout)
     exp_dir = os.path.join(session.run_dir, best["artifact_path"])
     with open(os.path.join(exp_dir, "meta.json")) as f:
         meta = json.load(f)
@@ -1924,15 +2036,29 @@ def finalize_run(session: RunSession) -> dict:
         model_types=[meta["model_type"]],
         feature_names=meta["feature_names"],
         split=j.get("split"),
+        holdout=holdout,
     )
     report_path = write_report(session.ctx, text)
     journal.mark_finalized(session.run_dir)
 
+    shipped = selected_holdout(holdout)
     return {
         "best_experiment_id": best["experiment_id"],
         "model_type": meta["model_type"],
         "metric": meta["metric"],
         "val_score": meta["val_score"],
+        # Present only on a run that was cut with a third split, and the run is
+        # over by the time the agent reads it — there is no call left to make
+        # with it, which is the point. `optimism` is the number 0023 exists for:
+        # how much the validation half flattered the model that shipped.
+        **(
+            {}
+            if shipped is None
+            else {
+                "holdout_score": shipped["holdout_score"],
+                "optimism": shipped.get("optimism"),
+            }
+        ),
         "cv_score": meta["cv_score"],
         "baseline_score": j["baseline"]["val_score"],
         "n_experiments": len(j["leaderboard"]),
