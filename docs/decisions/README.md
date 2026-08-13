@@ -67,6 +67,7 @@ Vocabulary used throughout:
 - [0010 — Store the transform code, not the columns it produced](0010-store-code-not-columns.md)
 - [0011 — Statelessness is tested as a property, not blacklisted](0011-stability-check.md)
 - [0021 — The agent picks the target scale, from a fixed menu](0021-the-agent-picks-the-target-scale.md)
+  *(the menu stands; where the choice is made is superseded by 0035)*
 - [0032 — Fitted group aggregates, and the first step that is not replayed](0032-fitted-aggregates-and-a-step-that-is-not-replayed.md)
   *(what 0011 rejects becomes legal once the value is stored; and why a row
   filter is train-time-only)*
@@ -97,6 +98,11 @@ Vocabulary used throughout:
   *(accepted; `min_gain_ratio` deliberately left open pending a second dataset)*
 - [0023 — The third split has evidence now](0023-the-third-split-has-evidence-now.md)
   *(accepted, not yet implemented)*
+- [0034 — Breaking a `val_se` tie with `cv_score` was tested and rejected](0034-the-tiebreak-was-tested-and-rejected.md)
+  *(a measurement: 1 win, 1 loss, 1 null — and why the real conclusion is 0023)*
+- [0035 — The search is over features; models are enumerated, not searched](0035-the-search-is-over-features.md)
+  *(accepted, not yet implemented; supersedes 0021 on where the target scale is
+  chosen, and collapses 0014's two-level stop)*
 
 ### Keeping the agent's surface small
 

@@ -8,6 +8,71 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-13 — 44% of the search budget went to a set we could have enumerated
+
+**Machine:** MacBook Air | **Branch:** master | No `src/` change yet — two
+decision records and one script.
+
+A session of analysis, no library code. Two records written, both
+**accepted, not yet implemented**: **0034** and **0035**.
+
+### 0034 — the cv tiebreak: tested, rejected
+
+`scripts/rebuild_submission.py` is committed (`ed4b486`). It packages any
+experiment from a finished run, verified by replaying against the run's own val
+half and insisting on the journalled score. It exists because seguro_v2 shipped
+e8 (Kaggle **0.26522**) over e11 (**0.27724**) on a `val_score` margin of
+0.00020 = **0.05 `val_se`**.
+
+Breaking such ties with `cv_score` scored **1 win, 1 loss, 1 null** (seguro_v2
++0.0120, seguro_v1 −0.0031, house_v8 +0.00004). `cv` *is* the better estimator —
+error spread 0.0043 vs val's 0.0124, rank correlation **+0.8 vs −0.4** — and is
+still useless at tie margins, because at a tie the quantity being resolved is
+~zero. **No margin threshold**: that is fitting a constant to three points.
+
+Measured optimism now spans 5 readings on 2 datasets, one direction, growing
+with experiment count: house 17exp +0.00206 → 24exp +0.00944; seguro 5exp
++0.0129 → 11exp +0.0183. **The conclusion is 0023.**
+
+### 0035 — feature-only search
+
+Counted across all 16 runs: **222 experiments, 97 (44%) varied only the model or
+its params**, and the winner was a model variation in **10 of 16**. Winner-over-
+runner-up margins where `val_se` exists: **0.03 / 0.05 / 0.18 `val_se`**.
+
+Model-vs-model on one table is also the *least* reliable comparison we make —
+different estimators, uncorrelated errors, so the covariance term that makes
+paired comparisons cheap is absent. We were spending half the budget on the
+noisy axis and taking the winner from it.
+
+Decision: **search where the space is unbounded, enumerate where it is small.**
+Agent's action space becomes tables only; a fixed **probe model** (fixed params,
+folds, seed) ranks them so every comparison is paired; terminal phase fits
+xgb/catboost/elasticnet on the winner and ships the best; **target scale derived
+from the metric, overridable in `TaskSpec`** — which supersedes 0021 on placement
+only (its menu-not-code decision stands).
+
+Also found, and it argues *for* the feature axis: the agent already recombines
+abandoned branches **24 times across 10 runs**, always as "current table + one
+step first seen on a dropped branch".
+
+Cross-check: `wandb_fc/tabular-nomad` does exactly this — LightGBM screening,
+minimal tuning, selection by OOF only, 677 columns. Their held-out labels are
+**not on the machine the agent runs on**, which is 0023 enforced physically
+rather than by an allowlist. Worth stealing.
+
+### Gotchas / owed
+
+- **Neither record is implemented.** 0023 comes first: a feature-only search will
+  report a different `val_score` and that number is not evidence.
+- 0035 collapses 0014's two-level stop, which also closes the `df.copy()`
+  no-op-table loophole that reset `table_patience` — the loophole that produced
+  e11, the best model this harness has made. Closing it is not a pure win.
+- **0033's elasticnet fix is still untested by a real run** — seguro_v2 never
+  called elasticnet.
+- No notebook or quiz for this session's analysis; it produced no machinery yet.
+- Analysis scripts were scratchpad-only and are not in the repo.
+
 ## 2026-08-12 — First classification run; the diagnostic model was unrunnable at scale
 
 **Machine:** MacBook Air | **Branch:** master | **309 tests pass** (was 306).
