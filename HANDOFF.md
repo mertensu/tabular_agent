@@ -99,7 +99,14 @@ One existing test read the flat shape and was updated.
 
 ### Gotchas
 
-- **Quiz for 0046/0047 is owed** and still unanswered, as are 0041/0042/0044's.
+- **Quiz for 0046/0047 done** (0041/0042/0044's are still owed). It surfaced a
+  caveat 0046 does not state and should have: **`count`-instead-of-smoothing only
+  works for a model that can express an interaction.** A GBDT splits on
+  `cat_te_count < 5` and learns the discount; `elasticnet` fitted on both columns
+  just adds them, so for the linear member of the terminal ballot `count` is
+  strictly weaker than smoothing and smoothing is still doing the real work.
+  0046 is accepted and stays as written — carry this into slice 2's record, or
+  its own if slice 2 does not touch it.
 - `count` under an ordered split is a *partial* count (folds preceding the row),
   while the stored encoder's count covers all rows — so the trained column and
   the served column measure subtly different things. Already true of the mean;
