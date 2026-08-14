@@ -214,6 +214,7 @@ def build_agent(model=DEFAULT_MODEL):
         table: str | None = None,
         categories: dict[str, list] | None = None,
         smoothing: float = 10.0,
+        stats: list[str] | None = None,
     ) -> dict:
         """Encode categorical columns, writing a new feature table to train on.
 
@@ -229,6 +230,13 @@ def build_agent(model=DEFAULT_MODEL):
                 large) — it is never inferred from the data.
             smoothing: For method="target" only: pulls small categories towards
                 the global mean.
+            stats: For method="target" only. Which statistics of the target to
+                summarise each category by — any of "mean", "std", "median",
+                "count". Defaults to ["mean"], the classical target encoding.
+                The mean alone hides how spread out a category's target is and
+                how many rows the estimate rests on; asking for "std" and
+                "count" alongside it gives the model both, in one call and one
+                new table, instead of a separate table per idea.
         """
         return _retryable(
             lambda: tools.fit_encoding(
@@ -238,6 +246,7 @@ def build_agent(model=DEFAULT_MODEL):
                 table=table,
                 categories=categories,
                 smoothing=smoothing,
+                stats=stats,
             )
         )
 

@@ -171,8 +171,10 @@ def test_target_encoding_stores_oof_values_but_a_full_fit_encoder(session):
     assert encoder["kind"] == "target"
 
     # Each row's stored value was fitted without that row's fold; the serving
-    # encoder saw every row. They must therefore disagree.
-    full_fit = pd.Series(table["city"].map(encoder["mapping"]["city"]))
+    # encoder saw every row. They must therefore disagree. The mapping is nested
+    # by statistic since the target encoder learned to emit more than the mean.
+    assert encoder["stats"] == ["mean"]
+    full_fit = pd.Series(table["city"].map(encoder["mapping"]["city"]["mean"]))
     assert not np.allclose(table["city_te"], full_fit)
 
 

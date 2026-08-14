@@ -8,6 +8,103 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-14 (later) — The two blocking questions are answered, and Gap A is closed
+
+**Machine:** MacBook Air | **Branch:** master | **387 tests pass** (was 363).
+
+Worked `docs/time_aware_features.md`. Both questions it named as blocking are
+settled with Ulf, and slice 1 is built.
+
+### 0047 — the horizon, settled (accepted, **not implemented**)
+
+Ulf's answer to §3.3 collapsed both questions into one. The real forecasting
+contract is: history to `T`, predict `T+1 … T+k`. For `T+1` you know yesterday's
+value; for `T+2` you do not. **So availability is not a property of the served
+set, it is each row's distance from the end of history** — which is what §3.2 was
+asking. One mechanism answers both:
+
+- **Frozen history + a per-row staleness column.** `T+1` gets the last known
+  value at staleness 1 (that *is* yesterday's value), `T+5` the same value at
+  staleness 5. Degrades visibly instead of lying quietly.
+- **`TaskSpec.forecast_horizon` optional, and a *minimum*.** The refinement that
+  is easy to get wrong: `h` varies per row inside one predict batch, so a single
+  declared horizon cannot gate lags globally. It is the floor across the block;
+  staleness stays per row.
+- **No recursion** (predictions not fed back as lags) — sequential prediction,
+  compounding error, and structural train/serve skew. Rejected-for-now, reopenable.
+- **Predict rows never read their own batch's past.** This is the one that costs
+  a guarantee: a lag reading the batch's earlier rows *is* 0011's batch-dependence.
+  Frozen history keeps batch-independence by construction.
+
+Two pre-work checks that changed the framing:
+
+- **0030's serving schema does not already express §3.3.** It is column-level;
+  §3.3 is temporal. And since the target is excluded from `serving_columns` by
+  construction, a target lag can never come from a served frame at all — so §3.3
+  is really "is stored history ever *extended*?", a new declaration.
+- **0011's check passes a stored-history step as-is** (`unstable_columns` only
+  ever runs on sandbox code), *because* history is frozen. That equivalence is
+  exactly what the permissive answer would have spent.
+
+### 0046 — slice 1 built: a group is more than its average
+
+`fit_encoding(method="target", stats=[...])`, `TARGET_STATS = (mean, std,
+median, count)`. `mean` keeps the bare `<col>_te` name; the rest get
+`<col>_te_<stat>`. Default is `["mean"]`, so nothing changes unasked.
+
+- **One tool, not two.** Lifting `fit_group_stats`'s target refusal for the
+  non-mean stats is less code and produces an indefensible seam — a group's
+  target *mean* from one tool, its target *median* from another.
+- **Only the mean is smoothed.** The weighted-average formula is a statement
+  about means; shrinking a median by a count weight invents an estimator and
+  gives it a standard one's name. **`count` is emitted instead** — same
+  information, learned rather than baked into an untuned constant.
+- **`min`/`max`/`sum` off the menu.** An extreme of the target in a group is
+  essentially one row's target and survives OOF only by luck of fold assignment;
+  `sum` is `count * mean`.
+- Everything is out-of-fold, including `count`.
+
+### The gotcha worth carrying forward
+
+**A leak test written for one statistic does not transfer to another statistic of
+the same column.** The mean's OOF test correlates the encoding with `y`. Applied
+to `std` it *fails* — and not because `std` is safe: a row inflates its group's
+spread whether its target is high **or** low, so the leak lands on `|y - mean|`
+and sits near zero against `y`. Replaced with a direct perturbation test (move
+one row's target, watch that row's own feature) which covers all four with one
+mechanism.
+
+Also: **the serialized target encoder changed shape** — `mapping` is now nested
+by statistic. `from_dict` detects the old flat shape by the absent `stats` key
+and loads it mean-only, so bundles on disk keep predicting what they predicted.
+One existing test read the flat shape and was updated.
+
+### Also
+
+- `tests/test_target_stats.py` (15) + `tests/test_target_stats_harness.py` (9).
+- `notebooks/phase4_target_distribution.ipynb` ships unexecuted, all 11 code
+  cells executed in order from the shipped file.
+- `fit_group_stats`'s target refusal now names `stats=` instead of only saying
+  the mean needs smoothing.
+
+### Next
+
+- **Slice 2 — the `history` lineage step.** Unblocked now; 0047 is the spec.
+  Bounded storage (last `L + W` per group), replay at predict, and §3.4 (lagging
+  the *target* specifically) still to settle.
+- **No run has used 0046.** 0032 is the precedent: `fit_group_stats` was the tool
+  the agent asked for and then never called once in 69 calls.
+- Everything from the entry below is still open: fix the ruler, a non-Rossmann
+  sealed run for 0044's claims, the request timeout, `scripts/run_rossmann.py`.
+
+### Gotchas
+
+- **Quiz for 0046/0047 is owed** and still unanswered, as are 0041/0042/0044's.
+- `count` under an ordered split is a *partial* count (folds preceding the row),
+  while the stored encoder's count covers all rows — so the trained column and
+  the served column measure subtly different things. Already true of the mean;
+  noted in 0046, not fixed.
+
 ## 2026-08-14 — Kaggle confirmed the blend, so the blend is what ships now
 
 **Machine:** MacBook Air | **Branch:** master | **363 tests pass** (was 353).

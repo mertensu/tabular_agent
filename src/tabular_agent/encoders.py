@@ -4,34 +4,139 @@ import numpy as np
 import pandas as pd
 
 
+#: The statistics of the target a group may be summarised by.
+#:
+#: ``mean`` is the classical target encoding and the only one that is smoothed.
+#: The other three describe the *rest* of the group's target distribution, which
+#: the mean alone throws away: how spread out it is, where its middle is when the
+#: mean is dragged by a tail, and how many observations stand behind the estimate
+#: at all.
+#:
+#: Deliberately not on the menu: ``min``/``max``, because an extreme of the
+#: target within a group is essentially one row's target and survives
+#: out-of-fold fitting only by luck of which fold that row landed in; and
+#: ``sum``, which is ``count * mean`` and adds no information to a model that can
+#: already see both.
+TARGET_STATS = ("mean", "std", "median", "count")
+
+
 class TargetEncoder:
+    """Per-group statistics of the **target**, fitted once and looked up later.
+
+    The classical case is ``stats=("mean",)`` — a category replaced by the
+    average target of the rows sharing it — which is why the default emits
+    exactly that and names the column ``<col>_te``.
+
+    The mean alone is a lossy summary of a group, and the loss matters. Two
+    categories with the same average can have completely different target
+    distributions, and an estimate standing on three rows should not be read like
+    one standing on three hundred. ``std`` and ``median`` describe the shape;
+    ``count`` is the trust signal, and it was already being computed here as the
+    smoothing denominator and then discarded.
+
+    **Only the mean is smoothed**, and the asymmetry is deliberate rather than an
+    omission. Smoothing shrinks a group's estimate toward the population value in
+    proportion to how little evidence it has, and the weighted-average formula
+    that does this is a statement about means. Shrinking a *median* toward the
+    global median by a count weight, or a standard deviation toward the global
+    standard deviation, would be inventing an estimator here and giving it the
+    same name as a standard one. Instead the group's count is emitted as its own
+    column and the model is left to learn how far to trust a thin group — which
+    is the same information, expressed rather than baked in.
+
+    Groups whose statistic is undefined are not stored, so the lookup falls
+    through to the population value: a one-row group has no sample standard
+    deviation, and "no usable estimate for this group" should mean the same thing
+    whether the group was thin or was never seen at all. ``count`` is the
+    exception, and unseen means ``0`` there — the same reasoning as
+    :class:`FrequencyEncoder`'s unseen-means-zero.
+
+    Every statistic here reads ``y``, so every one of them needs the out-of-fold
+    discipline in :func:`oof_target_encode`. That is as true of ``count`` as of
+    ``mean``: a per-fold count is not target-informed in itself, but it is fitted
+    on the same rows and there is no benefit to giving it a second, looser path.
+    """
+
     kind = "target"
 
-    def __init__(self, columns: list[str], smoothing: float = 10.0):
+    def __init__(self, columns: list[str], smoothing: float = 10.0, stats=("mean",)):
         self.columns = list(columns)
         self.smoothing = float(smoothing)
-        self.mapping_: dict[str, dict[str, float]] = {}
+        self.stats = tuple(dict.fromkeys(str(s) for s in stats))
+        if not self.stats:
+            raise ValueError("stats must name at least one statistic")
+        unknown = [s for s in self.stats if s not in TARGET_STATS]
+        if unknown:
+            raise ValueError(
+                f"unknown target statistic(s) {unknown}; use one or more of "
+                f"{', '.join(TARGET_STATS)}"
+            )
+        # {column: {stat: {category: value}}}. Nested by stat rather than one
+        # mapping per emitted column so that a round trip through JSON keeps the
+        # encoder's shape self-describing.
+        self.mapping_: dict[str, dict[str, dict[str, float]]] = {}
+        self.defaults_: dict[str, float] = {}
         self.global_mean_: float | None = None
+
+    def column_name(self, col: str, stat: str) -> str:
+        """``<col>_te`` for the mean, ``<col>_te_<stat>`` for the rest.
+
+        The mean keeps the bare name it has always had, so a table, a lineage
+        sidecar or a journal row written before the other statistics existed
+        still names its column the same thing.
+        """
+        return f"{col}_te" if stat == "mean" else f"{col}_te_{stat}"
+
+    @property
+    def output_columns(self) -> list[str]:
+        return [self.column_name(c, s) for c in self.columns for s in self.stats]
 
     def fit(self, df: pd.DataFrame, y) -> "TargetEncoder":
         y = np.asarray(y, dtype=float)
         self.global_mean_ = float(np.mean(y))
         y_ser = pd.Series(y)
+
+        self.defaults_ = {}
+        for stat in self.stats:
+            if stat == "count":
+                self.defaults_[stat] = 0.0
+            else:
+                population = y_ser.agg(stat)
+                self.defaults_[stat] = (
+                    self.global_mean_ if pd.isna(population) else float(population)
+                )
+
+        # "count" is always aggregated because the smoothing weight needs it,
+        # even when the caller did not ask for it as a feature.
+        wanted = list(dict.fromkeys([*self.stats, "count"]))
         for col in self.columns:
             keys = df[col].astype(str).to_numpy()
-            grouped = y_ser.groupby(keys)
-            stats = grouped.agg(["mean", "count"])
-            smooth = (stats["mean"] * stats["count"] + self.global_mean_ * self.smoothing) / (
-                stats["count"] + self.smoothing
-            )
-            self.mapping_[col] = {str(k): float(v) for k, v in smooth.items()}
+            agg = pd.Series(y).groupby(keys).agg(wanted)
+            per_stat: dict[str, dict[str, float]] = {}
+            for stat in self.stats:
+                if stat == "mean":
+                    values = (agg["mean"] * agg["count"] + self.global_mean_ * self.smoothing) / (
+                        agg["count"] + self.smoothing
+                    )
+                else:
+                    values = agg[stat]
+                per_stat[stat] = {
+                    str(k): float(v) for k, v in values.items() if pd.notna(v)
+                }
+            self.mapping_[col] = per_stat
         return self
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         out = df.copy()
         for col in self.columns:
-            mapped = df[col].astype(str).map(self.mapping_[col])
-            out[col + "_te"] = mapped.fillna(self.global_mean_).astype(float)
+            keys = df[col].astype(str)
+            for stat in self.stats:
+                mapped = keys.map(self.mapping_[col][stat])
+                out[self.column_name(col, stat)] = (
+                    pd.to_numeric(mapped, errors="coerce")
+                    .fillna(self.defaults_[stat])
+                    .astype(float)
+                )
         return out
 
     def to_dict(self) -> dict:
@@ -39,15 +144,30 @@ class TargetEncoder:
             "kind": self.kind,
             "columns": self.columns,
             "smoothing": self.smoothing,
+            "stats": list(self.stats),
             "mapping": self.mapping_,
+            "defaults": self.defaults_,
             "global_mean": self.global_mean_,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "TargetEncoder":
-        enc = cls(d["columns"], d["smoothing"])
-        enc.mapping_ = {c: dict(m) for c, m in d["mapping"].items()}
+        # Encoders serialized before the other statistics existed have no
+        # "stats" key and a flat {column: {category: value}} mapping. They are
+        # mean-only by definition, and a bundle on disk has to keep predicting
+        # exactly what it predicted when it was written.
+        stats = d.get("stats", ["mean"])
+        enc = cls(d["columns"], d["smoothing"], stats)
         enc.global_mean_ = d["global_mean"]
+        if "stats" in d:
+            enc.mapping_ = {
+                c: {s: dict(m) for s, m in per_stat.items()}
+                for c, per_stat in d["mapping"].items()
+            }
+            enc.defaults_ = dict(d["defaults"])
+        else:
+            enc.mapping_ = {c: {"mean": dict(m)} for c, m in d["mapping"].items()}
+            enc.defaults_ = {"mean": enc.global_mean_}
         return enc
 
 
@@ -334,7 +454,8 @@ ENCODER_CLASSES: dict[str, type] = {
 
 def fit_encoding(df, columns, method="target", *, y=None, folds=None,
                  smoothing: float = 10.0, normalize: bool = True,
-                 categories: dict[str, list] | None = None, unknown: float = -1.0):
+                 categories: dict[str, list] | None = None, unknown: float = -1.0,
+                 stats=("mean",)):
     """Structured, leakage-safe encoding tool (spec §5.2).
 
     The typed entry point the MCP ``fit_encoding`` tool wraps. Unlike the
@@ -355,12 +476,19 @@ def fit_encoding(df, columns, method="target", *, y=None, folds=None,
     requires neither. ``method="ordinal"`` requires ``categories`` -- the level
     order per column -- and no target either; use it when the column's
     categories are genuinely ordered, frequency/target when they are nominal.
+
+    ``stats`` applies to ``method="target"`` only and defaults to the mean, i.e.
+    target encoding as it has always been. Ask for more of
+    :data:`TARGET_STATS` to get the group's spread, middle and size as
+    additional columns; see :class:`TargetEncoder` for why only the mean is
+    smoothed.
     """
     if method == "target":
         if y is None or folds is None:
             raise ValueError("method='target' requires both y and folds (per-fold "
                              "out-of-fold fitting is what keeps it leakage-safe).")
-        oof, final = oof_target_encode(df, y, columns, folds, smoothing=smoothing)
+        oof, final = oof_target_encode(df, y, columns, folds, smoothing=smoothing,
+                                       stats=stats)
         return oof, final
     if method == "frequency":
         enc = FrequencyEncoder(columns, normalize=normalize).fit(df)
@@ -411,15 +539,18 @@ def fit_group_stats(df, by, value, stat="mean", *, folds):
     return oof, enc.fit(df)
 
 
-def oof_target_encode(df, y, columns, folds, smoothing: float = 10.0):
+def oof_target_encode(df, y, columns, folds, smoothing: float = 10.0, stats=("mean",)):
     y = np.asarray(y, dtype=float)
+    template = TargetEncoder(columns, smoothing, stats)
+    names = template.output_columns
     oof = pd.DataFrame(index=df.index)
-    for col in columns:
-        oof[col + "_te"] = np.nan
+    for name in names:
+        oof[name] = np.nan
+    positions = {name: oof.columns.get_loc(name) for name in names}
     for tr, va in folds:
-        enc = TargetEncoder(columns, smoothing).fit(df.iloc[tr], y[tr])
+        enc = TargetEncoder(columns, smoothing, stats).fit(df.iloc[tr], y[tr])
         transformed = enc.transform(df.iloc[va])
-        for col in columns:
-            oof.iloc[va, oof.columns.get_loc(col + "_te")] = transformed[col + "_te"].to_numpy()
-    final = TargetEncoder(columns, smoothing).fit(df, y)
+        for name in names:
+            oof.iloc[va, positions[name]] = transformed[name].to_numpy()
+    final = TargetEncoder(columns, smoothing, stats).fit(df, y)
     return oof, final

@@ -145,6 +145,14 @@ Vocabulary used throughout:
   *(0023 implemented: opt-in per run, why the holdout comes out of the work half,
   why an ordered split seals the latest period — and why every terminal candidate
   is scored, which is 0039's confound removed without a Kaggle submission)*
+- [0046 — The mean is a lossy summary of a group, and the loss was not sayable](0046-the-mean-is-a-lossy-summary-of-a-group.md)
+  *(a category's target spread, middle and size alongside its average; why only
+  the mean is smoothed, why min/max/sum are off the menu, and a leak test that
+  passed while the leak was real)*
+- [0047 — The forecast horizon is a column, not a constant](0047-the-forecast-horizon-is-a-column-not-a-constant.md)
+  *(accepted, **not implemented**: what a lag serves past the end of stored
+  history, why staleness is per row, and why predict rows never read their own
+  batch — the two questions `../time_aware_features.md` named as blocking)*
 
 ### Keeping the agent's surface small
 

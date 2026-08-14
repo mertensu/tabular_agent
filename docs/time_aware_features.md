@@ -1,7 +1,19 @@
 # Time-aware features — the gap, and what building it requires
 
-**Status:** a plan, not a decision. Nothing here is built. Written 2026-08-14 so
-a fresh session can start from the argument rather than rebuild it.
+**Status:** a plan. Written 2026-08-14 so a fresh session can start from the
+argument rather than rebuild it.
+
+**Updated 2026-08-14, later the same day:**
+
+- **Both blocking questions (§3.2, §3.3) are settled** — see
+  [0047](decisions/0047-the-forecast-horizon-is-a-column-not-a-constant.md). The
+  short version: frozen history + a per-row staleness column, optional
+  `TaskSpec.forecast_horizon` as a *minimum*, no recursion, predict rows never
+  read their own batch. §3.2 and §3.3 below are left as written; the record is
+  the decision.
+- **Slice 1 is built** —
+  [0046](decisions/0046-the-mean-is-a-lossy-summary-of-a-group.md). Gap A is
+  closed. Slices 2 and 3 are untouched.
 
 This is longer-form reading in the sense of `docs/decisions/README.md`: it
 records what we know and what has to be settled, and the decisions it leads to

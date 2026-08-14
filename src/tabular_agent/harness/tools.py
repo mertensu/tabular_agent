@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from ..cv import make_folds
+from ..encoders import TARGET_STATS
 from ..encoders import fit_encoding as _fit_encoding
 from ..encoders import fit_group_stats as _fit_group_stats
 from ..inspect import profile_dataframe
@@ -549,6 +550,7 @@ def fit_encoding(
     table: str | None = None,
     categories: dict[str, list] | None = None,
     smoothing: float = 10.0,
+    stats: list[str] | None = None,
 ) -> dict:
     """Encode categorical columns into a new feature table (spec §5.2).
 
@@ -565,6 +567,14 @@ def fit_encoding(
     predict). ``method="frequency"`` and ``method="ordinal"`` never look at the
     target; ``ordinal`` needs ``categories`` — the level order per column, which
     is never inferred.
+
+    ``stats`` widens ``method="target"`` past the mean. The mean is a lossy
+    summary of a group — two categories with the same average can have very
+    different target distributions, and an average standing on three rows should
+    not be read like one standing on three hundred — so the group's spread,
+    middle and size are available as further columns. Only the mean is smoothed;
+    ``count`` is what lets the model discount a thin group by itself. See
+    :class:`~tabular_agent.encoders.TargetEncoder`.
     """
     refusal = _refuse_if_finished(session)
     if refusal is not None:
@@ -580,8 +590,24 @@ def fit_encoding(
     if spec.target in columns:
         raise ValueError(f"refusing to encode the target column {spec.target!r} as a feature")
 
+    if stats and method != "target":
+        raise ValueError(
+            f"stats={list(stats)} applies to method='target' only — it summarises the "
+            f"target's distribution within each category, and method={method!r} never "
+            "looks at the target. For per-group statistics of some *other* column, use "
+            "fit_group_stats."
+        )
+
     kwargs = {"smoothing": smoothing, "categories": categories}
     if method == "target":
+        if stats is not None:
+            unknown = [s for s in stats if s not in TARGET_STATS]
+            if unknown:
+                raise ValueError(
+                    f"unknown target statistic(s) {unknown}; use one or more of "
+                    f"{list(TARGET_STATS)}"
+                )
+            kwargs["stats"] = list(stats) or ["mean"]
         y = df[spec.target]
         # Same seed and n_splits as training, so the out-of-fold values in the
         # table were held out of exactly the folds the model is scored on.
@@ -610,6 +636,11 @@ def fit_encoding(
         "new_columns": new_columns,
         "n_steps": len(lineage.steps),
     }
+    if method == "target":
+        # On the row rather than only in the lineage, so `explore_journal` can
+        # tell two target encodings of the same columns apart — they differ only
+        # by which statistics were asked for.
+        row["target_stats"] = list(encoder.stats)
     scored = _probe_and_compare(session, out_path, row["source_table"])
     row.update(scored)
     journal.append_table(session.run_dir, row)
@@ -682,8 +713,11 @@ def fit_group_stats(
     if value == spec.target:
         raise ValueError(
             f"{value!r} is the target column. A per-group statistic of the target is "
-            "target encoding, which has its own tool because it needs smoothing as "
-            "well as out-of-fold fitting: fit_encoding(columns=[...], method='target')."
+            "target encoding, which has its own tool because the mean of the target "
+            "needs smoothing as well as out-of-fold fitting: "
+            "fit_encoding(columns=[...], method='target'). That tool takes the same "
+            f"statistics this one does — fit_encoding(columns={by}, method='target', "
+            f"stats=['{stat}']) is what you are asking for here."
         )
     if spec.target in by:
         raise ValueError(
