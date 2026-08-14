@@ -184,6 +184,19 @@ Vocabulary used throughout:
   train/serve counts, so the skew story is refuted — what holds is that a
   window's measured worth is an artifact of the fold count while the unbounded
   aggregate it loses to is invariant, and no replacement mechanism is offered)*
+- [0054 — The budget is not a constant, and at 200 trees a feature block scores backwards](0054-the-budget-is-not-a-constant-and-at-200-trees-features-score-backwards.md)
+  *(**closes the common-budget question 0039 left open**: the row-count hypothesis
+  is refuted — capacity pays where there is high-cardinality *identity* to learn,
+  not where there are many rows — and on Rossmann the agent's own feature block
+  measures −0.015 at the harness's 200 trees and +0.009 at 5000, so the ruler that
+  ranks every table has been changing the sign of what it measures; early stopping
+  asked for 162 to 16,926 rounds across five readings, which is why no constant is
+  the fix)*
+- [0055 — A rename in the library makes every earlier artifact unreplayable](0055-a-rename-makes-every-earlier-artifact-unreplayable.md)
+  *(0051's column rename landed four hours after v8's tables were written, so their
+  stored lineages now emit names the tables do not have and 0030 correctly refuses
+  them — the boundary of "the code is the artifact", and why nothing in the suite
+  could have caught it)*
 
 ### Keeping the agent's surface small
 

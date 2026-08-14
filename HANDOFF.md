@@ -8,6 +8,91 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-14 (evening, newest) — the capacity plan was run, and it was wrong
+
+**Machine:** MacBook Air | **Branch:** master.
+Written up as [0054](docs/decisions/0054-the-budget-is-not-a-constant-and-at-200-trees-features-score-backwards.md)
+and [0055](docs/decisions/0055-a-rename-makes-every-earlier-artifact-unreplayable.md).
+**The START HERE plan below is now superseded on its main point — read this first.**
+
+Ulf: *prepare Recruit Restaurant as a new dataset, then check the n_estimators
+hypothesis everywhere, it is most probably wrong.* Both done, and he was right.
+
+### New dataset: Recruit Restaurant Visitor Forecasting
+
+`scripts/prep_restaurant.py`, `notebooks/phase5_restaurant_dataset.ipynb`,
+public leaderboard in `restaurant_visitor/` with `leaderboard_rank()`.
+252,108 store-days, 829 stores, rmsle, ordered on `visit_date`, 5%/5% like
+Rossmann. Six files joined; two of them at a finer grain, which is the join the
+harness has no tool for.
+
+**It came with a trap worth the dataset.** The reservation stream is cut at the
+moment the forecast is issued, so 30% of *training* reservations were booked
+same-day while **no** forecast-window row can have one — and the floor grows to 39
+days at the far edge. No guard we have sees it: no fold crossed, no encoder
+misfitted, column present at serve time, and validation *confirms* it because
+validation shares the uncut stream. Kept and documented, per the `Customers`
+precedent (0029). The general capability it asks for — *aggregate a related stream
+restricted to what was knowable a given lead time ahead* — does not exist.
+
+Also: the spine is **ragged** (a store has no row on days it did not report), so
+"last 364 rows" ≠ "last 364 days" here. Every window feature from 0052/0053
+assumed they were the same, because on Rossmann they are.
+
+### The capacity hypothesis is refuted; the mechanism is identity, not rows
+
+`scripts/probe_capacity.py`, `_runs/capacity_probe.csv`,
+`notebooks/phase5_model_capacity.ipynb`. Prediction registered before running.
+
+| dataset | rows | best fixed budget | early stop |
+|---|---|---|---|
+| house-prices | 1,168 | −0.0034 (all lose) | 162 → **+0.0062** |
+| restaurant | 227,139 | +0.0004 | 1,018 → +0.0003 |
+| Porto Seguro | 476,170 | −0.0188 (all but one lose) | 181 → **+0.0049** |
+| Rossmann | 915,744 | **+0.0573** | 16,926 → **+0.0606** |
+
+Restaurant at 227k gains nothing, so it is not rows. The confound — nearly written
+up as the conclusion — is that Rossmann's `Store` is an *integer* and survives
+`_feature_frame` while restaurant's `air_store_id` is a *string* and is dropped.
+Give restaurant an arbitrary integer store code and the same rows go from **+0.0004
+to +0.0283**. It is per-entity effects: 200 trees cannot reach 829 shop effects.
+
+### The thing nobody was looking for
+
+On Rossmann, v8's own feature block measured against the same split:
+
+| rmspe | baseline | + feature block | features worth |
+|---|---|---|---|
+| **200 trees (today)** | 0.21810 | 0.23331 | **−0.0152** |
+| 5000 @ lr 0.03 | 0.16083 | 0.15213 | **+0.0087** |
+
+**The sign reverses.** The ruler that ranks every table in every run has been
+changing the sign of what it measures. `best_table` is that ruler's argmax.
+
+### What to do next, in order
+
+1. **Do not raise the constant.** Early stopping asked for 162 / 181 / 1018 / 3430
+   / 16926 — two orders of magnitude. Any constant big enough for Rossmann wrecks
+   house and Seguro; picking Rossmann's is a leaderboard-fit (0022, one level up).
+2. **Design where the early-stopping block comes from.** This is the open decision.
+   The arm here carves the tail 10% off the work half — fine for an ordered split,
+   needs an argument otherwise, and it touches 0023/0029/0041/0043. **Not** an
+   argument for giving params back to the agent (0035).
+3. **Re-read `_runs/` with suspicion.** Every table comparison was made at 200
+   trees. 0052 and 0053 are about features measured by this ruler.
+4. **0055 first if anything is to be shipped:** v8's tables cannot be replayed at
+   HEAD. Cheapest useful repair is a replay test against a checked-in artifact, so
+   the *next* rename is loud at the commit rather than four hours later by luck.
+
+### Owed, unchanged
+
+0036's paired bootstrap still not wired in — every number above is still a
+difference with no interval around it. Quizzes owed: slice 3, 0041/0042/0044, and
+the one asked this session (house-prices capacity, unanswered).
+`scripts/run_rossmann.py` still broken since 0035.
+
+---
+
 ## START HERE — plan for the next session
 
 Written 2026-08-14 at Ulf's request, so a fresh context can begin without

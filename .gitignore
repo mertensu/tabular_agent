@@ -27,6 +27,11 @@ rossmann_store_sales/
 # runner exists for it yet — it is a third dataset waiting to be used, not part of
 # any finding recorded so far.
 seguro_driver_prediction/
+# `restaurant_visitor/`: recruit-restaurant-visitor-forecasting. Six CSVs plus the
+# public leaderboard; `hpg_reserve.csv` alone is 126MB. `train_joined.parquet` and
+# `test_joined.parquet` are built from them by `scripts/prep_restaurant.py` —
+# regenerate them rather than looking for them here.
+restaurant_visitor/
 
 # Secrets — API keys live here and must never be committed.
 .secrets/
