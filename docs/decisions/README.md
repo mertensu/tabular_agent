@@ -169,6 +169,10 @@ Vocabulary used throughout:
   size one shared by the whole batch, why the declared floor makes an offset legal
   while the block span makes it useful, and a hardcoded verdict that asserted its
   own premise)*
+- [0051 — One word for one idea, and a flag instead of an age](0051-one-word-for-one-idea-and-a-flag-instead-of-an-age.md)
+  *(why history's columns are all `_ago`, why the offset's age became a 1/0 `_exact`
+  flag while the latest-known one stayed a number, why no name says "days", and why
+  `fit_history` now reports the block span the agent had no way to compute)*
 
 ### Keeping the agent's surface small
 
