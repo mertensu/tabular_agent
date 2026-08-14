@@ -75,6 +75,20 @@ caught it in `summarise_history`).
 Fixed generally: `fit_history` now returns **`shortest_training_prefix`** and warns
 when a window exceeds it, saying outright that the count is no guide there.
 
+**The guard over-fires and says so.** Rossmann's shortest prefix is 136, so the
+warning flags **364 — the best window in the sweep** — alongside the ruinous 728.
+The prefix marks where the mechanism starts, not where it starts costing. Warning
+on the *ratio* instead needs a threshold, and there are two points on that curve
+(1.26x fine, 1.71x ruinous); picking a number between them is 0034's refusal to
+fit a constant to three observations. Conservative and honest about it, rather
+than tuned and sharper-looking.
+
+Also: the training-side clipping is **not uniform** — fold 0 holds ≤19 weekly obs
+in a 728 window, fold 4 up to ~101, serving gives 97–104 to everyone. The trained
+column is a *mixture* of differently-truncated windows under one name. Less data
+everywhere would be a noisier feature; differing amounts across the seam is a
+different feature.
+
 ### Decisions taken with Ulf
 
 - **Keep the code, record the loss.** One dataset is one reading, and Rossmann is

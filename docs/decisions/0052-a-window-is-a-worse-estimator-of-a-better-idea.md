@@ -131,6 +131,30 @@ here*. Forward chaining always makes early prefixes shorter than full history;
 nothing about this is Rossmann-specific, which is what makes it admissible under
 `CLAUDE.md`.
 
+**And the guard over-fires, which has to be said plainly.** Rossmann's shortest
+prefix is 136 days, so the warning flags **364** — the best window in the sweep,
+at a ratio of 1.26x — as well as 728 at 1.71x. The threshold marks where the
+mechanism *starts*, not where it starts costing anything, and the two are far
+apart. A check that warns about the winner is a check a reader learns to skip,
+which is its own failure mode.
+
+The obvious repair is to warn on the ratio, or on some multiple of the prefix,
+rather than on the prefix itself. **Both were rejected**: this run has exactly two
+points on that curve (1.26x good, 1.71x ruinous), and picking a threshold between
+them is fitting a constant to two observations of one dataset — 0034's refusal,
+which declined to set a tiebreak margin from three points. The conservative
+version states a real structural boundary and is honest about being conservative;
+a tuned version would look sharper and mean less. Left as a stated limitation, and
+the number the reader should actually act on — the prefix — is printed either way.
+
+Also worth stating: the *training-side* clipping is not uniform, which is what
+makes this worse than "less data". Fold 0 can hold ≤19 weekly observations in a
+728-day window, fold 4 up to ~101, and serving delivers 97–104 to every row. The
+trained column is a **mixture of differently-truncated windows** under one name,
+against a uniformly full served column. Less data everywhere would merely be a
+noisier feature; differing amounts between training and serving is a different
+feature.
+
 ## Why it ships anyway
 
 Reverting was offered and declined. The arguments for keeping it:

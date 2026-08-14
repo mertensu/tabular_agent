@@ -954,6 +954,15 @@ def fit_history(
     # 728-day window reported *more* observations than the 364-day one while being
     # the more broken of the two, because the damage is in the ratio between the
     # two sides and the count only ever sees one of them.
+    #
+    # **This warns conservatively and knowingly.** The prefix marks where the
+    # mechanism begins, not where it begins to cost, and on Rossmann those are far
+    # apart — the boundary flags 364, which was the best window measured. Warning
+    # on the ratio instead would need a threshold, and the evidence is two points
+    # on one dataset (1.26x fine, 1.71x ruinous); choosing a number between them is
+    # 0034's refusal to fit a constant to three observations. So the note states a
+    # real structural boundary, admits it is conservative, and prints the prefix so
+    # the reader can judge the margin themselves.
     prefixes = [
         float(np.nanmax(periods[tr]) - np.nanmin(periods[tr]))
         for tr, _ in folds if len(tr)
@@ -1001,7 +1010,10 @@ def fit_history(
             "and the column you serve then average different numbers of "
             "observations under one name. Prefer window lengths at or below "
             f"{shortest_prefix:g}; the count is no guide here, since an unfillable "
-            "window can report more observations than a healthy shorter one."
+            "window can report more observations than a healthy shorter one. This "
+            "is where the effect starts, not where it starts to hurt — a window "
+            "somewhat past the prefix has been worth having, one far past it has "
+            "been ruinous, so treat the margin as the thing to judge."
         )
 
     return {
