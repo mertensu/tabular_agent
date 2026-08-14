@@ -197,6 +197,19 @@ Vocabulary used throughout:
   stored lineages now emit names the tables do not have and 0030 correctly refuses
   them — the boundary of "the code is the artifact", and why nothing in the suite
   could have caught it)*
+- [0056 — Kaggle ranked four models, and the block we rank on got it nearly backwards](0056-kaggle-ranked-four-models-and-our-leaderboard-ranked-them-wrong.md)
+  *(four submissions on an external seal: capacity confirmed at +0.079 against a
+  predicted +0.085, history refuted at −0.030 on its fifth and first external
+  reading, the encoding pipeline worth nothing once the budget is right — and the
+  finding that matters, that `val` ranks at Spearman +0.20 against Kaggle while the
+  sealed holdout ranks at +1.00, so the block we rank on is the wrong one)*
+- [0057 — The capabilities the agent does not have](0057-the-capabilities-the-agent-does-not-have.md)
+  *(the design inventory, nothing implemented: lead-time-restricted aggregates —
+  found independently by a second dataset and by a winner's writeup — signed
+  distance to a named event, per-group trend extrapolation justified by GBDTs not
+  extrapolating at all, and what each would demand of the harness; plus what is
+  rejected and why, and why none of it should be built before 0056's ruler is
+  fixed)*
 
 ### Keeping the agent's surface small
 

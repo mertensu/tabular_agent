@@ -8,7 +8,50 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-14 (evening, newest) — the capacity plan was run, and it was wrong
+## 2026-08-14 (night, newest) — four submissions, and the ruler is the problem
+
+**Machine:** MacBook Air | **Branch:** master.
+[0056](docs/decisions/0056-kaggle-ranked-four-models-and-our-leaderboard-ranked-them-wrong.md)
+(the measurements) and
+[0057](docs/decisions/0057-the-capabilities-the-agent-does-not-have.md)
+(what to build, nothing built yet).
+
+| arm | val | holdout | Kaggle priv | Kaggle pub |
+|---|---|---|---|---|
+| bare block, 200 trees | 0.23331 | 0.24228 | 0.23048 | 0.23420 |
+| bare block, 4,144 trees | 0.16000 | 0.15766 | **0.15166** | **0.14853** |
+| full pipeline + history, blend | **0.13276** | 0.17678 | 0.18438 | 0.17444 |
+| full pipeline no history, blend | 0.14793 | 0.15841 | 0.15429 | 0.16193 |
+
+1. **Capacity confirmed externally**: +0.0788 private against a predicted +0.0846.
+2. **`val` ranks at Spearman +0.20 against Kaggle; the sealed holdout ranks at
+   +1.00.** The holdout is the six weeks adjacent to the test window. **We rank
+   every table on the wrong block** — 0043's trade-off priced the other way round.
+3. **History refuted externally**, −0.0301. Fifth negative, first external. The
+   competition winner independently reports recent data barely mattering to him.
+4. **The encoding pipeline is worth nothing once the budget is right** — one lgbm
+   on a bare feature block beats the three-way blended pipeline.
+
+**We did not beat v7 (0.13813 private / 0.12932 public) and are not near the
+median (0.11677).** And an error worth not repeating: the rebuild targeted v8's
+chain because `t24` had the best *probe* score, but v7 is the better run — the
+rebuild target was chosen with the instrument 0056 shows is unreliable.
+
+**Next, in this order** (0057 argues it):
+1. Fix the ranking block. Every feature is judged by `val`. Do not build features
+   first.
+2. Then lead-time-restricted aggregates — the only capability found independently
+   twice, and `restaurant_visitor` already carries a natural experiment for it.
+3. Then per-group trend extrapolation (justified by GBDTs not extrapolating, which
+   names no dataset).
+4. `fit_history` should leave the vocabulary in its current form.
+
+Not done: 0036's paired bootstrap, still. Every number above is a difference with
+no interval. Quizzes still owed.
+
+---
+
+## 2026-08-14 (evening) — the capacity plan was run, and it was wrong
 
 **Machine:** MacBook Air | **Branch:** master.
 Written up as [0054](docs/decisions/0054-the-budget-is-not-a-constant-and-at-200-trees-features-score-backwards.md)
