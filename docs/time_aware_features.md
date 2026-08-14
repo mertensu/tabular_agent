@@ -15,6 +15,22 @@ argument rather than rebuild it.
   [0046](decisions/0046-the-mean-is-a-lossy-summary-of-a-group.md). Gap A is
   closed. Slices 2 and 3 are untouched.
 
+**Updated again, same day — §3.4 settled and slice 2 built:**
+
+- **§3.4's premise was wrong** — see
+  [0048](decisions/0048-a-target-lag-is-not-target-encoding.md). A target lag is
+  *not* target encoding's near relative: out-of-fold construction removes
+  self-inclusion, which a strictly backward lag cannot commit at any group size.
+  What it actually needs guarding against is availability skew, so history is
+  frozen **per fold** at the training prefix, and target history is refused
+  outright under random k-fold. §3.4 below is left as written; the record is the
+  decision.
+- **Slice 2 is built** — `HistoryEncoder`, `fit_history`, the `history` lineage
+  step, `TaskSpec.forecast_horizon`, and the `fit_history` tool. Gap B's core is
+  closed; notebook is `notebooks/phase5_history_and_the_horizon.ipynb`. **Slice 3
+  (rolling/expanding windows) is the remaining one**, and `keep` already carries
+  the `L + W` bound §3.1 asks for.
+
 This is longer-form reading in the sense of `docs/decisions/README.md`: it
 records what we know and what has to be settled, and the decisions it leads to
 get their own records when they are made.

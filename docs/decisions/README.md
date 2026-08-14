@@ -153,6 +153,11 @@ Vocabulary used throughout:
   *(accepted, **not implemented**: what a lag serves past the end of stored
   history, why staleness is per row, and why predict rows never read their own
   batch — the two questions `../time_aware_features.md` named as blocking)*
+- [0048 — A target lag is not target encoding; the guard it needs is the horizon](0048-a-target-lag-is-not-target-encoding.md)
+  *(accepted, **not implemented**: why out-of-fold construction buys nothing
+  against a strictly backward lag, what it should be replaced by, and why target
+  history is refused outright under random k-fold — `../time_aware_features.md`
+  §3.4, the last question left open before slice 2)*
 
 ### Keeping the agent's surface small
 

@@ -8,6 +8,71 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-14 (later still) — §3.4 settled, and slice 2 is built
+
+**Machine:** MacBook Air | **Branch:** master | **425 tests pass** (was 387).
+
+### 0048 — the last open question, and its premise was wrong
+
+`docs/time_aware_features.md` §3.4 said a target lag "is target encoding's near
+relative and needs the same care: out-of-fold construction". It is not. Two
+failures were wearing one word:
+
+- **Self-inclusion** (the row's own target in its own feature) is what OOF removes
+  for `TargetEncoder`/`GroupStatsEncoder`. A strictly backward lag **cannot commit
+  it** — the row at `t` only reads `t-k`, at any group size, under any folds. OOF
+  buys nothing.
+- **Availability skew** (reading a label that will not exist at serving time) is
+  the real risk, and OOF does not fix it. The fix is 0047's frozen horizon,
+  mirrored per fold.
+
+So the fold loop looks like `fit_group_stats`'s and exists for an unrelated
+reason. **This is the gotcha to carry forward:** fitting each fold's history on
+"everything outside the validation fold" satisfies the older rule and is a
+straight future leak here, because *last known* is defined relative to the fitting
+set — put a later block in it and the newest observation comes from the future.
+A strictly backward lag survives that by luck; the last-known lookup 0047 chose
+does not.
+
+Also decided: **target history is refused under random k-fold** (0013-style, not a
+warning). Checked as a property of the index pairs, not a trusted flag.
+
+### Slice 2 built
+
+`HistoryEncoder` + `fit_history` in `encoders.py`, `history` in `ENCODER_CLASSES`
+so `Pipeline.transform` replays it, `TaskSpec.forecast_horizon`, and the
+`fit_history` harness tool. Emits **pairs**: `<by>_<value>_last` and `..._last_age`,
+plus `_lag<k>`/`_lag<k>_age` per offset.
+
+- **Age = row − the observation actually read**, not the offset asked for. So an
+  unanswerable `lag7` degrades into `_last` and reports the real age rather than a
+  stale number under a fresh name.
+- **Offsets require `forecast_horizon`** and must be ≥ it. Undeclared → last-known
+  pair only, which is honest without a declaration.
+- Storage bounded by `keep` per group; encoder size never depends on table length.
+- `value` **may be the target** here, unlike `fit_group_stats` — a target lag can
+  only come from stored history, never from a served frame.
+
+### Two things that bit, worth knowing
+
+- **`pandas` hands back `datetime64` in s/ms/us/ns** depending on how the column
+  was built. Scaling from the integer representation put every age out by 1000x.
+  `to_periods` now divides by a `timedelta` instead.
+- **Dates arrive as strings**, because harness tables come from CSV. Unit tests
+  used an integer `day` and missed it entirely; caught only when the notebook ran
+  the real tool. `to_periods` accepts **ISO 8601 only** — `01/02/2015` is refused
+  rather than guessed, since guessing wrong silently transposes day and month.
+
+**Notebook:** `notebooks/phase5_history_and_the_horizon.ipynb` (36 cells, ships
+unexecuted, every cell smoke-tested in order). Its section 6 is the payload: the
+naive lag scores 0.973 within-store correlation against the frozen one's 0.77 —
+**that gap is the size of the lie, not the size of the loss**, and 0048 says so
+explicitly so it is not later "fixed".
+
+**Next:** slice 3 — rolling/expanding windows over the stored tail. `keep` already
+carries the `L + W` bound. Still unvalidated by any real run; nothing here has been
+scored on Rossmann.
+
 ## 2026-08-14 (later) — The two blocking questions are answered, and Gap A is closed
 
 **Machine:** MacBook Air | **Branch:** master | **387 tests pass** (was 363).

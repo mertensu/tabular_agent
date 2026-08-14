@@ -23,6 +23,7 @@ from ..cv import make_folds
 from ..encoders import TARGET_STATS
 from ..encoders import fit_encoding as _fit_encoding
 from ..encoders import fit_group_stats as _fit_group_stats
+from ..encoders import fit_history as _fit_history
 from ..inspect import profile_dataframe
 from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
@@ -795,6 +796,121 @@ def fit_group_stats(
         # handle it — this is a real "no estimate", not a zero.
         "n_rows_without_value": n_missing,
         "note": note,
+    }
+
+
+def fit_history(
+    session: RunSession,
+    by: list[str],
+    value: str,
+    offsets: list[float] | None = None,
+    keep: int | None = None,
+    table: str | None = None,
+) -> dict:
+    """Store each group's recent past and replay it as last-known value + age.
+
+    "What did this store last sell, and how long ago" — the one thing about a
+    group that depends on *when* rather than *how much*, which `fit_group_stats`
+    and `fit_encoding` both average away. Unlike those, this may point at the
+    target: a lag of the target can only ever come from stored history, never from
+    a served frame, because the target is not in one.
+
+    Two columns per request, always as a pair. The value alone would be a
+    carry-forward that drifts further from the truth the further ahead you predict
+    and says nothing about it; the age is what lets the model discount it.
+
+    The ordering column is the one the run is split on, and there has to be one.
+    History frozen at a training fold scattered through time reports an age that
+    depends on the fold seed rather than the data, which is why an unordered run
+    is refused here rather than served a number that means nothing.
+    """
+    refusal = _refuse_if_finished(session)
+    if refusal is not None:
+        return refusal
+
+    path = session.resolve_table(table)
+    spec = session.resolved()
+    df = load_table(path)
+
+    by = list(by)
+    if session.split_on is None:
+        raise ValueError(
+            "this run is not split on an ordering column, so there is no past to "
+            "store: 'the previous observation for this group' has no meaning when the "
+            "rows are exchangeable. History is for runs whose task is to predict "
+            "later rows from earlier ones."
+        )
+    order = session.split_on
+    missing = [c for c in [*by, value, order] if c not in df.columns]
+    if missing:
+        raise ValueError(f"columns not in {session.rel(path)}: {missing}")
+    if spec.target in by:
+        raise ValueError(
+            f"refusing to group by the target column {spec.target!r}: the group key "
+            "has to exist at predict time and the target never does"
+        )
+    unavailable_keys = [
+        c for c in [*by, order] if c in _unavailable_at_predict_time(session, df)
+    ]
+    if unavailable_keys:
+        raise ValueError(
+            f"cannot key history on {unavailable_keys}: these columns will not exist "
+            "when a prediction is asked for, so the stored history could never be "
+            "looked up. The ordering column in particular has to be there — without "
+            "it a served row has no position, and age is a distance from one."
+        )
+
+    folds = make_folds(df[spec.target], spec.task_type, n_splits=spec.n_splits,
+                       seed=spec.seed, order=_fold_order(session, df))
+    train_features, encoder = _fit_history(
+        df, by, value, order, folds=folds, offsets=offsets or (), keep=keep,
+        forecast_horizon=spec.forecast_horizon,
+    )
+
+    out = df.join(train_features)
+    table_id = journal.next_table_id(session.run_dir)
+    out_path = session.ctx.path("tables", f"{table_id}.parquet")
+    save_parquet(out, out_path)
+
+    lineage = _load_lineage(path, spec.task_type)
+    lineage.add_encoder(encoder)
+    with open(_lineage_path(out_path), "w") as f:
+        json.dump(lineage.to_dict(), f, indent=2)
+
+    new_columns = list(train_features.columns)
+    scored = _probe_and_compare(session, out_path, session.rel(path))
+    journal.append_table(session.run_dir, {
+        "id": table_id,
+        "path": session.rel(out_path),
+        "source_table": session.rel(path),
+        "method": "history",
+        "group_by": by,
+        "value_column": value,
+        "order_column": order,
+        "offsets": [float(o) for o in (offsets or ())],
+        "new_columns": new_columns,
+        "n_steps": len(lineage.steps),
+        **scored,
+    })
+
+    n_missing = int(out[new_columns[0]].isna().sum())
+    return {
+        "table": session.rel(out_path),
+        "new_columns": new_columns,
+        "n_groups": len(encoder.history_),
+        "n_rows": int(len(out)),
+        "source_table": session.rel(path),
+        **scored,
+        "n_rows_without_value": n_missing,
+        "note": (
+            "This table is scored above; build on it to keep the new columns. Each "
+            "fold's history stops at the end of that fold's training rows, so a "
+            "validation row reads exactly what a served row the same distance ahead "
+            "would read — the values here get older across each block, on purpose. "
+            "Expect this to score lower than a lag that peeks; the difference is what "
+            "peeking was worth, not what this feature costs. Rows in the first period "
+            "have no earlier block to read and keep a missing value."
+        ),
     }
 
 

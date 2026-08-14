@@ -45,6 +45,24 @@ class TaskSpec:
     #: this class are for. Names come from the same validated menu 0021 defined;
     #: free-form code over the target is still impossible.
     target_transform: str | None = None
+    #: How far ahead this task actually forecasts: the gap between the end of
+    #: history and the *earliest* row a prediction is asked for, in the ordering
+    #: column's units (days, usually).
+    #:
+    #: It is a **minimum**, not a constant, and that distinction is the whole
+    #: reason it can be one number. Within a single predict batch the rows sit at
+    #: different distances from the end of history — the first is one period out,
+    #: the last many — so a design that stored one horizon and treated every
+    #: served row as sitting at it would be wrong for every row but the first.
+    #: Per-row distance is reported by history's ``_age`` columns; this is the
+    #: floor across the block, and its only job is to say which lag offsets are
+    #: answerable at all.
+    #:
+    #: Left `None` — the default — no lag offsets are legal and history serves the
+    #: last known value with its age, which needs no declaration to be honest.
+    #: Nothing can derive this: it is a fact about the serving contract, which
+    #: makes it the data owner's to state (0029).
+    forecast_horizon: float | None = None
 
 
 @dataclass
@@ -60,6 +78,9 @@ class ResolvedSpec:
     #: Always concrete after resolution — derived from the metric when the spec
     #: left it open, so no caller has to repeat the derivation.
     target_transform: str = "none"
+    #: Carried through unresolved: nothing can fill it in, so `None` stays `None`
+    #: and means "no lag offsets are legal".
+    forecast_horizon: float | None = None
 
 
 def detect_task_type(y: pd.Series) -> str:
@@ -92,6 +113,12 @@ def resolve_taskspec(spec: TaskSpec, y: pd.Series) -> ResolvedSpec:
             f"unknown target_transform: {spec.target_transform!r} "
             f"(use one of {sorted(TARGET_TRANSFORMS)})"
         )
+    if spec.forecast_horizon is not None and spec.forecast_horizon <= 0:
+        raise ValueError(
+            f"forecast_horizon must be positive, got {spec.forecast_horizon}. It is the "
+            "gap to the earliest row you predict; zero would mean the row's own period "
+            "is already observed, in which case there is nothing to forecast."
+        )
     target_transform = spec.target_transform or default_target_transform(metric, task_type)
     return ResolvedSpec(
         target=spec.target,
@@ -103,4 +130,5 @@ def resolve_taskspec(spec: TaskSpec, y: pd.Series) -> ResolvedSpec:
         n_splits=spec.n_splits,
         seed=spec.seed,
         target_transform=target_transform,
+        forecast_horizon=spec.forecast_horizon,
     )

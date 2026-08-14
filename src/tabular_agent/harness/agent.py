@@ -291,6 +291,54 @@ def build_agent(model=DEFAULT_MODEL):
         )
 
     @agent.tool
+    def fit_history(
+        ctx: RunContext[Deps],
+        by: list[str],
+        value: str,
+        offsets: list[float] | None = None,
+        keep: int | None = None,
+        table: str | None = None,
+    ) -> dict:
+        """Give each row its group's most recent earlier value, and its age.
+
+        For "what did this store last sell, and how long ago" — the one fact
+        about a group that depends on *when* rather than *how much*, which
+        `fit_group_stats` and `fit_encoding` both average away.
+
+        Adds a **pair** of columns, `<by>_<value>_last` and `..._last_age`. The
+        value on its own would be a number that quietly goes stale the further
+        ahead you predict; the age is what lets the model discount it.
+
+        Unlike `fit_group_stats`, `value` may be the target — a lag of the target
+        can only come from stored history, never from a served frame.
+
+        Each fold's history stops at the end of that fold's training rows, so a
+        validation row sees what a real prediction the same distance ahead would
+        see. This scores lower than a lag that peeks at neighbouring rows, and
+        that gap is what the peeking was worth. Only for runs split on an
+        ordering column; rows in the first period keep a missing value.
+
+        Args:
+            by: Column(s) forming the group key — the series to store one of.
+                Read at predict time, so they must exist then.
+            value: The column whose past is stored. May be the target.
+            offsets: True lags, in the ordering column's units, e.g. [7] for
+                "the value 7 days before this row". Each adds its own pair of
+                columns and each must be at least the task's declared
+                forecast_horizon; without that declaration, leave this empty and
+                take the last-known pair.
+            keep: Observations retained per group. Defaults to just enough for
+                the largest offset; raise it for a series with gaps.
+            table: Path to the source table. Omit to use the run's work table.
+        """
+        return _retryable(
+            lambda: tools.fit_history(
+                ctx.deps.session, by=by, value=value, offsets=offsets,
+                keep=keep, table=table,
+            )
+        )
+
+    @agent.tool
     def filter_rows(
         ctx: RunContext[Deps],
         code: str,

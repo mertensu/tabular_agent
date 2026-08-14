@@ -19,6 +19,13 @@ EXPECTED_TOOLS = {
     # it. Cannot see the target (it is refused as a `value`), and the stored
     # mapping is a lookup, so it cannot become batch-dependent at predict.
     "fit_group_stats",
+    # Stores each group's recent past and replays it as a value plus its age.
+    # May point at the target, where the others may not — a lag of the target can
+    # only come from stored history, never from a served frame. History is frozen
+    # per fold at the end of the training prefix, so a validation row reads what a
+    # served row the same distance ahead would; and it is refused outright on
+    # unordered runs, where that freeze would mean nothing.
+    "fit_history",
     "transform_features",
     # Runs agent-written code that *can* see the target, which is only safe
     # because nothing it produces is replayed: it selects work-half rows to fit
