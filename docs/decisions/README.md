@@ -135,7 +135,12 @@ Vocabulary used throughout:
 - [0044 — What ships is the average of the terminal fits, not the best of them](0044-what-ships-is-the-average-not-the-argmax.md)
   *(0042 implemented: why an average pays no selection cost, why no candidate is
   filtered out, why the run still records what the argmax would have shipped —
-  and the inversion-order defect found on the way)*
+  and the inversion-order defect found on the way; its cost section is corrected
+  by 0045)*
+- [0045 — The cost of the unfiltered blend was underestimated 44x](0045-the-cost-of-the-unfiltered-blend-was-underestimated-44x.md)
+  *(a measurement: the blend still beats the argmax on Kaggle, but including the
+  weakest member costs 0.0036 where the seal said 0.00008 — and why that licenses
+  a hypothesis rather than a filter)*
 - [0041 — The sealed split scores the ballot, not just the winner](0041-the-sealed-split-scores-the-ballot-not-the-winner.md)
   *(0023 implemented: opt-in per run, why the holdout comes out of the work half,
   why an ordered split seals the latest period — and why every terminal candidate
@@ -165,6 +170,10 @@ Longer-form notes that are not decisions:
 - `docs/feature_attribution_and_agent_iteration.md` — the long version behind
   decisions 0015 and 0016. Predates 0017: its importance-share reasoning was
   superseded, and it has not been rewritten.
+- `docs/time_aware_features.md` — the gap v7 exposed: no feature can look at
+  another row in time, because the harness can carry a mapping across the
+  fit/predict seam but not a history. A plan with two blocking questions, not a
+  decision.
 - `docs/superpowers/specs/2026-07-21-tabular-agent-mcp-design.md` — the original
   design spec. Its title is stale (see 0001); revisions are dated in place.
 - `notebooks/` — hands-on walkthroughs, one per slice of the system, each

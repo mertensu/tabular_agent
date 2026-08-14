@@ -66,6 +66,28 @@ identical, and until now every library-written bundle had one model.
 - `scripts/blend_submission.py` docstring updated; it now enumerates *subsets*,
   which the harness still does not.
 
+### 0045 — the four-way blend scored, and 0044's cost estimate was 44x wrong
+
+Scored after 0044 was committed:
+
+| submission | private | vs argmax |
+|---|---|---|
+| `submission.csv` — argmax (xgb) | 0.14356 | — |
+| `submission_blend_all.csv` — **what ships** | **0.14172** | **+0.00184** |
+| `submission_blend_lgbm_xgb_catboost.csv` | 0.13813 | +0.00543 |
+
+**0044's decision holds** — the average beats the argmax on an external set. **Its
+cost section does not:** including elasticnet costs **0.00359**, where v7's seal
+said 0.00008. Two thirds of the benefit of blending, eaten by the weakest member.
+
+**No code changed, deliberately.** Filtering on this number is choosing a rule by
+consulting a holdout — 0042's refusal, and the private LB is now spent for this
+question. House v9 still refutes the category rule ("drop linear models" deletes
+that run's winner). 0045 registers a hypothesis with a mechanism instead: the
+seal may understate a linear model's drag because it measures at six weeks where
+Kaggle measures at four months (0043), **or** 0.00008 was never an effect at all,
+just an unresolved difference quoted as if the smallness were the finding.
+
 ### The bigger finding this session: we are out of feature vocabulary
 
 Went through v7's 15 tables. **Ulf's hypothesis — per-group target means like
@@ -91,9 +113,13 @@ No dataset in the sentence.
 
 ### Next
 
-- **Time-aware features** — the biggest build and, on the evidence, the biggest
-  headroom. Needs a new lineage step type that stores history, a stability-check
-  story, a predict-time replay path, a record and a notebook.
+- **Time-aware features — start here, and start by reading
+  `docs/time_aware_features.md`.** Written this session precisely so a fresh
+  session does not rebuild the argument. It has the evidence, the general
+  statement of the gap, a three-slice plan, and **two blocking questions that
+  need Ulf's answer before any code**: (3.2) what a lag serves when the predict
+  rows are past the end of stored history, and (3.3) whether validation rows may
+  use their own past. Everything else follows from those two.
 - **Fix the ruler** (blocked/rolling-origin CV, or paired-bootstrap-of-difference
   from 0036) — still necessary, but it is a multiplier on a search that currently
   has nothing new to search over. After lags, not before.
@@ -108,8 +134,10 @@ No dataset in the sentence.
 - Rossmann private LB is 3,303 teams and 0.13813 is roughly **rank ~2,200** —
   interpolated from HANDOFF's own score→rank mapping, **not** from the real
   leaderboard file. Below median; worth pinning down properly.
-- `submission_blend_all.csv` (the four-way, which is what now ships) was **never
-  scored on Kaggle**. Only the three-GBDT one was.
+- **Rossmann's private LB is now spent for the blend-membership question.** All
+  three relevant submissions are scored; there is no unconsulted external set
+  left to judge a filtering rule on this dataset. The next test has to be a
+  different dataset.
 
 ## 2026-08-13 (later) — The sealed split is in, and it immediately caught us shipping the worst model
 
