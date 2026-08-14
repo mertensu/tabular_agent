@@ -8,6 +8,67 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-14 (evening) — Rossmann says no, and the reason is worth more than the number
+
+**Machine:** MacBook Air | **Branch:** master | **425 tests still pass** (no code
+changed as a result of this).
+
+Ran slice 2 against Rossmann via `scripts/probe_rossmann_history.py` — not an
+agent run, `fit_history` driven by hand against v7's split so the number moves for
+one reason. **The feature made the probe substantially worse.** Written up as
+[0049](docs/decisions/0049-the-last-observation-is-a-sample-of-size-one.md).
+
+- baseline (Customers dropped) **0.21810** → + Store history of Sales **0.35054**
+  (−0.13244). Every variant worse; `Store+DayOfWeek` −0.09720, `lag7` −0.13659,
+  history of `Customers` −0.14111.
+- The **naive** lag (val rows reading their own labels, built outside the harness
+  because 0011 refuses to build it) scored **0.09999** — better than baseline by
+  +0.11811.
+
+**The cause:** the work half ends **2015-05-01**, a public holiday with **98.21%
+of stores shut**. Training columns are healthy (median `_last` 6488, 0.1% zeros)
+because forward chaining freezes at five different fold boundaries. But **every
+validation row reads one freeze date**, and that one was a holiday — median
+`_last` 0, **98.2% zeros**. Not this split's bad luck either: **16.8% of the 851
+candidate work-end dates** have >90% of stores selling nothing.
+
+**Control** (`probe_rossmann_history.py 0.06`, boundary moved to an ordinary
+Wednesday, 0% shut): baseline 0.22460 → 0.23602, **−0.01142**. So the holiday is
+~92% of the damage and the mechanism is not broken — **but the feature still hurts
+on a clean boundary.**
+
+**One key survives.** On that clean boundary `Store`+`DayOfWeek` history is
+**+0.00272**, the only positive of the four. "What did this store sell the last
+time it was this weekday" puts the closed days in **their own groups**, so a
+Sunday's zero can only be read by another Sunday. Small and directional only, but
+it establishes the mechanism can help at all. General form: **a group's last
+observation is usable only if the group is homogeneous enough for one member to
+stand for the rest** — the same requirement a group mean has (0046), from the
+other side. Hence the fix is a narrower key or a wider window; both cut the
+variance of what is read.
+
+### The general statement, and the two things 0047/0048 missed
+
+**The most recent observation is a sample of size one.** `_age` reports how *old* a
+value is; **nothing reports how *typical* it is**. Honest about staleness, silent
+about representativeness.
+
+Second, quieter: **the age ranges don't match.** Training ages run 1–305 (median
+74, fold blocks ~150 days), validation ages 1–45 (median 23). 0048's serving
+symmetry holds in *shape* but not in *scale* — block width comes from `n_splits`,
+the horizon from the task. Structural, not incidental.
+
+### The gotcha for whoever picks this up
+
+**Do not fix this by making Rossmann better.** Skipping closed days in history, or
+taking the last *non-zero* observation, each improves the number and neither can
+be defended without naming the dataset — 0022 one level up. 0049 says so
+explicitly.
+
+**Next:** slice 3 (rolling/expanding windows) is now **the fix, not a bonus**. A
+7-day mean over the same stored tail gives **0%** of stores a zero (median 5771.7)
+— robust to exactly this failure, because it is not a sample of size one.
+
 ## 2026-08-14 (later still) — §3.4 settled, and slice 2 is built
 
 **Machine:** MacBook Air | **Branch:** master | **425 tests pass** (was 387).

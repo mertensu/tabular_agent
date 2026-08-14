@@ -158,6 +158,11 @@ Vocabulary used throughout:
   against a strictly backward lag, what it should be replaced by, and why target
   history is refused outright under random k-fold — `../time_aware_features.md`
   §3.4, the last question left open before slice 2)*
+- [0049 — The last observation is a sample of size one](0049-the-last-observation-is-a-sample-of-size-one.md)
+  *(a measurement, and a negative one: frozen history made Rossmann's probe worse,
+  92% of it because the single freeze date was a public holiday with 98% of stores
+  shut — why `_age` says how old a value is and nothing says how typical, and why
+  that makes windows the fix rather than a bonus)*
 
 ### Keeping the agent's surface small
 
