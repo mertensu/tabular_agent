@@ -13,8 +13,15 @@ touched, today, rather than waiting for a fresh sealed run.
 
 **It changes no library behaviour.** Like `rebuild_submission.py` and
 `ablate_terminal_set.py`, it reads a finished run directory and writes CSVs
-beside it. What the harness ships is still the argmax winner until a
-pre-registered run says otherwise.
+beside it.
+
+It has since done its job: the three-GBDT blend scored **0.13813** on Rossmann's
+private leaderboard against **0.14356** for the argmax winner, and on the
+strength of that external set **0044 made the equal-weight blend what
+`finalize_run` ships**. So this script no longer previews a hypothetical — it
+enumerates the *subsets* the harness does not, which is still the only way to ask
+whether some smaller combination would have done better than averaging
+everything.
 
 Usage:
 

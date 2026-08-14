@@ -8,6 +8,109 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-14 — Kaggle confirmed the blend, so the blend is what ships now
+
+**Machine:** MacBook Air | **Branch:** master | **363 tests pass** (was 353).
+
+### 0042 claim 1 passed on an external seal
+
+Rossmann v7's submissions, scored on Kaggle:
+
+| | private | public |
+|---|---|---|
+| `submission.csv` — argmax winner (xgb) | 0.14356 | 0.13960 |
+| `submission_blend_lgbm_xgb_catboost.csv` | **0.13813** | **0.12932** |
+
+**+0.00543 private**, on rows nothing in this project has ever touched. Not a
+fresh run — same models, same table, only the judging rows are new — but it rules
+out the specific worry that stopped 0042 implementing: that the effect lived in
+v7's sealed tenth alone.
+
+### 0044 — implemented
+
+`finalize_run` **ships an equal-weight average of every terminal fit that
+trained**. No weights fitted, no candidate dropped, nothing chooses. Verified
+against v7: the new library path scores the four-way blend at **0.13618** on v7's
+sealed rows, matching 0042's recorded number exactly.
+
+- **Every candidate, no filtering.** "Keep the trees, drop the linear model" is
+  refuted by house v9, where elasticnet was the best model on the board. And on
+  v7 four-way vs three-way differs by 0.00008.
+- **Residual risk, named in the record:** Kaggle backed the *three-GBDT* blend;
+  what ships is the four-way.
+- **`selected` vs `shipped`** are now separate flags on the holdout rows.
+  `selected` still means "what the search crowned" so 0039/0040's optimism series
+  stays comparable; `shipped` is what the bundle predicts with. Their difference
+  is 0042's A/B, **recomputed by every run from now on** instead of by a script.
+- **The seal still picks nothing.** Members are fixed before any sealed row is
+  read; `_score_on_holdout` receives the finished blend as an argument.
+
+### A defect found on the way — and it would have shipped an unmeasured estimator
+
+`predict_bundle` combined models **on the model's scale and inverted once at the
+end**. Under `log1p` that is a *geometric* mean of the target. Every number in
+0042, and both Kaggle submissions, were arithmetic means (`blend_submission.py`
+inverts first). So passing k models into the old bundle would have shipped an
+estimator never scored against anything, quoting a number belonging to a
+different one. `predict_bundle` now inverts per model, then averages.
+
+**Nothing on disk changed:** for a single-model bundle the two orders are
+identical, and until now every library-written bundle had one model.
+
+### Also
+
+- `tests/test_blend_ships.py` — 10 tests. `notebooks/phase4_blend_ships.ipynb`
+  ships unexecuted, all 10 code cells executed in order from the shipped file.
+- Report drops the CV score line, the fold table, and the "gap to the CV score"
+  sentence when a blend ships — it was never cross-validated.
+- `scripts/blend_submission.py` docstring updated; it now enumerates *subsets*,
+  which the harness still does not.
+
+### The bigger finding this session: we are out of feature vocabulary
+
+Went through v7's 15 tables. **Ulf's hypothesis — per-group target means like
+"average sales for this store on a Monday" — is already there and was the
+biggest win in the run:** `t7` built `Store_DOW`, `t8` target-encoded it, probe
+0.1587 → 0.1344, **+0.0243**. Then `t9`–`t15` built nine more composite keys the
+same way for **+0.0006 total**, three negative. Half the run re-drilling one hole.
+
+Two gaps behind that, both general:
+
+- **Only the mean.** `fit_group_stats` correctly refuses the target as its value
+  column, and the target encoder only makes a smoothed mean — so per-group
+  **std / median / count** of the target cannot be written at all.
+- **No feature can look at another row in time.** No lag, no rolling, no
+  days-since/until. `transform_features` *could* write `groupby().shift()` and
+  0011's stability check would rightly kill it; and at predict time the test
+  period is later than every training row. **A lag needs the harness to carry a
+  time series across the fit/predict seam, and it can only carry a mapping.**
+
+Stated generally: *"a feature whose value depends on other rows, ordered by a
+known key, whose history is stored at fit time and replayed at predict time."*
+No dataset in the sentence.
+
+### Next
+
+- **Time-aware features** — the biggest build and, on the evidence, the biggest
+  headroom. Needs a new lineage step type that stores history, a stability-check
+  story, a predict-time replay path, a record and a notebook.
+- **Fix the ruler** (blocked/rolling-origin CV, or paired-bootstrap-of-difference
+  from 0036) — still necessary, but it is a multiplier on a search that currently
+  has nothing new to search over. After lags, not before.
+- 0044's registered claims need a **non-Rossmann** sealed run to test.
+- Still open from last session: lift the request timeout into the library;
+  `scripts/run_rossmann.py` still broken since 0035.
+
+### Gotchas
+
+- **No quiz done** for 0041/0042 yet, and none for 0044 — questions asked at the
+  end of this session are unanswered.
+- Rossmann private LB is 3,303 teams and 0.13813 is roughly **rank ~2,200** —
+  interpolated from HANDOFF's own score→rank mapping, **not** from the real
+  leaderboard file. Below median; worth pinning down properly.
+- `submission_blend_all.csv` (the four-way, which is what now ships) was **never
+  scored on Kaggle**. Only the three-GBDT one was.
+
 ## 2026-08-13 (later) — The sealed split is in, and it immediately caught us shipping the worst model
 
 **Machine:** MacBook Air | **Branch:** master | **353 tests pass** (was 329).

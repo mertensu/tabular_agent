@@ -28,7 +28,8 @@ from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..probe import PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_probe
-from ..report import build_report, selected_holdout, write_report
+from ..blend import apply_blend
+from ..report import build_report, shipped_holdout, write_report
 from ..rows import select_rows
 from ..sandbox import SandboxError, run_readonly
 from ..target import TARGET_TRANSFORMS, invert_target
@@ -264,13 +265,20 @@ def _score_on_held_out(
     session: RunSession,
     rows_path: str,
     source_path: str,
-    model,
+    models,
     feature_names,
     spec,
     y_work: pd.Series,
     target_transform: str = "none",
 ) -> tuple[float | None, float | None, str | None]:
-    """Score a just-fitted model on held-out rows. ``(score, se, why_not)``.
+    """Score just-fitted models on held-out rows. ``(score, se, why_not)``.
+
+    ``models`` is a list because a run can ship an equal-weight average of the
+    terminal candidates rather than one of them (0044). One model and several go
+    through the same code for the same reason the two row-sets do: a blend's
+    score is only comparable to its members' if it was produced identically.
+    Predictions are averaged **after** each model's transform is inverted,
+    matching `predict_bundle` — see its docstring for why the order matters.
 
     ``rows_path`` is the validation half for everything the agent can reach, and
     the sealed holdout for the single call `finalize_run` makes (0023). The
@@ -305,18 +313,21 @@ def _score_on_held_out(
         # validation (or the reverse) still has to occupy its column, or the
         # probability matrix silently shifts and logloss scores the wrong class.
         classes = sorted(set(pd.unique(y_work)) | set(pd.unique(y_val)))
-    preds = predict_model(
-        model,
-        features[list(feature_names)],
-        spec.task_type,
-        classes=classes if spec.task_type == "multiclass" else None,
-    )
-    # The model was fitted on f(y), so its predictions are on that scale. Scoring
-    # them against raw validation targets without inverting would not merely be
-    # wrong, it would be *flatteringly* wrong for `rmsle` — which is why this
-    # inversion is tested rather than trusted.
-    if target_transform != "none":
-        preds = invert_target(target_transform, preds)
+    X = features[list(feature_names)]
+    each = []
+    for model in models:
+        p = predict_model(
+            model, X, spec.task_type,
+            classes=classes if spec.task_type == "multiclass" else None,
+        )
+        # The model was fitted on f(y), so its predictions are on that scale.
+        # Scoring them against raw validation targets without inverting would not
+        # merely be wrong, it would be *flatteringly* wrong for `rmsle` — which is
+        # why this inversion is tested rather than trusted.
+        if target_transform != "none":
+            p = invert_target(target_transform, p)
+        each.append(p)
+    preds = each[0] if len(each) == 1 else apply_blend(each, np.full(len(each), 1.0 / len(each)))
     score = float(compute_metric(spec.metric, y_val, preds, labels=classes))
     # Computed here rather than in the stop rule because this is the only place
     # that still holds the predictions: the leaderboard keeps the score, not the
@@ -341,7 +352,7 @@ def _score_on_held_out(
 def _score_on_val(
     session: RunSession,
     source_path: str,
-    model,
+    models,
     feature_names,
     spec,
     y_work: pd.Series,
@@ -353,7 +364,7 @@ def _score_on_val(
     single caller that is *not* has to say so at its call site.
     """
     return _score_on_held_out(
-        session, session.val_path, source_path, model, feature_names, spec, y_work,
+        session, session.val_path, source_path, models, feature_names, spec, y_work,
         target_transform=target_transform,
     )
 
@@ -405,7 +416,7 @@ def probe_table(session: RunSession, table_path: str) -> dict:
         y = df[spec.target]
         fit = fit_probe(X, y, spec.task_type, spec.metric, spec.target_transform)
         score, se, why_not = _score_on_val(
-            session, table_path, fit.model, fit.feature_names, spec, y,
+            session, table_path, [fit.model], fit.feature_names, spec, y,
             target_transform=fit.target_transform,
         )
     except Exception as e:  # noqa: BLE001 - see the docstring: this cannot fail loudly
@@ -1248,7 +1259,7 @@ def train_tabular_model(
     cv_score = float(np.mean(result.fold_metrics))
     fold_spread = float(np.std(result.fold_metrics))
     val_score, val_se, val_unavailable = _score_on_val(
-        session, path, result.final_model, result.feature_names, spec, y, target_transform
+        session, path, [result.final_model], result.feature_names, spec, y, target_transform
     )
 
     exp_id = journal.next_experiment_id(session.run_dir)
@@ -1845,24 +1856,17 @@ TERMINAL_MODEL_TYPES = (PROBE_MODEL_TYPE, "xgb", "catboost", "elasticnet")
 
 
 def _terminal_fits(session: RunSession) -> list[dict]:
-    """Fit the enumerated set on the best table and let the leaderboard rank them.
+    """Fit the enumerated set on the best table, and leave them all on the board.
 
-    The one selection event a run still makes over models, and it is bounded: an
-    argmax over three candidates costs about `sqrt(2*ln 3)` = 1.5 standard errors
-    of luck, against the 97 model-variation experiments across `_runs/` that this
-    replaces.
-
-    **Deliberately not a blend.** Averaging the three would mine no luck at all
-    and is the better answer in theory, but our own measurements disagree —
-    Rossmann's OOF-weighted blend scored 0.12991 against 0.12741 for the best
-    single model, and house-prices' three-family blend bought +0.00024 — because
-    boosted trees on one feature matrix have residual correlations of 0.86-0.88.
-    Written as one function with every candidate left on the leaderboard so that
-    pick-best against equal-weight is a one-line experiment once 0023's third
-    split can judge it.
+    Since 0044 this is **not** a selection event: `finalize_run` ships the
+    equal-weight average of everything fitted here, so no candidate has to win.
+    The leaderboard still ranks them, because the ranking is the measurement —
+    the argmax winner's sealed score against the blend's is the A/B this design
+    was chosen on, and every run recomputes it.
 
     A model type that fails is skipped, not fatal: three candidates exist so that
-    the run survives one of them being wrong for this data.
+    the run survives one of them being wrong for this data, and the blend simply
+    averages whatever survived.
     """
     j = journal.load(session.run_dir)
     metric = (j.get("task") or {}).get("metric") or session.resolved().metric
@@ -1891,8 +1895,58 @@ def _terminal_fits(session: RunSession) -> list[dict]:
     return done
 
 
+BLEND_ID = "blend"
+
+
+def _blend_members(session: RunSession, terminal: list[dict]) -> list[dict]:
+    """The terminal fits that may be averaged together, with their models loaded.
+
+    Averaging is only meaningful across models that predict the *same quantity
+    from the same rows*, so a candidate joins only if it shares the first one's
+    source table, feature list and target transform. Under 0035 they always do —
+    `_terminal_fits` fits every family on one winning table — and the check is
+    here because the day that stops being true, a silent mismatch would produce a
+    bundle whose members disagree about what column three means.
+
+    **Every candidate that trained, with no filtering by score.** Dropping the
+    weak ones would be a selection, which is the cost 0044 exists to avoid
+    paying; and the obvious filter — keep the boosted trees, drop the linear
+    model — is refuted by house v9, where elasticnet was the best model on the
+    board. Rossmann v7 is the case against: elasticnet sat 0.054 of rmspe behind
+    the next-worst candidate and the four-way average still landed within 0.0001
+    of the three-way one, because an equal-weight average is not very sensitive to
+    one dissenting member.
+    """
+    members = []
+    for out in terminal:
+        exp_id = out.get("experiment_id")
+        if not exp_id:
+            continue
+        exp_dir = session.ctx.path("experiments", exp_id)
+        try:
+            with open(os.path.join(exp_dir, "meta.json")) as f:
+                meta = json.load(f)
+            model = joblib.load(os.path.join(exp_dir, "final_model.joblib"))
+        except Exception:  # noqa: BLE001 - a member that cannot be loaded is not a member
+            continue
+        members.append({"experiment_id": exp_id, "meta": meta, "model": model})
+
+    if not members:
+        return []
+    head = members[0]["meta"]
+    key = ("source_table", "target_transform")
+    return [
+        m for m in members
+        if all(m["meta"].get(k) == head.get(k) for k in key)
+        and list(m["meta"]["feature_names"]) == list(head["feature_names"])
+    ]
+
+
 def _score_on_holdout(
-    session: RunSession, exp_ids: list[str], selected_id: str | None = None
+    session: RunSession,
+    exp_ids: list[str],
+    selected_id: str | None = None,
+    blend: dict | None = None,
 ) -> dict | None:
     """Break the seal: score already-fitted experiments on the third split (0023).
 
@@ -1902,9 +1956,15 @@ def _score_on_holdout(
     were *already* chosen, and the return value goes to the journal and the
     report, never to `best`.
 
-    Every terminal candidate is scored, not only the winner. The fits exist
-    either way, so the extra numbers are free, and they are the measurement three
-    records in a row have wanted and could only get from a Kaggle submission:
+    Every terminal candidate is scored, and since 0044 the blend that ships is
+    scored alongside them — ``selected`` marks the one the search crowned,
+    ``shipped`` the one the bundle predicts with, and on a blended run those are
+    different rows. Keeping both is what lets the argmax-versus-average question
+    stay open across runs instead of being settled by the run that raised it.
+
+    The fits exist either way, so the extra numbers are free, and they are the
+    measurement three records in a row have wanted and could only get from a
+    Kaggle submission:
     0039 and 0040 argued that optimism attaches to the *selected* measurement
     rather than to the model or the table, on three pairs that all happened to be
     lgbm-vs-elasticnet. A winner and its runners-up on the same table, scored on
@@ -1938,6 +1998,10 @@ def _score_on_holdout(
             # position, so the distinction survives anything that reorders this
             # list. It is the variable 0039's hypothesis is about.
             "selected": exp_id == selected_id,
+            # Set on every row, not only where it is true, so a reader can filter
+            # on it without a missing key meaning two different things. Overwritten
+            # below when there is no blend and the crowned candidate ships itself.
+            "shipped": False,
         }
         try:
             with open(os.path.join(exp_dir, "meta.json")) as f:
@@ -1946,7 +2010,7 @@ def _score_on_holdout(
             source_path = session.resolve_table(meta["source_table"])
             y_work = load_table(source_path)[spec.target]
             score, se, why_not = _score_on_held_out(
-                session, holdout_path, source_path, model, meta["feature_names"], spec,
+                session, holdout_path, source_path, [model], meta["feature_names"], spec,
                 y_work, target_transform=meta.get("target_transform", "none"),
             )
         except Exception as e:  # noqa: BLE001 - a run must still finalize
@@ -1963,6 +2027,42 @@ def _score_on_holdout(
                 # direction every measurement we have has pointed so far.
                 entry["optimism"] = _gain(entry["val_score"], score, spec.metric)
         scored.append(entry)
+
+    # The blend last, so it reads as what it is: a combination of the rows above
+    # it, not a candidate that competed with them. It has an `optimism` like the
+    # rest, and the expectation on it is that it is small — an average selects
+    # nothing, so there is no luck in its validation score to give back.
+    if blend is not None:
+        entry = {
+            "experiment_id": BLEND_ID,
+            "model_type": blend["model_type"],
+            "val_score": blend.get("val_score"),
+            "members": blend["members"],
+            "selected": False,
+            "shipped": True,
+        }
+        head = blend["meta"]
+        try:
+            source_path = session.resolve_table(head["source_table"])
+            y_work = load_table(source_path)[spec.target]
+            score, se, why_not = _score_on_held_out(
+                session, holdout_path, source_path, blend["models"],
+                head["feature_names"], spec, y_work,
+                target_transform=head.get("target_transform", "none"),
+            )
+        except Exception as e:  # noqa: BLE001 - a run must still finalize
+            score, se, why_not = None, None, f"{type(e).__name__}: {e}"
+        if score is None:
+            entry["holdout_unavailable"] = why_not
+        else:
+            entry["holdout_score"] = round(score, 6)
+            entry["holdout_se"] = None if se is None else round(se, 6)
+            if entry["val_score"] is not None:
+                entry["optimism"] = _gain(entry["val_score"], score, spec.metric)
+        scored.append(entry)
+    else:
+        for entry in scored:
+            entry["shipped"] = entry["selected"]
     return {"n_rows": len(load_table(holdout_path)), "scores": scored}
 
 
@@ -1990,14 +2090,49 @@ def finalize_run(session: RunSession) -> dict:
         raise ValueError("nothing to finalize: nothing could be fitted")
 
     best = j["best"]
+    spec = session.resolved()
+
+    # What ships is the equal-weight average of every terminal candidate, not the
+    # one with the best validation score (0044). An argmax over k candidates costs
+    # about `sqrt(2*ln k)` standard errors of luck by construction and an average
+    # costs none, and on Rossmann v7 the argmax's pick was the *worst* of the
+    # three boosted trees on rows it had never seen. One candidate is not a blend,
+    # so the winner still ships when only one family survived.
+    members = _blend_members(session, terminal)
+    blend = None
+    if len(members) > 1:
+        head = members[0]["meta"]
+        source_path = session.resolve_table(head["source_table"])
+        models = [m["model"] for m in members]
+        # Scored on the validation half like every other candidate, so the run has
+        # a number for it in the same units — and so its `optimism` on the sealed
+        # rows is comparable to theirs. This is a measurement, not a selection:
+        # nothing downstream compares it to anything before deciding.
+        val_score, val_se, _ = _score_on_val(
+            session, source_path, models, head["feature_names"], spec,
+            load_table(source_path)[spec.target],
+            target_transform=head.get("target_transform", "none"),
+        )
+        blend = {
+            "members": [m["experiment_id"] for m in members],
+            "model_types": [m["meta"]["model_type"] for m in members],
+            "model_type": "blend(" + "+".join(m["meta"]["model_type"] for m in members) + ")",
+            "models": models,
+            "meta": head,
+            "val_score": None if val_score is None else round(val_score, 6),
+            "val_se": None if val_se is None else round(val_se, 6),
+        }
+
     # After `best` is read, and it could not be otherwise: the sealed split is
     # allowed to judge the choice, never to make it (0023). The winner first, then
-    # the runners-up it was picked over.
+    # the runners-up it was picked over, then the blend that shipped instead.
     candidates = [best["experiment_id"]] + [
         out["experiment_id"] for out in terminal
         if out.get("experiment_id") and out["experiment_id"] != best["experiment_id"]
     ]
-    holdout = _score_on_holdout(session, candidates, selected_id=best["experiment_id"])
+    holdout = _score_on_holdout(
+        session, candidates, selected_id=best["experiment_id"], blend=blend,
+    )
     if holdout is not None:
         journal.set_holdout(session.run_dir, holdout)
     exp_dir = os.path.join(session.run_dir, best["artifact_path"])
@@ -2005,48 +2140,56 @@ def finalize_run(session: RunSession) -> dict:
         meta = json.load(f)
     model = joblib.load(os.path.join(exp_dir, "final_model.joblib"))
 
-    # The bundle must be able to rebuild the winning model's features from *raw*
-    # input, so it inherits the lineage of whichever table that model was trained
-    # on — empty when it trained on the raw table, one step per encoding otherwise.
-    pipeline = _load_lineage(session.resolve_table(meta["source_table"]), meta["task_type"])
+    ship = blend["meta"] if blend else meta
+    ship_models = blend["models"] if blend else [model]
+    # The bundle must be able to rebuild the shipped models' features from *raw*
+    # input, so it inherits the lineage of whichever table they were trained on —
+    # empty when trained on the raw table, one step per encoding otherwise. Every
+    # blend member shares that table by construction (`_blend_members`), which is
+    # what makes one pipeline enough for all of them.
+    pipeline = _load_lineage(session.resolve_table(ship["source_table"]), ship["task_type"])
     bundle_dir = save_bundle(
         session.ctx,
         pipeline,
-        [model],
-        np.array([1.0]),
-        meta["feature_names"],
-        meta["task_type"],
-        meta.get("target_transform", "none"),
+        ship_models,
+        np.full(len(ship_models), 1.0 / len(ship_models)),
+        ship["feature_names"],
+        ship["task_type"],
+        ship.get("target_transform", "none"),
     )
 
-    credit = journal.attribution(j, meta["source_table"])
+    credit = journal.attribution(j, ship["source_table"])
     text = build_report(
         attribution=credit,
-        task_type=meta["task_type"],
-        metric=meta["metric"],
+        task_type=ship["task_type"],
+        metric=ship["metric"],
         # The validation half is what the leaderboard ranked by, so it is what
-        # picked this winner and what the report leads with. `cv_score` follows as
+        # picked the winner and what the report leads with. `cv_score` follows as
         # the fold estimate — the gap between them is the run's own record of how
-        # far the search drifted from the folds it was optimising.
-        selection_score=meta["val_score"],
-        val_se=meta.get("val_se"),
-        cv_score=meta["cv_score"],
-        fold_metrics=meta["fold_metrics"],
+        # far the search drifted from the folds it was optimising. A blend has
+        # neither: it was never cross-validated, because it was never fitted.
+        selection_score=blend["val_score"] if blend else meta["val_score"],
+        val_se=blend["val_se"] if blend else meta.get("val_se"),
+        cv_score=None if blend else meta["cv_score"],
+        fold_metrics=[] if blend else meta["fold_metrics"],
         baseline_score=j["baseline"]["val_score"],
-        model_types=[meta["model_type"]],
-        feature_names=meta["feature_names"],
+        model_types=blend["model_types"] if blend else [meta["model_type"]],
+        feature_names=ship["feature_names"],
         split=j.get("split"),
         holdout=holdout,
     )
     report_path = write_report(session.ctx, text)
     journal.mark_finalized(session.run_dir)
 
-    shipped = selected_holdout(holdout)
+    shipped = shipped_holdout(holdout)
     return {
         "best_experiment_id": best["experiment_id"],
-        "model_type": meta["model_type"],
-        "metric": meta["metric"],
-        "val_score": meta["val_score"],
+        "model_type": blend["model_type"] if blend else meta["model_type"],
+        # Which fits the bundle averages, and their ids, so a reader of the return
+        # value alone can tell a blend from a single model without opening it.
+        **({} if blend is None else {"blend_members": blend["members"]}),
+        "metric": ship["metric"],
+        "val_score": blend["val_score"] if blend else meta["val_score"],
         # Present only on a run that was cut with a third split, and the run is
         # over by the time the agent reads it — there is no call left to make
         # with it, which is the point. `optimism` is the number 0023 exists for:
@@ -2059,6 +2202,8 @@ def finalize_run(session: RunSession) -> dict:
                 "optimism": shipped.get("optimism"),
             }
         ),
+        # The argmax winner's, always — a blend has no folds of its own, and this
+        # is still the run's record of how far the search drifted from them.
         "cv_score": meta["cv_score"],
         "baseline_score": j["baseline"]["val_score"],
         "n_experiments": len(j["leaderboard"]),

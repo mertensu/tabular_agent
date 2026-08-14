@@ -130,7 +130,12 @@ Vocabulary used throughout:
 - [0042 — The terminal argmax shipped the worst model, and the seal caught it](0042-the-terminal-argmax-shipped-the-worst-model.md)
   *(a measurement: ranking one contiguous period is n=1 in the unit that varies;
   equal-weight blending beat every single model on sealed rows — registered for
-  the next run, deliberately not implemented)*
+  the next run, deliberately not implemented; implemented by 0044 once Kaggle
+  agreed)*
+- [0044 — What ships is the average of the terminal fits, not the best of them](0044-what-ships-is-the-average-not-the-argmax.md)
+  *(0042 implemented: why an average pays no selection cost, why no candidate is
+  filtered out, why the run still records what the argmax would have shipped —
+  and the inversion-order defect found on the way)*
 - [0041 — The sealed split scores the ballot, not just the winner](0041-the-sealed-split-scores-the-ballot-not-the-winner.md)
   *(0023 implemented: opt-in per run, why the holdout comes out of the work half,
   why an ordered split seals the latest period — and why every terminal candidate

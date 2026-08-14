@@ -11,15 +11,43 @@ def _beats_baseline(metric: str, selection_score: float, baseline_score: float) 
     return selection_score <= baseline_score
 
 
+def _gain(score: float, reference: float, metric: str) -> float:
+    """How much better ``score`` is than ``reference``, positive-is-better always.
+
+    The same sign convention as every ``vs_*`` field the tools write, restated
+    here so the report does not have to import from the harness package.
+    """
+    return score - reference if greater_is_better(metric) else reference - score
+
+
 def selected_holdout(holdout: dict | None) -> dict | None:
-    """The sealed score belonging to the model that actually shipped, if it has one."""
+    """The sealed score belonging to the candidate the *search* crowned.
+
+    Not necessarily the one that ships — since 0044 an equal-weight blend does,
+    and this entry is its runner-up in every sense. Kept distinct from
+    :func:`shipped_holdout` because the optimism of the *selected* candidate is
+    the quantity 0039 has been tracking across runs, and folding the two together
+    would break that series at the run where the blend arrived.
+    """
     for entry in (holdout or {}).get("scores") or []:
         if entry.get("selected") and entry.get("holdout_score") is not None:
             return entry
     return None
 
 
-def _holdout_section(holdout: dict, split: dict | None) -> list[str]:
+def shipped_holdout(holdout: dict | None) -> dict | None:
+    """The sealed score of what the bundle actually predicts with.
+
+    Falls back to the selected candidate for runs written before blending, where
+    the argmax winner *was* what shipped.
+    """
+    for entry in (holdout or {}).get("scores") or []:
+        if entry.get("shipped") and entry.get("holdout_score") is not None:
+            return entry
+    return selected_holdout(holdout)
+
+
+def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str]:
     """The gap, which is the whole reason the third split is worth its rows (0023).
 
     Printed as a table over every model scored, not just the winner: the run
@@ -29,6 +57,7 @@ def _holdout_section(holdout: dict, split: dict | None) -> list[str]:
     """
     scores = holdout.get("scores") or []
     selected = selected_holdout(holdout)
+    shipped = shipped_holdout(holdout)
     lines = ["", "## What the search cost", ""]
     if selected is not None and selected.get("optimism") is not None:
         gap = selected["optimism"]
@@ -43,12 +72,32 @@ def _holdout_section(holdout: dict, split: dict | None) -> list[str]:
             "so the headline was not inflated"
         )
         lines += [
-            f"The shipped model scored **{selected['val_score']:.4f}** on the "
-            f"validation half the search ranked by, and "
+            f"The candidate the search crowned scored **{selected['val_score']:.4f}** "
+            f"on the validation half it ranked by, and "
             f"**{selected['holdout_score']:.4f}** on {holdout.get('n_rows')} sealed "
             f"rows nothing in this run could read — a gap of **{gap:+.4f}**, meaning "
             f"{reading}. That is how much of the headline was the search finding "
             "signal rather than finding luck.",
+            "",
+        ]
+    # The A/B 0042 registered, produced by every sealed run from now on rather
+    # than by a script afterwards: an average pays no selection cost, so the sign
+    # of this line is the standing test of whether that is worth anything here.
+    if (
+        shipped is not None
+        and selected is not None
+        and shipped is not selected
+        and shipped.get("holdout_score") is not None
+    ):
+        delta = _gain(shipped["holdout_score"], selected["holdout_score"], metric)
+        verdict = "better than" if delta > 0 else "worse than" if delta < 0 else "level with"
+        lines += [
+            f"**What shipped is not that candidate.** The equal-weight blend scored "
+            f"**{shipped['holdout_score']:.4f}** on the same sealed rows — "
+            f"**{delta:+.4f}**, {verdict} the argmax winner. An average makes no "
+            "selection, so it pays none of the optimism above; whether that is "
+            "worth the loss of the best single model is exactly what this number "
+            "answers, once per run.",
             "",
         ]
     lines += [
@@ -56,7 +105,7 @@ def _holdout_section(holdout: dict, split: dict | None) -> list[str]:
         "|---|---|---|---|---|",
     ]
     for e in scores:
-        mark = " (shipped)" if e.get("selected") else ""
+        mark = " (shipped)" if e is shipped else " (search's pick)" if e.get("selected") else ""
         val = "n/a" if e.get("val_score") is None else f"{e['val_score']:.4f}"
         if e.get("holdout_score") is None:
             sealed, gap = f"not scored: {e.get('holdout_unavailable')}", ""
@@ -108,7 +157,10 @@ def build_report(
     val_se: float | None = None,
     holdout: dict | None = None,
 ) -> str:
-    fold_std = float(np.std(fold_metrics))
+    # Empty when a blend ships: an average of k fitted models has no folds of its
+    # own, and inventing them from its members' would report a spread for a thing
+    # that was never cross-validated.
+    fold_std = float(np.std(fold_metrics)) if len(fold_metrics) else float("nan")
     # The headline number's own uncertainty, printed beside it (0022). A score
     # reported bare invites the reader to compare it against other runs digit by
     # digit; +/- one standard error is what says how many of those digits are real.
@@ -127,11 +179,11 @@ def build_report(
     ]
     if cv_score is not None:
         lines.insert(5, f"- **CV score:** {cv_score:.3f} (fold std {fold_std:.3f})")
-    selected = selected_holdout(holdout)
-    if selected is not None:
-        sealed = f"{selected['holdout_score']:.3f}"
-        if selected.get("holdout_se") is not None:
-            sealed += f" (+/- {selected['holdout_se']:.3f})"
+    shipped = shipped_holdout(holdout)
+    if shipped is not None:
+        sealed = f"{shipped['holdout_score']:.3f}"
+        if shipped.get("holdout_se") is not None:
+            sealed += f" (+/- {shipped['holdout_se']:.3f})"
         # Beside the validation score, never instead of it (0023). The pair is
         # the point: one number is what the search steered towards, the other is
         # what it was worth, and the reader needs both to read the third.
@@ -150,8 +202,15 @@ def build_report(
             "> **Read the validation score as a public leaderboard.** Every experiment in "
             "this run was ranked against these same rows, so the winner is the best of "
             f"{split['n_val']} rows seen many times over — the score is the one the search "
-            "was steering towards, not an independent check on it. The gap to the CV score "
-            "says how far the two came apart.",
+            "was steering towards, not an independent check on it."
+            # Only when there is one to point at. A blend has no folds, and a
+            # sentence sending the reader to a number the report does not print
+            # is worse than the silence it replaces.
+            + (
+                " The gap to the CV score says how far the two came apart."
+                if cv_score is not None
+                else ""
+            ),
         ]
         if val_se is None and split.get("split_on"):
             lines += [
@@ -179,11 +238,12 @@ def build_report(
             "Suspect a bug, leakage, or an unlearnable target.",
         ]
     if holdout:
-        lines += _holdout_section(holdout, split)
-    lines.append("")
-    lines.append("## Per-fold metrics")
-    for i, m in enumerate(fold_metrics):
-        lines.append(f"- fold {i}: {m:.4f}")
+        lines += _holdout_section(holdout, split, metric)
+    if len(fold_metrics):
+        lines.append("")
+        lines.append("## Per-fold metrics")
+        for i, m in enumerate(fold_metrics):
+            lines.append(f"- fold {i}: {m:.4f}")
 
     if attribution:
         lines += ["", "## How the winning feature set was built", ""]

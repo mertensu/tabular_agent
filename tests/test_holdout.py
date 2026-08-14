@@ -222,11 +222,17 @@ def test_finalize_scores_every_terminal_candidate_once(sealed):
     record = journal.load(sealed.run_dir)["holdout"]
     assert record["n_rows"] == 60
     assert len(record["scores"]) >= 2
-    # Exactly one of them is the model that actually shipped.
-    shipped = [e for e in record["scores"] if e["selected"]]
+    # Exactly one of them is the candidate the *search* crowned. Since 0044 that
+    # is no longer the same row as the one that ships, and both are kept: this is
+    # the one 0039's optimism-of-the-selected series is measured on.
+    selected = [e for e in record["scores"] if e["selected"]]
+    assert len(selected) == 1
+    assert selected[0]["experiment_id"] == out["best_experiment_id"]
+
+    # And the gap on the finalize result belongs to whatever the bundle predicts
+    # with, which is where the reader looks first.
+    shipped = [e for e in record["scores"] if e.get("shipped")]
     assert len(shipped) == 1
-    assert shipped[0]["experiment_id"] == out["best_experiment_id"]
-    # And the gap is on the finalize result, where the reader will look first.
     assert out["holdout_score"] == shipped[0]["holdout_score"]
     assert out["optimism"] == shipped[0]["optimism"]
 

@@ -115,15 +115,29 @@ def load_bundle(bundle_dir: str) -> dict:
 
 
 def predict_bundle(bundle: dict, raw_df: pd.DataFrame) -> np.ndarray:
+    """Replay the lineage, predict with every model in the bundle, combine.
+
+    **Each model's target transform is inverted before the weights are applied**,
+    so the combination is an average of predicted *targets*. The other order —
+    combine on the model's scale, invert once — is a different estimator whenever
+    the transform is non-linear: under ``log1p`` it is a geometric mean of sales
+    rather than an arithmetic one, and the two disagree by more the more the
+    models disagree.
+
+    This order is the one that has been measured. 0044's blend was scored on
+    Rossmann v7's sealed rows and on Kaggle's private set with the inversion
+    first; combining on the log scale has never been scored against anything. For
+    a single-model bundle the two are identical, which is every bundle this
+    library wrote before 0044.
+    """
     features = bundle["pipeline"].transform(raw_df)
     X = features[bundle["feature_names"]]
     task_type = bundle["task_type"]
-    preds = [predict_model(m, X, task_type) for m in bundle["models"]]
-    blended = apply_blend(preds, bundle["weights"])
-    # Inverted after blending, not before: the models all share one target scale,
-    # so averaging on that scale and inverting once is the same operation the
-    # cross-validated scores were computed with.
     transform = bundle.get("target_transform", "none")
-    if transform != "none":
-        blended = invert_target(transform, blended)
-    return blended
+    preds = []
+    for m in bundle["models"]:
+        p = predict_model(m, X, task_type)
+        if transform != "none":
+            p = invert_target(transform, p)
+        preds.append(p)
+    return apply_blend(preds, bundle["weights"])
