@@ -136,7 +136,20 @@ the one asked this session (house-prices capacity, unanswered).
 
 ---
 
-## START HERE — plan for the next session
+## SUPERSEDED — the old plan, kept only so its refutation is legible
+
+> **Do not follow this section.** Its central claim — that model capacity matters
+> in proportion to *rows* — was tested on 2026-08-14 and **refuted**
+> ([0054](docs/decisions/0054-the-budget-is-not-a-constant-and-at-200-trees-features-score-backwards.md)):
+> a 227k-row dataset gained nothing while a 916k-row one gained 0.057, and the
+> real mechanism is high-cardinality *identity*, not size. Its second guess — that
+> capacity would dwarf the feature search — turned out to be right for a different
+> reason than it gives.
+>
+> **The current plan is the newest entry at the top of this file.** This block is
+> left intact rather than deleted because the decision records cite it as what we
+> believed beforehand, and rewriting it would erase the prediction that was made
+> before the measurement.
 
 Written 2026-08-14 at Ulf's request, so a fresh context can begin without
 re-deriving anything. Read this, then `docs/decisions/README.md`, then the entries
