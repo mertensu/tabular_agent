@@ -55,8 +55,8 @@ def test_the_pair_is_the_last_value_and_its_distance_from_the_row(panel):
 
     out = enc.transform(served)
 
-    assert out["store_sales_last"].iloc[0] == 18.0
-    assert out["store_sales_last_age"].iloc[0] == 4.0
+    assert out["store_sales_latest"].iloc[0] == 18.0
+    assert out["store_sales_latest_ago"].iloc[0] == 4.0
 
 
 def test_the_answer_does_not_depend_on_the_batch(panel):
@@ -72,8 +72,8 @@ def test_the_answer_does_not_depend_on_the_batch(panel):
     batch = enc.transform(served)
     alone = enc.transform(served.iloc[[2]])
 
-    assert alone["store_sales_last"].iloc[0] == batch["store_sales_last"].iloc[2]
-    assert alone["store_sales_last_age"].iloc[0] == batch["store_sales_last_age"].iloc[2]
+    assert alone["store_sales_latest"].iloc[0] == batch["store_sales_latest"].iloc[2]
+    assert alone["store_sales_latest_ago"].iloc[0] == batch["store_sales_latest_ago"].iloc[2]
 
 
 def test_the_value_column_need_not_exist_at_predict_time(panel):
@@ -84,7 +84,7 @@ def test_the_value_column_need_not_exist_at_predict_time(panel):
     out = enc.transform(serving)
 
     assert "sales" not in serving.columns
-    assert out["store_sales_last"].iloc[0] == 18.0
+    assert out["store_sales_latest"].iloc[0] == 18.0
 
 
 def test_a_group_never_seen_gets_nothing_rather_than_a_population_value(panel):
@@ -95,8 +95,8 @@ def test_a_group_never_seen_gets_nothing_rather_than_a_population_value(panel):
         pd.DataFrame({"store": ["zzz"], "date": pd.to_datetime(["2015-01-11"])})
     )
 
-    assert np.isnan(out["store_sales_last"].iloc[0])
-    assert np.isnan(out["store_sales_last_age"].iloc[0])
+    assert np.isnan(out["store_sales_latest"].iloc[0])
+    assert np.isnan(out["store_sales_latest_ago"].iloc[0])
 
 
 def test_a_row_with_no_ordering_value_reads_nothing(panel):
@@ -106,7 +106,7 @@ def test_a_row_with_no_ordering_value_reads_nothing(panel):
 
     out = enc.transform(pd.DataFrame({"store": ["a"], "date": [pd.NaT]}))
 
-    assert np.isnan(out["store_sales_last"].iloc[0])
+    assert np.isnan(out["store_sales_latest"].iloc[0])
 
 
 def test_age_grows_across_the_horizon_while_the_value_stands_still(panel):
@@ -121,8 +121,8 @@ def test_age_grows_across_the_horizon_while_the_value_stands_still(panel):
 
     out = enc.transform(served)
 
-    assert out["store_sales_last"].tolist() == [18.0, 18.0, 18.0]
-    assert out["store_sales_last_age"].tolist() == [1.0, 5.0, 22.0]
+    assert out["store_sales_latest"].tolist() == [18.0, 18.0, 18.0]
+    assert out["store_sales_latest_ago"].tolist() == [1.0, 5.0, 22.0]
 
 
 # --- storage is bounded ------------------------------------------------------
@@ -155,11 +155,11 @@ def test_an_offset_reads_the_observation_at_or_before_the_anchor(panel, ordered_
     out = enc.transform(served)
 
     # Anchor is 2015-01-08, store "a"'s value that day is 14.
-    assert out["store_sales_lag3"].iloc[0] == 14.0
-    assert out["store_sales_lag3_age"].iloc[0] == 3.0
+    assert out["store_sales_3_ago"].iloc[0] == 14.0
+    assert out["store_sales_3_ago_exact"].iloc[0] == 1.0
 
 
-def test_an_unanswerable_offset_degrades_into_last_and_reports_the_real_age(panel):
+def test_an_unanswerable_offset_degrades_into_last_and_flags_itself(panel):
     """It does not lie about which observation it found."""
     enc = HistoryEncoder(["store"], "sales", "date", offsets=[3], keep=10).fit(panel)
     # Twenty days past the end of history: "three days ago" is not in history.
@@ -167,8 +167,9 @@ def test_an_unanswerable_offset_degrades_into_last_and_reports_the_real_age(pane
 
     out = enc.transform(served)
 
-    assert out["store_sales_lag3"].iloc[0] == 18.0
-    assert out["store_sales_lag3_age"].iloc[0] == 20.0
+    assert out["store_sales_3_ago"].iloc[0] == 18.0
+    # It found something 20 back, not 3, and says so.
+    assert out["store_sales_3_ago_exact"].iloc[0] == 0.0
 
 
 def test_offsets_are_refused_without_a_declared_horizon(panel, ordered_folds):
@@ -194,8 +195,8 @@ def test_an_offset_at_the_horizon_is_allowed(panel, ordered_folds):
         offsets=[7], forecast_horizon=7, keep=10,
     )
 
-    assert "store_sales_lag7" in oof.columns
-    assert "store_sales_lag7_age" in oof.columns
+    assert "store_sales_7_ago" in oof.columns
+    assert "store_sales_7_ago_exact" in oof.columns
 
 
 # --- the per-fold freeze (0048) ---------------------------------------------
@@ -217,7 +218,7 @@ def test_the_first_block_is_never_validated_and_keeps_nan(panel, ordered_folds):
     unvalidated = sorted(set(range(len(panel))) - set(validated.tolist()))
 
     assert unvalidated, "forward chaining should leave the first block unvalidated"
-    assert oof["store_sales_last"].iloc[unvalidated].isna().all()
+    assert oof["store_sales_latest"].iloc[unvalidated].isna().all()
 
 
 def test_a_validation_row_never_reads_its_own_or_a_later_period(panel, ordered_folds):
@@ -226,8 +227,8 @@ def test_a_validation_row_never_reads_its_own_or_a_later_period(panel, ordered_f
     must not."""
     oof, _ = fit_history(panel, ["store"], "sales", "date", folds=ordered_folds)
 
-    values = oof["store_sales_last"]
-    ages = oof["store_sales_last_age"]
+    values = oof["store_sales_latest"]
+    ages = oof["store_sales_latest_ago"]
     seen = ~values.isna()
 
     # Every value read is strictly older than the row that read it.
@@ -247,7 +248,7 @@ def test_the_freeze_makes_age_grow_across_a_validation_block(panel, ordered_fold
     _, va = ordered_folds[-1]
     block = panel.iloc[va]
     a_rows = va[(block["store"] == "a").to_numpy()]
-    ages = oof["store_sales_last_age"].iloc[a_rows].to_numpy()
+    ages = oof["store_sales_latest_ago"].iloc[a_rows].to_numpy()
 
     assert len(ages) > 1
     assert (np.diff(ages) > 0).all(), "age must grow across the block, not reset"
@@ -258,7 +259,7 @@ def test_a_naive_backward_lag_would_look_fresher_than_the_frozen_one(panel, orde
     feature is staler than the one that reads neighbouring validation rows."""
     oof, _ = fit_history(panel, ["store"], "sales", "date", folds=ordered_folds)
 
-    frozen_age = oof["store_sales_last_age"].dropna()
+    frozen_age = oof["store_sales_latest_ago"].dropna()
     # A naive within-store shift would give every row an age of exactly one day.
     assert frozen_age.max() > 1.0
 
@@ -285,8 +286,8 @@ def test_it_replays_through_a_pipeline(panel, ordered_folds):
 
     out = Pipeline.from_dict(pipe.to_dict()).transform(served)
 
-    assert out["store_sales_last"].iloc[0] == 18.0
-    assert out["store_sales_last_age"].iloc[0] == 1.0
+    assert out["store_sales_latest"].iloc[0] == 18.0
+    assert out["store_sales_latest_ago"].iloc[0] == 1.0
 
 
 # --- the ordering column -----------------------------------------------------
@@ -318,8 +319,8 @@ def test_a_numeric_ordering_column_keeps_its_own_units():
 
     out = enc.transform(pd.DataFrame({"g": ["a"], "t": [9]}))
 
-    assert out["g_v_last"].iloc[0] == 40.0
-    assert out["g_v_last_age"].iloc[0] == 5.0
+    assert out["g_v_latest"].iloc[0] == 40.0
+    assert out["g_v_latest_ago"].iloc[0] == 5.0
 
 
 def test_dates_are_measured_in_days_whatever_the_datetime_resolution():

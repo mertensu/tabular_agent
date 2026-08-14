@@ -70,7 +70,7 @@ def unordered_session(tmp_path, panel):
 def test_it_adds_the_pair_and_records_the_ordering_column(session):
     out = fit_history(session, by=["store"], value="sales")
 
-    assert out["new_columns"] == ["store_sales_last", "store_sales_last_age"]
+    assert out["new_columns"] == ["store_sales_latest", "store_sales_latest_ago"]
     row = journal.load(session.run_dir)["tables"][-1]
     assert row["method"] == "history"
     assert row["order_column"] == "day"
@@ -86,7 +86,7 @@ def test_the_target_may_be_the_value_column(session):
     """
     out = fit_history(session, by=["store"], value="sales")
 
-    assert "store_sales_last" in out["new_columns"]
+    assert "store_sales_latest" in out["new_columns"]
 
 
 def test_an_unordered_run_is_refused(unordered_session):
@@ -137,9 +137,9 @@ def test_an_iso_date_column_read_back_from_csv_works(tmp_path, panel):
     out = fit_history(session, by=["store"], value="sales")
 
     table = load_table(session.resolve_table(out["table"]))
-    seen = table["store_sales_last_age"].notna()
+    seen = table["store_sales_latest_ago"].notna()
     # Days, not the nanosecond integers a naive conversion would hand back.
-    assert table.loc[seen, "store_sales_last_age"].max() < 365
+    assert table.loc[seen, "store_sales_latest_ago"].max() < 365
 
 
 def test_offsets_need_the_task_to_declare_its_horizon(session):
@@ -160,8 +160,36 @@ def test_a_declared_horizon_makes_a_long_enough_offset_legal(tmp_path, panel):
 
     out = fit_history(session, by=["store"], value="sales", offsets=[7], keep=10)
 
-    assert "store_sales_lag7" in out["new_columns"]
-    assert "store_sales_lag7_age" in out["new_columns"]
+    assert "store_sales_7_ago" in out["new_columns"]
+    assert "store_sales_7_ago_exact" in out["new_columns"]
+
+
+def test_the_tool_reports_what_share_of_rows_each_offset_could_answer(tmp_path, panel):
+    """0050: an offset shorter than the period being predicted is answerable for
+    the earliest rows and silently becomes the last-known value for the rest.
+
+    On Rossmann v8 a 7-day offset over a 44-day block was honoured for 11% of
+    rows and nothing said so. This is the line that would have said so.
+    """
+    session = RunSession(
+        str(tmp_path / "run_answerable"),
+        panel,
+        TaskSpec(
+            target="sales", task_type="regression", metric="rmse", n_splits=3,
+            forecast_horizon=1,
+        ),
+        split_on="day",
+    )
+
+    out = fit_history(
+        session, by=["store"], value="sales", offsets=[2, 60], keep=80
+    )
+
+    short, long = out["offsets_answerable"]["2"], out["offsets_answerable"]["60"]
+    # The blocks here are ~30 days wide, so a 2-day offset is answerable only for
+    # the first rows of each and a 60-day one reaches back past the boundary.
+    assert short < long
+    assert "WARNING" in out["note"] and "'2'" in out["note"]
 
 
 def test_the_bundle_predicts_rows_dated_after_every_row_it_saw(session, tmp_path):
@@ -210,8 +238,8 @@ def test_the_stored_values_are_the_frozen_ones_not_the_rows_own(session):
     out = fit_history(session, by=["store"], value="sales")
     table = load_table(session.resolve_table(out["table"]))
 
-    seen = table["store_sales_last"].notna()
+    seen = table["store_sales_latest"].notna()
     assert seen.any()
     # Never the row's own value: the freeze is strictly in that row's past.
-    assert (table.loc[seen, "store_sales_last"] != table.loc[seen, "sales"]).all()
-    assert (table.loc[seen, "store_sales_last_age"] > 0).all()
+    assert (table.loc[seen, "store_sales_latest"] != table.loc[seen, "sales"]).all()
+    assert (table.loc[seen, "store_sales_latest_ago"] > 0).all()

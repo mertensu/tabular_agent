@@ -24,6 +24,7 @@ from ..encoders import TARGET_STATS
 from ..encoders import fit_encoding as _fit_encoding
 from ..encoders import fit_group_stats as _fit_group_stats
 from ..encoders import fit_history as _fit_history
+from ..encoders import to_periods as _to_periods
 from ..inspect import profile_dataframe
 from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
@@ -894,6 +895,53 @@ def fit_history(
     })
 
     n_missing = int(out[new_columns[0]].isna().sum())
+    # The share of rows each offset could actually answer, which is the number a
+    # caller acts on and the one thing that makes a badly-chosen offset obvious
+    # immediately. An offset shorter than the period being predicted is
+    # answerable for the earliest rows and silently becomes the last-known value
+    # for the rest (0050) — on Rossmann v8 a 7-day offset over a 44-day block was
+    # honoured for 11% of rows, and nothing said so until it was gone looking for.
+    periods = _to_periods(df[order])
+    answerable = {}
+    for o in (offsets or ()):
+        col = f"{encoder.base_name}_{float(o):g}_ago_exact"
+        seen = train_features[col].dropna()
+        if len(seen):
+            answerable[f"{float(o):g}"] = round(float(seen.mean()), 3)
+    # How wide a block the run is asked to predict, in the ordering column's
+    # units. The agent cannot work this out for itself — `inspect_data` reports
+    # `n_val` as a *row count*, and nothing anywhere converts that to a span — so
+    # telling it "use an offset longer than the period you predict" was advice it
+    # had no way to act on. The tool knows, so the tool says.
+    spans = [
+        float(np.nanmax(periods[va]) - np.nanmin(periods[va]))
+        for _, va in folds if len(va)
+    ]
+    block_span = round(float(np.median(spans)), 3) if spans else None
+    weak = [k for k, v in answerable.items() if v < 0.5]
+
+    note = (
+        "This table is scored above; build on it to keep the new columns. Each "
+        "fold's history stops at the end of that fold's training rows, so a "
+        "validation row reads exactly what a served row the same distance ahead "
+        "would read — the values here get older across each block, on purpose. "
+        "Expect this to score lower than a lag that peeks; the difference is what "
+        "peeking was worth, not what this feature costs. Rows in the first period "
+        "have no earlier block to read and keep a missing value."
+    )
+    if block_span is not None:
+        note += (
+            f" Each block you are scored on spans about {block_span:g} in "
+            f"{order!r}, so an offset shorter than that is answerable only for the "
+            "block's earliest rows and becomes the latest-known value for the rest."
+        )
+    if weak:
+        note += (
+            f" WARNING: offset(s) {weak} were answered exactly for fewer than half "
+            "the rows — see offsets_answerable. Below that, the column is mostly "
+            "the latest-known value wearing a name that promises a fixed lag."
+        )
+
     return {
         "table": session.rel(out_path),
         "new_columns": new_columns,
@@ -902,15 +950,11 @@ def fit_history(
         "source_table": session.rel(path),
         **scored,
         "n_rows_without_value": n_missing,
-        "note": (
-            "This table is scored above; build on it to keep the new columns. Each "
-            "fold's history stops at the end of that fold's training rows, so a "
-            "validation row reads exactly what a served row the same distance ahead "
-            "would read — the values here get older across each block, on purpose. "
-            "Expect this to score lower than a lag that peeks; the difference is what "
-            "peeking was worth, not what this feature costs. Rows in the first period "
-            "have no earlier block to read and keep a missing value."
-        ),
+        # {offset: share of rows where the lag was exactly that far back}.
+        "offsets_answerable": answerable,
+        # In the ordering column's units, so an offset can be chosen against it.
+        "block_span": block_span,
+        "note": note,
     }
 
 

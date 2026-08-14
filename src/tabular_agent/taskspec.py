@@ -54,7 +54,7 @@ class TaskSpec:
     #: different distances from the end of history — the first is one period out,
     #: the last many — so a design that stored one horizon and treated every
     #: served row as sitting at it would be wrong for every row but the first.
-    #: Per-row distance is reported by history's ``_age`` columns; this is the
+    #: Per-row distance is reported by history's ``_ago`` columns; this is the
     #: floor across the block, and its only job is to say which lag offsets are
     #: answerable at all.
     #:

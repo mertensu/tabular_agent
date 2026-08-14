@@ -8,6 +8,67 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-14 (night, later) — naming changed, flag replaces lag age, slice 3 planned
+
+**Machine:** MacBook Air | **Branch:** master | **426 tests pass.**
+
+Acting on 0050 plus Ulf's review of the column names.
+
+### Columns renamed (breaking — the v8 bundle no longer replays)
+
+| was | now |
+|---|---|
+| `<base>_last` | `<base>_latest` |
+| `<base>_last_age` | `<base>_latest_ago` |
+| `<base>_lag364` | `<base>_364_ago` |
+| `<base>_lag364_age` | **`<base>_364_ago_exact`** |
+
+**One word for one idea: `_ago`.** In `<base>_364_ago` the distance is a literal
+in the name; in `<base>_latest_ago` it is unknown until you look, so it becomes a
+column. Same word, same meaning — one fixed, one measured. ("history" was
+considered and rejected: it suggests the column *contains* history, when it holds
+a single distance.)
+
+**No unit in the names, deliberately.** Ulf's `_days_old` read better but the
+ordering column is not always days — an event log may be in seconds — and a name
+saying "days" over a series counted in something else is precisely the
+confidently-wrong label this area keeps producing.
+
+`_runs/rossmann_v8/bundle` still stores `feature_names` with the old names, so it
+will not replay. Accepted rather than versioned: nothing depends on it.
+
+### The lag age became a flag
+
+For an offset the age is near-constant — it *equals* the offset whenever the
+lookup worked — so all its information is in the failures. `_exact` is 1/0/NaN and
+carries the same signal legibly. **`_latest_ago` stays a real measured distance**, because there
+it genuinely varies per row (1–45 days on Rossmann).
+
+### `fit_history` now reports what the agent could not know
+
+Ulf's catch, and it was a real gap: the warning said *"use offsets longer than the
+period you are predicting"* — but the agent **has no way to learn that number**.
+`inspect_data` reports `n_val` as a *row count*; nothing converts it to a span. So
+the tool computes it and states it:
+
+- **`block_span`** — how wide a scored block is, in the ordering column's units.
+- **`offsets_answerable`** — `{"7": 0.112, "364": 0.805}` per offset, plus a
+  WARNING in the note below 50%.
+
+That is the line that would have made v8's `lag7` mistake obvious at a glance
+instead of after an investigation.
+
+### Known limitation, now documented in `to_periods`
+
+**Dates always become days, whatever their granularity.** Fine for a daily panel,
+unusable for a second-resolution log (age `0.00347`, an hour as offset `0.0417`).
+Correct arithmetic, unusable numbers. Fix is a *declared* unit, not an inferred
+one; a numeric ordering column already sidesteps it. Not built.
+
+**Next: slice 3, in a fresh context — see `docs/slice3_windows.md`**, which carries
+the full argument, the design constraints, and the two open questions
+(should `_latest` still be unconditional; the time unit).
+
 ## 2026-08-14 (night) — Rossmann v8: offsets are the win, `_last` is the disaster
 
 **Machine:** MacBook Air | **Branch:** master | first agent run with `fit_history`.

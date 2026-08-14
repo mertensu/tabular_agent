@@ -460,7 +460,17 @@ def to_periods(values) -> np.ndarray:
 
     Refusing is the point. A run ordered on a string month (``"2015-07"``) sorts
     correctly and subtracts to nonsense, and the nonsense would arrive as a
-    plausible-looking float in an ``_age`` column.
+    plausible-looking float in an ``_ago`` column.
+
+    **Known limitation: dates always become days, whatever their granularity.**
+    That is right for a daily panel and awkward for a second-resolution event log,
+    where an age reads ``0.00347`` and an hour has to be asked for as an offset of
+    ``0.0417``. Nothing here is *wrong* — the arithmetic holds and the ``_ago``
+    columns stay honest — but the numbers are unusable at that scale. The fix is
+    a declared unit rather than an inferred one (inferring it from the data would
+    make column values depend on the spacing that happened to be present), and it
+    is not built. A numeric ordering column sidesteps it entirely: it keeps its
+    own units, so a log indexed in epoch seconds already works in seconds.
     """
     s = pd.Series(values)
     if pd.api.types.is_datetime64_any_dtype(s):
@@ -469,7 +479,7 @@ def to_periods(values) -> np.ndarray:
         # milliseconds, microseconds or nanoseconds depending on how the column
         # was built. Assuming one of them puts every age out by a factor of a
         # thousand, which is exactly the kind of plausible-looking wrong number
-        # the `_age` columns exist to avoid. `NaT` falls through as `NaN`.
+        # the `_ago` columns exist to avoid. `NaT` falls through as `NaN`.
         return (s.to_numpy() - np.datetime64("1970-01-01")) / np.timedelta64(1, "D")
     if pd.api.types.is_numeric_dtype(s) and not pd.api.types.is_bool_dtype(s):
         return s.to_numpy().astype(float)
@@ -501,7 +511,7 @@ def to_periods(values) -> np.ndarray:
 
 
 class HistoryEncoder:
-    """A group's own past, frozen at fit time and replayed as last-known + age.
+    """A group's own past, frozen at fit time and replayed as latest-known + distance.
 
     The fourth case, and the one the others cannot reach. :class:`TargetEncoder`
     and :class:`GroupStatsEncoder` summarise a group across *all* of its rows at
@@ -516,26 +526,43 @@ class HistoryEncoder:
 
     What it emits, per row, is a pair of columns and never a bare value:
 
-    * ``..._last`` — the most recent observation for this row's group, as of the
+    * ``..._latest`` — the most recent observation for this row's group, as of the
       freeze point.
-    * ``..._last_age`` — how far that observation is from *this row*, in the
-      ordering column's units.
+    * ``..._latest_ago`` — how far back that observation sits from *this row*, in
+      the ordering column's units. Named for the same word the offset columns use:
+      in ``..._364_ago`` the distance is a literal, here it is measured.
+
+    The unit is deliberately absent from the names. It is days for a date column
+    and whatever the column counts otherwise, and a name reading ``_days_old``
+    over a series indexed in weeks would be the exact class of confidently-wrong
+    label the ``_ago`` column exists to prevent.
 
     **The pair is the design, not a convenience.** Serving the last known value
     alone is the same number with the honesty removed: it drifts further from the
     truth the further past the freeze point you predict, and says nothing about
     it. This project's characteristic failure is a number that looks fine and
     describes something else, and a bare carry-forward is that failure in feature
-    form. The age column is what lets a model discount a value it should not
+    form. The ``_ago`` column is what lets a model discount a value it should not
     trust.
 
-    ``offsets`` add true lags on the same machinery — ``..._lag7`` is the most
-    recent observation at or before ``row - 7``. They degrade into ``_last``
-    rather than into a lie: ask for a 7-day lag on a row 60 days past the freeze
-    point and you get the newest thing available with an ``_age`` of 60, which is
-    the truth about what was answerable. Whether an offset is *legal* is a
-    separate question, and one this class does not answer — see
-    :func:`fit_history`.
+    ``offsets`` add true lags on the same machinery — ``..._7_ago`` is the most
+    recent observation at or before ``row - 7``, paired with ``..._7_ago_exact``:
+    ``1.0`` when the observation really is 7 back, ``0.0`` when the lookup had to
+    reach further.
+
+    **A lag that is not exact has silently become ``_latest``**, and that is the
+    case worth flagging: ask for a 7-day lag on a row 60 days past the freeze
+    point and there is no 7-day-old observation to find, so you get the newest
+    one there is. The value is the honest answer to "what could be known"; the
+    flag is what stops it being read as an answer to "what happened a week ago".
+
+    A flag rather than an age, because for an offset the age is near-constant —
+    it equals the offset whenever the lookup succeeded — so all of its
+    information is in the failures. ``_latest`` keeps a real age, which genuinely
+    varies from row to row.
+
+    Whether an offset is *legal* is a separate question, and one this class does
+    not answer — see :func:`fit_history`.
 
     Two properties worth stating, because they are why this is allowed where the
     obvious ``groupby().shift()`` is not:
@@ -579,7 +606,7 @@ class HistoryEncoder:
         # Enough tail to answer the furthest offset, assuming roughly one
         # observation per unit of the ordering column. Irregular series have to
         # say so by passing `keep` — an assumption that is wrong is better than a
-        # default that silently truncates, and the `_age` columns show it when it
+        # default that silently truncates, and the `_ago` columns show it when it
         # happens.
         self.keep = int(keep) if keep is not None else int(max(self.offsets, default=0)) + 1
         if not 1 <= self.keep <= MAX_KEEP:
@@ -593,9 +620,9 @@ class HistoryEncoder:
 
     @property
     def output_columns(self) -> list[str]:
-        names = [f"{self.base_name}_last", f"{self.base_name}_last_age"]
+        names = [f"{self.base_name}_latest", f"{self.base_name}_latest_ago"]
         for o in self.offsets:
-            names += [f"{self.base_name}_lag{o:g}", f"{self.base_name}_lag{o:g}_age"]
+            names += [f"{self.base_name}_{o:g}_ago", f"{self.base_name}_{o:g}_ago_exact"]
         return names
 
     def _keys(self, df: pd.DataFrame) -> np.ndarray:
@@ -675,12 +702,24 @@ class HistoryEncoder:
         keys = self._keys(df)
         t = to_periods(df[self.order])
         last, last_age = self._asof(keys, t, None)
-        out[f"{self.base_name}_last"] = last
-        out[f"{self.base_name}_last_age"] = last_age
+        out[f"{self.base_name}_latest"] = last
+        out[f"{self.base_name}_latest_ago"] = last_age
         for o in self.offsets:
             v, a = self._asof(keys, t, o)
-            out[f"{self.base_name}_lag{o:g}"] = v
-            out[f"{self.base_name}_lag{o:g}_age"] = a
+            out[f"{self.base_name}_{o:g}_ago"] = v
+            # A flag rather than the age, because for an offset the age is
+            # near-constant: it equals `o` whenever the lookup succeeded, which on
+            # Rossmann v8 was 80% of served rows. All of its information sits in
+            # the failures, so 1/0 carries the same signal in a column whose
+            # meaning is legible — and a lag that fell back is exactly the case
+            # worth flagging, since it has silently become the last-known value
+            # (0050). `_latest` keeps a real age, which genuinely varies per row.
+            #
+            # `isclose` rather than `==`: ages are differences of floats, and an
+            # exact match that fails on the last bit would report a working lag as
+            # broken.
+            exact = np.where(np.isnan(a), np.nan, np.isclose(a, o).astype(float))
+            out[f"{self.base_name}_{o:g}_ago_exact"] = exact
         return out
 
     def to_dict(self) -> dict:
