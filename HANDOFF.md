@@ -8,6 +8,62 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-14 (night) — Rossmann v8: offsets are the win, `_last` is the disaster
+
+**Machine:** MacBook Air | **Branch:** master | first agent run with `fit_history`.
+Written up as [0050](docs/decisions/0050-the-anchor-is-what-matters-not-the-history.md).
+25 tables in 10.8 min, `_runs/rossmann_v8/`.
+
+**The four best tables in the run are history tables. So is the worst.** Same tool,
+same key, same value — the whole spread is one parameter:
+
+| table | offsets | probe | vs parent |
+|---|---|---|---|
+| t24 | `[364, 728]` | **0.13669** | +0.0217 |
+| t22 | `[364]` | 0.13915 | +0.0192 |
+| t20 (best non-history) | | 0.15840 | |
+| **t7** | **`[]` last-only** | **0.46396** | **−0.2639** |
+
+**Why: the anchor.** `_last` anchors at the *freeze boundary* — one date shared by
+every served row, and one date is never typical. 0049 caught it as zeros. v8 shows
+the general form: the agent had already filtered `Open == 1`, so **no zeros at
+all**, and `_last` was still ruinous — the last open day before a holiday is a
+**pre-holiday spike, median 9,697 vs 6,337 overall (+53%)**. The filter fixed the
+symptom, not the disease. An offset anchors at *the row*, so each row draws
+independently.
+
+**New rule 0047 lacked:** the declared floor makes an offset *legal*; the **span of
+the serving block** makes it *useful*. Val block is 44 days, so `lag7` was actually
+honoured for **11.2%** of val rows (median age delivered: 24) — the rest degraded
+into `_last`. That is why `[7,30,364]` was the worst of the four good ones.
+
+**Sealed:** blend (what ships, 0044) val 0.14138 → **0.17773**, beating the argmax
+lgbm's 0.18595 — 0044 holds on a second dataset. Optimism +0.036, so v7's
+registered "optimism ≤ 0" fails; drift and selection stay unseparated (0041).
+
+### Two things to carry forward
+
+- **`_age` measured to the observation *actually read* is what made this
+  diagnosable.** `lag7` reported median age 24 and told the truth about failing.
+  Had age been the offset *requested*, it would have read 7 everywhere and been
+  silently wrong.
+- **`forecast_horizon` was nearly left undeclared.** Without it offsets are refused
+  and the run's best table cannot exist.
+
+### The gotcha, and it was mine
+
+`summarise_history` printed *"the feedback loop is decorative"* — a **hardcoded
+verdict that assumed its own premise** (that the probe had called these tables
+worse) while the deltas printed directly above it said 4 of 5 were better. Fixed
+to read the deltas. 0031's shape in the reporting layer: a check that looks like
+it checks and only asserts. **Do not trust a conclusion a script prints about its
+own run without reading the numbers beside it.**
+
+**Next:** slice 3's argument has changed — offsets already deliver recency *and*
+periodicity (the agent picked 364/728 to keep the weekday aligned, which is the
+winner's feature shape). A window would add only the averaging. Possibly worth
+less than making `_last` optional and reporting each offset's answerable share.
+
 ## 2026-08-14 (evening) — Rossmann says no, and the reason is worth more than the number
 
 **Machine:** MacBook Air | **Branch:** master | **425 tests still pass** (no code
@@ -68,6 +124,47 @@ explicitly.
 **Next:** slice 3 (rolling/expanding windows) is now **the fix, not a bonus**. A
 7-day mean over the same stored tail gives **0%** of stores a zero (median 5771.7)
 — robust to exactly this failure, because it is not a sample of size one.
+
+### Input for slice 3, from outside: what the competition winner used
+
+Ulf points out the Rossmann winner's writeup leans on features like *"sales for
+this store on a typical Monday, averaged over the last 6 months / 1 year"*. That
+is **a narrow periodic key plus a trailing window** — the two fixes 0049 named,
+combined. Three things follow, and they change slice 3's framing:
+
+- **The key half is already built and already paid.** `fit_encoding(method=
+  "target")` on a composite `Store_DOW` key *is* "average sales for this store on
+  a Monday", and it was v7's **t8, +0.0243, the largest gain of that run** (0046).
+  Not a gap.
+- **The missing half is recency.** That aggregate runs over *all* work-half
+  history; the winner's is limited to a trailing period. A store whose trade level
+  moved a year ago is described badly by an all-time mean and well by a trailing
+  one. **That is slice 3, and it is a better argument for it than 0049's
+  structural-zeros one.**
+- **It argues `_last` is not the valuable part of history.** The winner used
+  windowed aggregates, not a last-known value — which is what 0049's numbers say
+  too. Worth stating before slice 3 rediscovers it.
+
+**Where the line actually is — and it is not where a first reading suggests.** The
+*agent* must be able to build this feature. `fit_history(by=["Store","DayOfWeek"],
+value="Sales", window=180, stat="mean")` **is** the winner's feature, assembled by
+the agent out of general parts, and that is the goal rather than the thing to
+avoid. What stays out of `src/` is a *default*, a blessed list of window lengths,
+or a docstring that names the dataset. The capability is general; the choice is
+the agent's (0029).
+
+Concretely, for slice 3:
+
+- **`window` is a free number in the ordering column's units**, not a menu. A
+  menu would be us picking the windows, which is the agent's call and would
+  encode "180 and 365 are the good ones" — true of one dataset.
+- **`keep` has to cover the longest window asked for.** `MAX_KEEP` is 1000, so a
+  365-day trailing window is expressible; a multi-year one on daily data is not,
+  and that ceiling should be a stated refusal rather than a silent truncation.
+- **Watch the storage.** `Store`×`DayOfWeek` over a year is ~52 observations ×
+  7,805 groups; `Store` over a year is 365 × 1,115. Both ~400k floats — bounded,
+  which is the property that matters, but no longer small. Worth measuring before
+  it goes in a bundle.
 
 ## 2026-08-14 (later still) — §3.4 settled, and slice 2 is built
 

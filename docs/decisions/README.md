@@ -163,6 +163,12 @@ Vocabulary used throughout:
   92% of it because the single freeze date was a public holiday with 98% of stores
   shut — why `_age` says how old a value is and nothing says how typical, and why
   that makes windows the fix rather than a bonus)*
+- [0050 — The anchor is what matters, not the history](0050-the-anchor-is-what-matters-not-the-history.md)
+  *(Rossmann v8: the four best tables in the run are history tables and so is the
+  worst, separated by one parameter — why a boundary-anchored value is a sample of
+  size one shared by the whole batch, why the declared floor makes an offset legal
+  while the block span makes it useful, and a hardcoded verdict that asserted its
+  own premise)*
 
 ### Keeping the agent's surface small
 
