@@ -37,14 +37,28 @@ median (0.11677).** And an error worth not repeating: the rebuild targeted v8's
 chain because `t24` had the best *probe* score, but v7 is the better run — the
 rebuild target was chosen with the instrument 0056 shows is unreliable.
 
-**Next, in this order** (0057 argues it):
-1. Fix the ranking block. Every feature is judged by `val`. Do not build features
-   first.
-2. Then lead-time-restricted aggregates — the only capability found independently
+**Finding 2 was then withdrawn the same night — see
+[0058](docs/decisions/0058-the-ranking-failure-was-one-feature-not-the-block.md).**
+Ulf asked whether it was Rossmann-specific. It was: drop the one history arm and
+`val` ranks fine (its only error is a pair separated by 0.0026); that arm decays
+with distance from its 2015-05-01 freeze, which is 0049/0050 not a block problem;
+`val`'s window is the odd one on *composition* (20.8% closed vs test's 14.6%, a
+May-holidays accident) rather than on recency; and a perfect ordering of four
+happens 1 time in 24 by chance. **Findings 1, 3 and 4 stand** — they rest on
+differences 10-30x larger.
+
+**Next, in this order** (0058's revision of 0057):
+1. **Lead-time-restricted aggregates** — the only capability found independently
    twice, and `restaurant_visitor` already carries a natural experiment for it.
-3. Then per-group trend extrapolation (justified by GBDTs not extrapolating, which
-   names no dataset).
+2. **Per-group trend extrapolation** — justified by GBDTs not extrapolating at all,
+   which names no dataset.
+3. Two *instruments*, when a run needs them, not pre-emptively: a composition
+   diagnostic comparing the evaluation block against `serving_columns`, and
+   ranking stability across several ordered blocks (which would have caught the
+   history arm with no external seal).
 4. `fit_history` should leave the vocabulary in its current form.
+
+**Do not** swap which block ranks, and do not hardcode a block choice. 0043 stands.
 
 Not done: 0036's paired bootstrap, still. Every number above is a difference with
 no interval. Quizzes still owed.

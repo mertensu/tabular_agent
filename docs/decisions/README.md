@@ -209,7 +209,15 @@ Vocabulary used throughout:
   distance to a named event, per-group trend extrapolation justified by GBDTs not
   extrapolating at all, and what each would demand of the harness; plus what is
   rejected and why, and why none of it should be built before 0056's ruler is
-  fixed)*
+  fixed — **the last of which 0058 withdraws**)*
+- [0058 — The ranking failure was one feature, not the block](0058-the-ranking-failure-was-one-feature-not-the-block.md)
+  *(**revises 0056's mechanism and 0057's build order, leaves their measurements
+  and inventory standing**: Ulf asked whether the ranking finding was
+  dataset-specific and it was — drop the one history arm and `val` ranks fine, the
+  arm decayed with distance from its freeze date exactly as 0049/0050 said, `val`'s
+  block is the odd one on composition rather than on recency, and n=4 gives a
+  perfect ordering 1 time in 24 anyway; what survives is a composition diagnostic
+  and ranking stability across blocks, neither of which changes which block ranks)*
 
 ### Keeping the agent's surface small
 
