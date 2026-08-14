@@ -8,6 +8,156 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## START HERE — plan for the next session
+
+Written 2026-08-14 at Ulf's request, so a fresh context can begin without
+re-deriving anything. Read this, then `docs/decisions/README.md`, then the entries
+below for detail.
+
+### Where we actually are
+
+Sixteen runs, two datasets. **Rossmann's best is ~rank 2,200/3,303 — below
+median.** House-prices reached top 9%, Porto Seguro top 57%. The harness is sound
+(leakage-safe, sealed holdout, replayable bundles) and the *scores* are mediocre
+on the forecasting task. Ulf: *"somehow we need to get better than the median, do
+not know what we miss still."*
+
+### My best guess at what we are missing, and it is not features
+
+**Capacity, not vocabulary.** Every fit in this harness runs at a **fixed, modest
+budget that nothing ever tunes**. Checked, so the next session does not have to:
+
+    probe.py:110      PROBE_PARAMS = {"n_estimators": 200}
+    models.py:419-432 lgbm / xgb / catboost defaults: n_estimators=200
+    learning_rate     never set anywhere — whatever the library ships (lgbm: 0.1)
+
+So it is 200 trees at lr 0.1, on 850k rows, for every model in every run. That is
+not absurd, but competitive solutions on a dataset this size run thousands of
+trees at a low learning rate, and **the harness cannot express that at all** —
+there is no tuning step, no early stopping, and 0035 removed the agent's ability
+to touch model params on purpose.
+
+This is not a new idea — **0039 named it and left it open deliberately**: *"the
+terminal phase enumerates library defaults, so it measures the libraries. A fair
+comparison needs a common budget or early stopping — left open."* It has been
+open since. Meanwhile three sessions went into feature vocabulary, and 0052/0053
+just spent a whole slice finding that the newest feature is worth less than one
+we already had.
+
+**The cheapest decisive test, and it should be the first thing next session:**
+take v8's best table and fit the probe estimator twice — the current 200 trees at
+lr 0.1 versus a real budget (lr 0.03, a few thousand trees, early stopping on the
+val block) — and read the difference. Register the prediction first. If capacity
+is worth more than ~0.02 rmspe it dwarfs everything the feature search has ever
+bought and the project's priorities are wrong.
+
+It also explains the *pattern* of our results: house-prices (1,168 rows) reached
+top 9% where 200 trees is roughly right, while the two large datasets (850k, 476k)
+land mid-table — which is exactly where a fixed small budget would bite.
+
+It is also **general** — "the harness never chooses model capacity" names no
+dataset, which is the test CLAUDE.md sets.
+
+Caveat to respect: 0035 removed the model tools deliberately, and 0029 says the
+harness owns the exam. **This is not an argument for handing hyperparameters back
+to the agent** — it is an argument for the terminal phase fitting each family at a
+defensible budget instead of at whatever the library ships.
+
+### `min_periods` — worth building, as an instrument
+
+Ulf asked. The literature's standard answer to "rows that cannot fill a window"
+is `min_periods` (skforecast's `RollingFeatures` drops such rows; a
+wildfire-forecasting paper excludes its first three years for a 36-month window).
+
+**Do not ship it as a guard.** 0053 showed `w=728` has identical count
+distributions at `n_splits=3` and `5` with opposite outcomes, so a threshold on
+counts cannot repair a difference that exists between two same-count
+configurations. That would be the fourth guard this session built on an unverified
+story.
+
+**Do build it as a discriminating experiment.** Raggedness — the per-fold ramp
+20/39/59/78/93 — is the last untested candidate mechanism, and `min_periods` is
+exactly the knob that removes it. Set it high, re-run the n=3/n=5 pair:
+
+- gap collapses ⇒ raggedness is the mechanism, and `min_periods` becomes a fix
+  *on evidence*;
+- gap survives ⇒ raggedness is dead too, and the cause is elsewhere.
+
+Implementation is nearly free: NaN the statistic where `_count < min_periods`.
+Blank rather than drop rows — a harness table's row count is load-bearing, and
+NaN is already a first-class "no estimate" (0046/0047).
+
+### A second forecasting dataset — yes, and pick one that breaks assumptions
+
+Rossmann's private LB is **spent** for the blend-membership question (0045), and
+every conclusion about ordered splits rests on one dataset. Candidates, with what
+each would stress that Rossmann does not:
+
+- **M5 / Walmart (hierarchical, intermittent).** Many series, lots of true zeros,
+  hierarchical aggregation. Would stress everything this harness assumes about a
+  single flat table. Heaviest lift, and its metric is complex — mind 0022, the
+  yardstick must measure the ranked quantity.
+- **Corporación Favorita.** Closest to Rossmann in shape, much bigger. Best for
+  *comparability* — a second reading of the same claims — worst for finding new
+  gaps.
+- **Recruit Restaurant Visitor Forecasting.** Genuine multi-table join, different
+  horizon, moderate size. A good middle option.
+
+**My recommendation: Recruit Restaurant or Favorita**, because the immediate
+question is "why are we below median on a task we understand", and answering it
+needs a *comparable* second reading, not a harder problem. Save M5 for when the
+capacity question is settled.
+
+Whichever it is: `scripts/prep_*.py` holds the join, typing, metric and split —
+nothing dataset-specific enters `src/` (CLAUDE.md).
+
+### Distilling a winner writeup — the guardrail
+
+Ulf wants to re-read the Rossmann winner (Gert Jacobusse) and distill. That is
+sanctioned design input — it is where slice 3's argument came from — but the
+distillation has to come out as **capabilities stated without naming the dataset**,
+or it is leaderboard-fitting one level up (0022, CLAUDE.md).
+
+The test that already worked once: *"per-group aggregates of a column, fitted once
+and replayed"* passes; *"exclude rows where the store was closed"* does not — its
+general form is *"some rows should not be trained on"*, and **that** is what gets
+built.
+
+Questions worth putting to a writeup, none of which name a dataset:
+
+- What did they do about **model capacity and early stopping**? (Suspected biggest
+  gap — see above.)
+- Did they **weight or filter training rows** (recency weighting, dropping
+  structurally-zero rows)? The harness has `filter_rows` but no weighting at all.
+- How did they handle the **target transform** and any post-hoc correction?
+  (0021 owns the transform; the 0.985 multiplier stays out — its own author reports
+  the effect was inside CV noise.)
+- Did they fit **one model or many** (per segment)? The harness can only fit one.
+- What did their **validation** look like? Ours is one period with no error bar,
+  which 0036 was supposed to fix.
+
+### The blocking item behind all of it
+
+**0036's paired bootstrap is still not wired in.** Ordered split ⇒ val is one
+period, `val_se` is `None`, n=1 in the unit that varies. 0052 and 0053 are both
+built on differences nobody can put an interval around, and the capacity
+experiment above will produce another one. Fix the ruler before trusting the next
+number.
+
+### Also owed
+
+- **Quizzes**: slice 3 (one question asked and answered), plus 0041/0042/0044 from
+  earlier sessions.
+- `scripts/run_rossmann.py` broken since 0035 (`StopPolicy(max_experiments=)`
+  renamed to `max_tables`).
+- Request timeout still only patched in one driver, not lifted into the library.
+- `_latest` still emitted unconditionally by `fit_history`, so every history table
+  carries the pair that destroyed v8's t7.
+- `to_periods` turns every date into days; a second-resolution log is unusable.
+  Fix is a *declared* unit (0051), not an inferred one.
+
+---
+
 ## 2026-08-14 (night, last) — Ulf's question refuted 0052's mechanism
 
 **Machine:** MacBook Air | **Branch:** master | suite green.
