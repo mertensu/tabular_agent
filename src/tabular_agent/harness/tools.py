@@ -948,30 +948,46 @@ def fit_history(
     # many: the same column name, a different and less noisy quantity, which is
     # train/serve skew of exactly the kind 0048 exists to prevent.
     #
-    # Measured on Rossmann: a 728-day window trained at a median of 59 observations
-    # and served at 101 (1.71x) and cost 0.093, where a 364-day one ran 39 against
-    # 49 (1.26x) and gained 0.045. **The count alone does not show this** — the
-    # 728-day window reported *more* observations than the 364-day one while being
-    # the more broken of the two, because the damage is in the ratio between the
-    # two sides and the count only ever sees one of them.
-    #
-    # **This warns conservatively and knowingly.** The prefix marks where the
-    # mechanism begins, not where it begins to cost, and on Rossmann those are far
-    # apart — the boundary flags 364, which was the best window measured. Warning
-    # on the ratio instead would need a threshold, and the evidence is two points
-    # on one dataset (1.26x fine, 1.71x ruinous); choosing a number between them is
-    # 0034's refusal to fit a constant to three observations. So the note states a
-    # real structural boundary, admits it is conservative, and prints the prefix so
-    # the reader can judge the margin themselves.
+    # **The count sees only one side of a two-sided quantity**, which is why it is
+    # reported next to the prefixes rather than alone: on Rossmann a 728-day window
+    # reported *more* observations (59) than a 364-day one (39) while behaving far
+    # worse under one fold count. The median also hides shape — 59 was the midpoint
+    # of a per-fold ramp from 20 to 93, not a typical value.
     prefixes = [
         float(np.nanmax(periods[tr]) - np.nanmin(periods[tr]))
         for tr, _ in folds if len(tr)
     ]
     shortest_prefix = round(float(min(prefixes)), 3) if prefixes else None
-    unfillable = [
+    longest_prefix = round(float(max(prefixes)), 3) if prefixes else None
+    # Reported as facts about the fold geometry, and **deliberately without a
+    # claim about what they cost**, because the obvious claim was tested and
+    # failed (0053).
+    #
+    # The arithmetic is not in doubt: past the shortest prefix the earliest folds
+    # cannot fill the window, and past the longest one no fold can, so the trained
+    # column and the served column summarise different numbers of observations.
+    # Measured on Rossmann at w=728: per-fold medians ramping 20/39/59/78/93
+    # against a served 101.
+    #
+    # What does *not* follow is that this is what damages a model. The same window
+    # at `n_splits=3` has the identical train/serve ratio (59 against 101, 1.71x)
+    # and scores **+0.047 where `n_splits=5` scores −0.093**; and w=546 (1.29x)
+    # scores −0.000 where w=364 (1.26x) scores +0.045. Across the pairs the ratio
+    # is *anti*-correlated with the score. The fold scheme moves these features by
+    # a lot, and this is not the route.
+    #
+    # So the numbers are surfaced — the agent cannot obtain them otherwise, which
+    # is the same argument `block_span` rests on — and the note describes the
+    # geometry without predicting a cost it cannot predict.
+    beyond_some = [
         f"{w:g}" for w in encoder.window_lengths
         if shortest_prefix is not None and w > shortest_prefix
     ]
+    beyond_all = [
+        f"{w:g}" for w in encoder.window_lengths
+        if longest_prefix is not None and w > longest_prefix
+    ]
+    beyond_some = [w for w in beyond_some if w not in beyond_all]
 
     note = (
         "This table is scored above; build on it to keep the new columns. Each "
@@ -1002,18 +1018,23 @@ def fit_history(
             "promises a summary. A window has to reach well past the horizon you "
             "forecast before it contains anything to average."
         )
-    if unfillable:
+    if beyond_some:
         note += (
-            f" WARNING: window(s) {unfillable} are longer than the shortest "
-            f"training prefix ({shortest_prefix:g} in {order!r}), so the earliest "
-            "fold cannot fill them while a served row can. The column you train on "
-            "and the column you serve then average different numbers of "
-            "observations under one name. Prefer window lengths at or below "
-            f"{shortest_prefix:g}; the count is no guide here, since an unfillable "
-            "window can report more observations than a healthy shorter one. This "
-            "is where the effect starts, not where it starts to hurt — a window "
-            "somewhat past the prefix has been worth having, one far past it has "
-            "been ruinous, so treat the margin as the thing to judge."
+            f" NOTE: window(s) {beyond_some} are longer than the shortest training "
+            f"prefix ({shortest_prefix:g} in {order!r}), so the earliest folds "
+            "cannot fill them while later folds and a served row can."
+        )
+    if beyond_all:
+        note += (
+            f" NOTE: window(s) {beyond_all} are longer than every fold's training "
+            f"prefix (the longest is {longest_prefix:g} in {order!r}), so no fold "
+            "fills them while a served row does. Each fold's column then summarises "
+            "a different number of observations from the column you will serve. "
+            "Whether that costs anything is not settled — on Rossmann the same "
+            "window was worth +0.047 under one fold count and −0.093 under "
+            "another, with identical counts on both sides — so treat window length "
+            "as a parameter this harness cannot yet advise you on, and read the "
+            "probe score rather than these numbers."
         )
 
     return {
@@ -1030,9 +1051,11 @@ def fit_history(
         # beside `shortest_training_prefix`: on its own it sees only the training
         # side, and a window too long to fill reports a healthy-looking count.
         "window_observations": window_counts,
-        # The narrowest history any fold was fitted on. A window longer than this
-        # measures one thing in training and another at serving.
+        # The narrowest and widest history any fold was fitted on. Past the first,
+        # the earliest folds are starved; past the second, no fold can fill the
+        # window at all and its per-fold counts ramp instead of settling.
         "shortest_training_prefix": shortest_prefix,
+        "longest_training_prefix": longest_prefix,
         # In the ordering column's units, so an offset or a window length can be
         # chosen against it.
         "block_span": block_span,

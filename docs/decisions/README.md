@@ -178,6 +178,12 @@ Vocabulary used throughout:
   unbounded mean of the same key, the periodic key is the whole gain, a window
   longer than the shortest fold prefix is train/serve skew — and the coverage
   number added the same day rated the broken window higher than the good one)*
+- [0053 — The fold count moves a window by 0.14, and we cannot say why](0053-the-fold-count-moves-a-window-and-we-cannot-say-why.md)
+  *(**revises 0052's mechanism, leaves its conclusion standing**: the same window
+  scores −0.093 at `n_splits=5` and +0.047 at `n_splits=3` with identical
+  train/serve counts, so the skew story is refuted — what holds is that a
+  window's measured worth is an artifact of the fold count while the unbounded
+  aggregate it loses to is invariant, and no replacement mechanism is offered)*
 
 ### Keeping the agent's surface small
 

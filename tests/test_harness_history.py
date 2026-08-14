@@ -289,34 +289,51 @@ def test_the_tool_reports_how_much_each_window_actually_held(forecasting_session
     assert "WARNING" in out["note"] and "'2'" in out["note"]
 
 
-def test_a_window_too_long_for_the_earliest_fold_is_flagged(forecasting_session):
-    """The failure the count cannot see, and the more expensive of the two.
+def test_a_window_no_fold_can_fill_says_so_without_predicting_a_cost(
+    forecasting_session,
+):
+    """The failure the count cannot see, and the expensive one.
 
-    Under forward chaining the first fold trains on a short head of the data, so a
-    window longer than that prefix cannot be filled there while a served row fills
-    it completely — the trained column and the served column then average
-    different numbers of observations under one name. On Rossmann this cost 0.093
-    while the count read *higher* than a healthy shorter window's.
+    Past the *longest* training prefix no fold can fill the window while a served
+    row fills it completely, so each fold's column summarises a different number
+    of observations. Measured on Rossmann: per-fold medians ramping 20/39/59/78/93
+    against a served 101, costing 0.093 — while the count read *higher* than a
+    healthy shorter window's.
     """
     out = fit_history(
         forecasting_session, by=["store"], value="sales",
-        windows=[[100, "mean"]], keep=200,
+        windows=[[500, "mean"]], keep=600,
     )
 
-    prefix = out["shortest_training_prefix"]
-    assert prefix is not None and prefix < 100
-    assert "WARNING" in out["note"]
-    assert "shortest training prefix" in out["note"]
+    assert out["longest_training_prefix"] < 500
+    assert "every fold" in out["note"]
+    assert "not settled" in out["note"]
 
 
-def test_a_window_inside_every_fold_prefix_is_not_flagged(forecasting_session):
+def test_a_window_only_the_earliest_folds_cannot_fill_is_noted_more_briefly(
+    forecasting_session,
+):
+    """Between the two prefixes the later folds still settle near what serving
+    delivers, so this is a note rather than a warning — Rossmann's 364-day window
+    sat here and was the best of the sweep."""
     out = fit_history(
         forecasting_session, by=["store"], value="sales",
-        windows=[[20, "mean"]], keep=40,
+        windows=[[60, "mean"]], keep=120,
     )
 
-    assert 20 <= out["shortest_training_prefix"]
-    assert "shortest training prefix" not in out["note"]
+    assert out["shortest_training_prefix"] < 60 <= out["longest_training_prefix"]
+    assert "shortest training prefix" in out["note"]
+    assert "every fold" not in out["note"]
+
+
+def test_a_window_inside_every_fold_prefix_is_left_alone(forecasting_session):
+    out = fit_history(
+        forecasting_session, by=["store"], value="sales",
+        windows=[[10, "mean"]], keep=40,
+    )
+
+    assert 10 <= out["shortest_training_prefix"]
+    assert "training prefix" not in out["note"]
 
 
 def test_a_window_shorter_than_the_horizon_is_refused_through_the_tool(tmp_path, panel):

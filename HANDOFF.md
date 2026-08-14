@@ -8,6 +8,67 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-14 (night, last) — Ulf's question refuted 0052's mechanism
+
+**Machine:** MacBook Air | **Branch:** master | suite green.
+Written up as [0053](docs/decisions/0053-the-fold-count-moves-a-window-and-we-cannot-say-why.md).
+
+Ulf, reading 0052: *"but the 136 for rossmann are only due to how we split the
+data into folds no?"* Yes — fold 0's prefix is `span/(n_splits+1)`. Testing it
+killed the explanation.
+
+Same sweep at `n_splits=3` and `5`, everything else identical, both reproducing
+to the digit:
+
+| feature | n=5 | n=3 | swing |
+|---|---|---|---|
+| all-time mean of `Store_DOW` (0046) | +0.06048 | +0.06004 | **0.0004** |
+| window 364 | +0.04458 | +0.05338 | 0.0088 |
+| window 546 | −0.00030 | +0.04078 | 0.0411 |
+| window 728 | **−0.09287** | **+0.04654** | **0.1394** |
+
+**w=728's train/serve counts are identical in both** (median 59 against a served
+101, 1.71x). The quantity 0052 blamed did not move while the outcome reversed.
+Across pairs the ratio is *anti*-correlated with the score, and the two-level
+guard I had just built fires in **both** configurations — 728 exceeds every prefix
+at n=3 too (204/408/612). A guard that fires on the good case and the ruinous one
+alike is uninformative.
+
+**What survives.** 0052's measurements (all reproduced) and its conclusion: the
+all-time mean beats every window under *both* fold counts, so slice 3 still buys
+nothing over 0046. And a new statement about the feature class —
+
+> a trailing window's measured worth is substantially an artifact of the fold
+> count, sensitivity growing with length, while the unbounded aggregate it loses
+> to is invariant.
+
+So **window length cannot be searched over here and the number believed** (0022's
+problem, arriving in a feature instead of a metric).
+
+**No replacement mechanism is offered**, deliberately. Candidates considered and
+untested: fold-dependent NaN share (25% at n=3 vs 17% at n=5), number of coverage
+regimes in the trained column, interaction of the ramp with the target's time
+trend. **Third failed story about these columns in one session** (0050's
+`summarise_history` verdict, 0052's coverage count, 0052's prefix mechanism).
+
+**Code:** prefixes still reported (the agent cannot get them otherwise), warnings
+demoted to notes that describe the geometry and explicitly decline to predict a
+cost.
+
+**From the literature** (searched at Ulf's request): the two standard answers are
+fixed-size sliding-window CV (`TimeSeriesSplit(max_train_size=...)`, skforecast's
+"fixed training size" backtesting) and **`min_periods` — skforecast's
+`RollingFeatures` drops training rows that cannot fill the window**, and a
+wildfire-forecasting paper excludes its first three years for a 36-month window.
+`min_periods` is the better fit here and is nearly free (NaN where `_count <
+min`), but **not built**: 0053 says the mechanism is unknown, and building a fix
+for an unidentified failure is how the last two guards got written. Switching CV
+schemes stays out too — it changes the exam for every feature and makes all 16
+prior runs incomparable, which is 0041's argument for opt-in.
+
+**Next:** 0036's paired bootstrap. Two records now rest on differences nobody can
+put an interval around; it is the blocking item for this whole area.
+
 ## 2026-08-14 (night, latest) — slice 3 built, and the measurement says it lost
 
 **Machine:** MacBook Air | **Branch:** master | **suite green.**

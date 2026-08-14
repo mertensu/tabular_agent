@@ -345,13 +345,17 @@ def build_agent(model=DEFAULT_MODEL):
                 Length is the whole game, and it fails at *both* ends. Too short
                 and the window holds almost nothing, because stored history stops
                 where the forecast starts; each length adds a `_count` column
-                saying how many observations it really held. Too long and the
-                earliest fold cannot fill it while a served row can, so the
-                column you train on and the column you serve are different
-                quantities — the result reports
-                `shortest_training_prefix`, and going past it is the more
-                expensive mistake of the two. The count will not warn you about
-                that one.
+                saying how many observations it really held.
+
+                Too long and the folds cannot fill it while a served row can, so
+                the column you train on and the one you serve summarise different
+                numbers of observations. The result reports
+                `shortest_training_prefix` and `longest_training_prefix` so you
+                can see where a window sits, but **be warned that none of these
+                numbers reliably predicts whether a length will work** — on one
+                dataset the same window was worth +0.047 under one fold count and
+                −0.093 under another with identical counts on both sides. Try a
+                length, read the probe score, and trust that over the diagnostics.
             table: Path to the source table. Omit to use the run's work table.
         """
         return _retryable(
