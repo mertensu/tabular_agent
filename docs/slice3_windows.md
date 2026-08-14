@@ -1,5 +1,13 @@
 # Slice 3 — rolling windows over stored history
 
+> **Superseded by [0052](decisions/0052-a-window-is-a-worse-estimator-of-a-better-idea.md)
+> (2026-08-14). This was the plan; it was built and it measured negative.** The
+> trailing window loses to 0046's unbounded mean of the same key, the gain the
+> first probe showed belongs to the periodic key rather than the averaging, and a
+> window longer than the shortest fold's training prefix is train/serve skew. Read
+> 0052 first — this file is kept as the argument that was made beforehand, and
+> section 5's exit condition is the part that paid off.
+
 **Status:** a plan, written 2026-08-14 so a fresh session can start from the
 argument instead of rebuilding it. Nothing here is built.
 

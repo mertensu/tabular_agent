@@ -243,3 +243,147 @@ def test_the_stored_values_are_the_frozen_ones_not_the_rows_own(session):
     # Never the row's own value: the freeze is strictly in that row's past.
     assert (table.loc[seen, "store_sales_latest"] != table.loc[seen, "sales"]).all()
     assert (table.loc[seen, "store_sales_latest_ago"] > 0).all()
+
+
+# --- trailing windows --------------------------------------------------------
+
+
+@pytest.fixture
+def forecasting_session(tmp_path, panel):
+    """A session that declares a horizon, which windows require."""
+    return RunSession(
+        str(tmp_path / "run_windows"),
+        panel,
+        TaskSpec(
+            target="sales", task_type="regression", metric="rmse", n_splits=3,
+            forecast_horizon=1,
+        ),
+        split_on="day",
+    )
+
+
+def test_a_window_adds_its_statistic_and_its_count(forecasting_session):
+    out = fit_history(
+        forecasting_session, by=["store"], value="sales",
+        windows=[[20, "mean"], [20, "std"]], keep=40,
+    )
+
+    assert out["new_columns"] == [
+        "store_sales_latest", "store_sales_latest_ago",
+        "store_sales_20_mean", "store_sales_20_std", "store_sales_20_count",
+    ]
+    row = journal.load(forecasting_session.run_dir)["tables"][-1]
+    assert row["windows"] == [[20.0, "mean"], [20.0, "std"]]
+
+
+def test_the_tool_reports_how_much_each_window_actually_held(forecasting_session):
+    """`offsets_answerable`'s counterpart. A window that averages two points on the
+    rows that matter is 0050's degraded lag in new clothing."""
+    out = fit_history(
+        forecasting_session, by=["store"], value="sales",
+        windows=[[2, "mean"], [40, "mean"]], keep=60,
+    )
+
+    assert out["window_observations"]["40"] > out["window_observations"]["2"]
+    # The 2-day window spans less than the gap for all but the block's first rows.
+    assert "WARNING" in out["note"] and "'2'" in out["note"]
+
+
+def test_a_window_too_long_for_the_earliest_fold_is_flagged(forecasting_session):
+    """The failure the count cannot see, and the more expensive of the two.
+
+    Under forward chaining the first fold trains on a short head of the data, so a
+    window longer than that prefix cannot be filled there while a served row fills
+    it completely — the trained column and the served column then average
+    different numbers of observations under one name. On Rossmann this cost 0.093
+    while the count read *higher* than a healthy shorter window's.
+    """
+    out = fit_history(
+        forecasting_session, by=["store"], value="sales",
+        windows=[[100, "mean"]], keep=200,
+    )
+
+    prefix = out["shortest_training_prefix"]
+    assert prefix is not None and prefix < 100
+    assert "WARNING" in out["note"]
+    assert "shortest training prefix" in out["note"]
+
+
+def test_a_window_inside_every_fold_prefix_is_not_flagged(forecasting_session):
+    out = fit_history(
+        forecasting_session, by=["store"], value="sales",
+        windows=[[20, "mean"]], keep=40,
+    )
+
+    assert 20 <= out["shortest_training_prefix"]
+    assert "shortest training prefix" not in out["note"]
+
+
+def test_a_window_shorter_than_the_horizon_is_refused_through_the_tool(tmp_path, panel):
+    session = RunSession(
+        str(tmp_path / "run_short_window"),
+        panel,
+        TaskSpec(
+            target="sales", task_type="regression", metric="rmse", n_splits=3,
+            forecast_horizon=14,
+        ),
+        split_on="day",
+    )
+
+    with pytest.raises(ValueError, match="shorter than the declared forecast horizon"):
+        fit_history(session, by=["store"], value="sales", windows=[[7, "mean"]])
+
+
+def test_windows_need_the_task_to_declare_its_horizon(session):
+    with pytest.raises(ValueError, match="forecast_horizon"):
+        fit_history(session, by=["store"], value="sales", windows=[[20, "mean"]])
+
+
+def test_a_windowed_bundle_predicts_rows_after_every_row_it_saw(forecasting_session):
+    """The serving case, for the columns slice 3 adds: the window has to be
+    computable from stored history alone, on rows later than all of it."""
+    table = fit_history(
+        forecasting_session, by=["store"], value="sales",
+        windows=[[30, "mean"], [30, "median"]], keep=40,
+    )["table"]
+    train_tabular_model(forecasting_session, table=table)
+    out = finalize_run(forecasting_session)
+
+    bundle = load_bundle(os.path.join(forecasting_session.run_dir, out["bundle_dir"]))
+    future = pd.DataFrame(
+        {"store": ["s1", "s2", "s1"], "day": [125, 130, 200], "promo": [0, 1, 0]}
+    )
+
+    preds = predict_bundle(bundle, future)
+
+    assert len(preds) == 3
+    assert np.isfinite(preds).all()
+
+
+def test_a_served_window_is_the_mean_of_the_rows_own_stretch_of_stored_history(
+    forecasting_session, panel
+):
+    """Recomputed by hand from the raw data, because a window is exactly the kind
+    of feature that can be wrong by a plausible amount without looking wrong."""
+    out = fit_history(
+        forecasting_session, by=["store"], value="sales",
+        windows=[[30, "mean"]], keep=40,
+    )
+    table = load_table(forecasting_session.resolve_table(out["table"]))
+    assert "store_sales_30_mean" in table.columns
+
+    from tabular_agent.encoders import HistoryEncoder
+
+    raw = pd.read_csv(panel)
+    encoder = HistoryEncoder(
+        ["store"], "sales", "day", windows=[(30, "mean")], keep=40
+    ).fit(raw)
+    served = encoder.transform(pd.DataFrame({"store": ["s1"], "day": [125]}))
+
+    # Stored history runs to day 119, so [95, 125) is days 95-119 of store s1.
+    expected = raw[
+        (raw["store"] == "s1") & (raw["day"] >= 95) & (raw["day"] < 125)
+    ]["sales"].mean()
+
+    assert served["store_sales_30_mean"].iloc[0] == pytest.approx(expected)
+    assert served["store_sales_30_count"].iloc[0] == 25.0

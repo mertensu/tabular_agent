@@ -449,6 +449,54 @@ class GroupStatsEncoder:
 #: of groups and this constant, never on how long the table is.
 MAX_KEEP = 1000
 
+#: What may be asked of a trailing window, and the menu is short on purpose.
+#:
+#: ``mean`` is the one the whole slice exists for. ``std`` says how settled the
+#: group has been lately, which no other encoder can express. ``median`` is the
+#: statistic that survives a spike, and 0050 is a record of a spike destroying a
+#: model — the last open day before a holiday sold 53% above normal, and a mean
+#: over a short window inherits that where a median shrugs it off.
+#:
+#: **``min``/``max`` are off the menu, for 0046's reason at a shorter range.** An
+#: extreme over a trailing window is close to a single observation, and "a single
+#: observation is not a summary" is exactly what 0049 was written about. **``sum``
+#: is off it too**: it is ``count * mean`` and the count is emitted beside every
+#: window already, so it is a column a model can form and does not need given.
+WINDOW_STATS = ("mean", "std", "median")
+
+
+def _clean_windows(windows) -> list[tuple[float, str]]:
+    """``[(90, "mean"), ...]`` validated, de-duplicated, order preserved.
+
+    Accepts what JSON hands back, so a tool call carrying ``[[90, "mean"]]``
+    arrives here as nested lists and is treated the same as tuples.
+    """
+    cleaned: list[tuple[float, str]] = []
+    for item in windows or ():
+        try:
+            length, stat = item
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"windows takes (length, statistic) pairs, got {item!r}. A length "
+                "on its own does not say what to do with the observations in it — "
+                f"write [({item!r}, 'mean')]."
+            ) from None
+        length = float(length)
+        stat = str(stat)
+        if length <= 0:
+            raise ValueError(
+                f"window lengths must be positive, got {length:g}. A window of zero "
+                "spans nothing and a negative one runs into the future."
+            )
+        if stat not in WINDOW_STATS:
+            raise ValueError(
+                f"unknown window statistic {stat!r}; pick from {list(WINDOW_STATS)}. "
+                "min/max and sum are deliberately absent — see WINDOW_STATS."
+            )
+        if (length, stat) not in cleaned:
+            cleaned.append((length, stat))
+    return cleaned
+
 
 def to_periods(values) -> np.ndarray:
     """The ordering column as floats that can be subtracted from one another.
@@ -564,6 +612,32 @@ class HistoryEncoder:
     Whether an offset is *legal* is a separate question, and one this class does
     not answer — see :func:`fit_history`.
 
+    ``windows`` aggregate the stored tail instead of picking one point out of it.
+    ``windows=[(90, "mean")]`` emits ``..._90_mean`` — the mean of every stored
+    observation in ``[row - 90, row)`` — beside ``..._90_count``, how many
+    observations that actually was.
+
+    **The window is anchored at the row, never at the freeze point**, which is the
+    single property that makes it worth building. A value anchored to the freeze is
+    one draw shared by every served row, and 0050 is the record of that costing a
+    working model two thirds of its score. ``[row - w, row)`` moves with the row,
+    so each row averages its own stretch of the past.
+
+    **The count is emitted with every window and is not optional**, for the reason
+    the ``_ago`` column is not optional: a mean over two observations and a mean
+    over ninety are the same number wearing the same name, and only one of them is
+    a summary. A window that quietly averages two points on the rows that matter is
+    0050's degraded ``lag7`` in new clothing, and the count is what makes it
+    visible. It is emitted once per distinct window length, however many statistics
+    that length was asked for.
+
+    **The right endpoint is strict.** The window ends *before* the row's own
+    ordering value, so the row can never be inside its own summary. ``_latest``
+    relies on the per-fold freeze for that (0048), and a window must not: a
+    self-included point in a mean over ninety is diluted to invisibility, where a
+    self-included ``_latest`` shows up as a perfect correlation. A guarantee that
+    only holds when the numbers are checked is not a guarantee.
+
     Two properties worth stating, because they are why this is allowed where the
     obvious ``groupby().shift()`` is not:
 
@@ -580,11 +654,17 @@ class HistoryEncoder:
 
     kind = "history"
 
-    def __init__(self, by: list[str], value: str, order: str, offsets=(), keep: int | None = None):
+    def __init__(self, by: list[str], value: str, order: str, offsets=(),
+                 keep: int | None = None, windows=()):
         self.by = [str(c) for c in by]
         self.value = str(value)
         self.order = str(order)
         self.offsets = [float(o) for o in offsets]
+        self.windows = _clean_windows(windows)
+        #: Distinct lengths in first-asked order — one count column each, not one
+        #: per (length, statistic) pair, since the count is a property of the
+        #: window and not of what was asked of it.
+        self.window_lengths = list(dict.fromkeys(w for w, _ in self.windows))
         if not self.by:
             raise ValueError("by must name at least one column to group on")
         if self.value in self.by or self.order in self.by:
@@ -603,13 +683,28 @@ class HistoryEncoder:
                 f"offsets must be positive, got {self.offsets}. An offset of zero is "
                 "the row's own value and a negative one is the future."
             )
-        # Enough tail to answer the furthest offset, assuming roughly one
-        # observation per unit of the ordering column. Irregular series have to
-        # say so by passing `keep` — an assumption that is wrong is better than a
-        # default that silently truncates, and the `_ago` columns show it when it
-        # happens.
-        self.keep = int(keep) if keep is not None else int(max(self.offsets, default=0)) + 1
+        # Enough tail to answer the furthest offset and fill the longest window,
+        # assuming roughly one observation per unit of the ordering column.
+        # Irregular series have to say so by passing `keep` — an assumption that is
+        # wrong is better than a default that silently truncates, and the `_ago`
+        # and `_count` columns show it when it happens.
+        reach = max([*self.offsets, *self.window_lengths], default=0.0)
+        self.keep = int(keep) if keep is not None else int(reach) + 1
         if not 1 <= self.keep <= MAX_KEEP:
+            # A window longer than the cap is refused rather than quietly served
+            # from a shortened tail. A window that spans a year and averages the
+            # most recent 1000 observations of a series that has thousands is a
+            # wrong number under a confident name, which is the failure this whole
+            # area keeps producing.
+            if keep is None and reach > MAX_KEEP:
+                raise ValueError(
+                    f"a reach of {reach:g} in {self.order!r} needs {int(reach) + 1} "
+                    f"stored observations per group and the cap is {MAX_KEEP}. If the "
+                    "series really is that dense, this is more history than an encoder "
+                    "may carry; if it is sparser than one observation per unit — weekly "
+                    "readings over a year-long window, say — pass keep explicitly to say "
+                    "so, and the _count columns will show whether it was enough."
+                )
             raise ValueError(f"keep must be between 1 and {MAX_KEEP}, got {self.keep}")
         self.history_: dict[str, list[list[float]]] = {}
         self.frozen_at_: float | None = None
@@ -623,6 +718,10 @@ class HistoryEncoder:
         names = [f"{self.base_name}_latest", f"{self.base_name}_latest_ago"]
         for o in self.offsets:
             names += [f"{self.base_name}_{o:g}_ago", f"{self.base_name}_{o:g}_ago_exact"]
+        for w, stat in self.windows:
+            names.append(f"{self.base_name}_{w:g}_{stat}")
+        for w in self.window_lengths:
+            names.append(f"{self.base_name}_{w:g}_count")
         return names
 
     def _keys(self, df: pd.DataFrame) -> np.ndarray:
@@ -697,6 +796,77 @@ class HistoryEncoder:
         ages[np.isnan(t)] = np.nan
         return vals, ages
 
+    def _window_stats(self, keys: np.ndarray, t: np.ndarray) -> dict[str, np.ndarray]:
+        """Aggregates of the stored tail over ``[row - w, row)``, per requested pair.
+
+        Cumulative sums do the work: with the tail already sorted, the two ends of
+        a window are one ``searchsorted`` each, and mean, count and standard
+        deviation follow by subtraction. That is what keeps a window the same order
+        of cost as a lag rather than a scan per row. ``median`` cannot be had that
+        way and slices per row, which is why it is the expensive member of
+        :data:`WINDOW_STATS`.
+        """
+        n = len(t)
+        wanted: dict[float, list[str]] = {w: [] for w in self.window_lengths}
+        for w, stat in self.windows:
+            wanted[w].append(stat)
+        names = [f"{self.base_name}_{w:g}_{s}" for w, s in self.windows]
+        names += [f"{self.base_name}_{w:g}_count" for w in self.window_lengths]
+        out = {name: np.full(n, np.nan) for name in names}
+
+        for key in pd.unique(keys):
+            hist = self.history_.get(str(key))
+            if hist is None:
+                continue
+            ts = np.asarray(hist[0], dtype=float)
+            vs = np.asarray(hist[1], dtype=float)
+            csum = np.concatenate([[0.0], np.cumsum(vs)])
+            csq = np.concatenate([[0.0], np.cumsum(vs * vs)])
+            rows = keys == key
+            rt = t[rows]
+            # `side="left"` on the right end is the strict endpoint: an observation
+            # sharing the row's ordering value is not in the row's past, and letting
+            # it in would put the row inside its own summary.
+            hi = np.searchsorted(ts, rt, side="left")
+            for w, stats in wanted.items():
+                lo = np.searchsorted(ts, rt - w, side="left")
+                count = (hi - lo).astype(float)
+                filled = count > 0
+                total = csum[hi] - csum[lo]
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    mean = np.where(filled, total / np.where(filled, count, 1.0), np.nan)
+                out[f"{self.base_name}_{w:g}_count"][rows] = count
+                if "mean" in stats:
+                    out[f"{self.base_name}_{w:g}_mean"][rows] = mean
+                if "std" in stats:
+                    # One observation has no spread, so it gets NaN rather than the
+                    # zero a population formula would hand back — a confident zero
+                    # for "this group never moves" off a single point is the same
+                    # class of lie as a mean over one.
+                    pair = count > 1
+                    sq = csq[hi] - csq[lo]
+                    with np.errstate(invalid="ignore", divide="ignore"):
+                        var = (sq - count * mean * mean) / np.where(pair, count - 1.0, 1.0)
+                    # Float error can drive a genuinely-zero variance slightly
+                    # negative, and a NaN out of a square root would read as "no
+                    # data" when the truth is "no movement".
+                    out[f"{self.base_name}_{w:g}_std"][rows] = np.where(
+                        pair, np.sqrt(np.maximum(var, 0.0)), np.nan
+                    )
+                if "median" in stats:
+                    med = np.full(len(rt), np.nan)
+                    for i in np.flatnonzero(filled):
+                        med[i] = np.median(vs[lo[i]:hi[i]])
+                    out[f"{self.base_name}_{w:g}_median"][rows] = med
+
+        # Same reason as `_asof`: a row with no ordering value has no window to
+        # take, and `searchsorted` would otherwise hand it an empty one at the end
+        # of the tail — a count of 0 reading as "this group had nothing to say"
+        # when the truth is that the row never asked.
+        for name in out:
+            out[name][np.isnan(t)] = np.nan
+        return out
+
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         out = df.copy()
         keys = self._keys(df)
@@ -720,6 +890,8 @@ class HistoryEncoder:
             # broken.
             exact = np.where(np.isnan(a), np.nan, np.isclose(a, o).astype(float))
             out[f"{self.base_name}_{o:g}_ago_exact"] = exact
+        for name, values in self._window_stats(keys, t).items():
+            out[name] = values
         return out
 
     def to_dict(self) -> dict:
@@ -730,13 +902,19 @@ class HistoryEncoder:
             "order": self.order,
             "offsets": self.offsets,
             "keep": self.keep,
+            # Pairs go out as lists so the round trip through JSON is the identity;
+            # `_clean_windows` takes them back in either shape.
+            "windows": [[w, s] for w, s in self.windows],
             "history": self.history_,
             "frozen_at": self.frozen_at_,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "HistoryEncoder":
-        enc = cls(d["by"], d["value"], d["order"], d.get("offsets", ()), d["keep"])
+        # `windows` absent is a bundle written before this existed, and it loads as
+        # what it was: last-known and offsets, no windows.
+        enc = cls(d["by"], d["value"], d["order"], d.get("offsets", ()), d["keep"],
+                  d.get("windows", ()))
         enc.history_ = {str(k): [list(v[0]), list(v[1])] for k, v in d["history"].items()}
         enc.frozen_at_ = d.get("frozen_at")
         return enc
@@ -891,7 +1069,7 @@ def _require_ordered_folds(periods: np.ndarray, folds) -> None:
 
 
 def fit_history(df, by, value, order, *, folds, offsets=(), keep=None,
-                forecast_horizon: float | None = None):
+                forecast_horizon: float | None = None, windows=()):
     """A group's recent past, frozen per fold (the tool entry point).
 
     Returns ``(train_features, final_encoder)`` on the same contract as
@@ -924,11 +1102,40 @@ def fit_history(df, by, value, order, *, folds, offsets=(), keep=None,
     that promises one. Undeclared, the last-known pair is what you get, and it is
     honest without needing the declaration.
 
+    ``windows`` are gated on the same declaration and for a sharper reason. A row
+    ``d`` ahead of the freeze has stored history only up to ``row - d``, so a
+    window of ``w`` covers ``[row - w, row - d]`` and is **empty for every served
+    row** when ``w < d``. An offset that short degrades into the last-known value;
+    a window that short is nothing at all. At exactly the horizon it holds a single
+    observation — the freeze point — which is ``_latest`` with extra arithmetic and
+    the boundary anchoring 0050 is about, and the ``_count`` column says so.
+
     Under forward chaining the first block is validated by nothing, so those rows
     keep ``NaN`` — the same gap out-of-fold target encoding leaves, for the same
     reason.
     """
     offsets = [float(o) for o in offsets]
+    windows = _clean_windows(windows)
+    if windows:
+        if forecast_horizon is None:
+            raise ValueError(
+                f"windows={[(f'{w:g}', s) for w, s in windows]} need the task to "
+                "declare how far ahead it forecasts. Set TaskSpec.forecast_horizon "
+                "to the gap between the end of history and the earliest row you are "
+                "asked to predict, in the ordering column's units. Without it there "
+                "is no way to tell a window that spans real history from one that "
+                "lands entirely in the gap and is empty for every row."
+            )
+        short = sorted({w for w, _ in windows if w < forecast_horizon})
+        if short:
+            raise ValueError(
+                f"window lengths {[f'{w:g}' for w in short]} are shorter than the "
+                f"declared forecast horizon of {forecast_horizon:g}. Stored history "
+                "stops one horizon before the earliest row you predict, so a window "
+                "that short covers only the gap and would be empty for every served "
+                f"row. Use lengths longer than {forecast_horizon:g} — comfortably "
+                "longer, or the window holds the freeze-point observation alone."
+            )
     if offsets:
         if forecast_horizon is None:
             raise ValueError(
@@ -951,7 +1158,7 @@ def fit_history(df, by, value, order, *, folds, offsets=(), keep=None,
     periods = to_periods(df[order])
     _require_ordered_folds(periods, folds)
 
-    template = HistoryEncoder(by, value, order, offsets, keep)
+    template = HistoryEncoder(by, value, order, offsets, keep, windows)
     names = template.output_columns
     oof = pd.DataFrame(index=df.index)
     for name in names:
@@ -961,7 +1168,7 @@ def fit_history(df, by, value, order, *, folds, offsets=(), keep=None,
         # `df.iloc[tr]` is the training *prefix* under forward chaining, which
         # `_require_ordered_folds` has already established. That is the freeze
         # point, and it is the whole mechanism.
-        fold_enc = HistoryEncoder(by, value, order, offsets, keep).fit(df.iloc[tr])
+        fold_enc = HistoryEncoder(by, value, order, offsets, keep, windows).fit(df.iloc[tr])
         transformed = fold_enc.transform(df.iloc[va])
         for name in names:
             oof.iloc[va, positions[name]] = transformed[name].to_numpy()

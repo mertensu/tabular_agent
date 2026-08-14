@@ -807,6 +807,7 @@ def fit_history(
     offsets: list[float] | None = None,
     keep: int | None = None,
     table: str | None = None,
+    windows: list | None = None,
 ) -> dict:
     """Store each group's recent past and replay it as last-known value + age.
 
@@ -819,6 +820,11 @@ def fit_history(
     Two columns per request, always as a pair. The value alone would be a
     carry-forward that drifts further from the truth the further ahead you predict
     and says nothing about it; the age is what lets the model discount it.
+
+    `windows` summarise the stored past instead of picking one point out of it:
+    `windows=[[90, "mean"]]` adds the mean of every observation in the 90 periods
+    before each row, beside a count of how many that was. One observation is one
+    draw; an average over a stretch of them is a description of the group.
 
     The ordering column is the one the run is split on, and there has to be one.
     History frozen at a training fold scattered through time reports an age that
@@ -865,7 +871,7 @@ def fit_history(
                        seed=spec.seed, order=_fold_order(session, df))
     train_features, encoder = _fit_history(
         df, by, value, order, folds=folds, offsets=offsets or (), keep=keep,
-        forecast_horizon=spec.forecast_horizon,
+        forecast_horizon=spec.forecast_horizon, windows=windows or (),
     )
 
     out = df.join(train_features)
@@ -889,6 +895,7 @@ def fit_history(
         "value_column": value,
         "order_column": order,
         "offsets": [float(o) for o in (offsets or ())],
+        "windows": [[w, s] for w, s in encoder.windows],
         "new_columns": new_columns,
         "n_steps": len(lineage.steps),
         **scored,
@@ -920,6 +927,43 @@ def fit_history(
     block_span = round(float(np.median(spans)), 3) if spans else None
     weak = [k for k, v in answerable.items() if v < 0.5]
 
+    # What a window actually averaged, which is the same question
+    # `offsets_answerable` asks of a lag. A window is a summary only if there was
+    # something in it: two observations under a name that says "90 periods" is
+    # 0050's degraded lag wearing different clothes, and the median across rows is
+    # the number that shows it at a glance.
+    window_counts = {}
+    for w in encoder.window_lengths:
+        seen = train_features[f"{encoder.base_name}_{w:g}_count"].dropna()
+        if len(seen):
+            window_counts[f"{w:g}"] = round(float(np.median(seen)), 3)
+    thin = [k for k, v in window_counts.items() if v < 2]
+
+    # The shortest training prefix any fold gets, and the reason it is reported.
+    #
+    # Under forward chaining the first fold trains on a short head of the data, so
+    # a window longer than that prefix **cannot be filled there** — while at
+    # serving time the whole history is available and it fills completely. The
+    # model then learns from a mean over few observations and is served a mean over
+    # many: the same column name, a different and less noisy quantity, which is
+    # train/serve skew of exactly the kind 0048 exists to prevent.
+    #
+    # Measured on Rossmann: a 728-day window trained at a median of 59 observations
+    # and served at 101 (1.71x) and cost 0.093, where a 364-day one ran 39 against
+    # 49 (1.26x) and gained 0.045. **The count alone does not show this** — the
+    # 728-day window reported *more* observations than the 364-day one while being
+    # the more broken of the two, because the damage is in the ratio between the
+    # two sides and the count only ever sees one of them.
+    prefixes = [
+        float(np.nanmax(periods[tr]) - np.nanmin(periods[tr]))
+        for tr, _ in folds if len(tr)
+    ]
+    shortest_prefix = round(float(min(prefixes)), 3) if prefixes else None
+    unfillable = [
+        f"{w:g}" for w in encoder.window_lengths
+        if shortest_prefix is not None and w > shortest_prefix
+    ]
+
     note = (
         "This table is scored above; build on it to keep the new columns. Each "
         "fold's history stops at the end of that fold's training rows, so a "
@@ -941,6 +985,24 @@ def fit_history(
             "the rows — see offsets_answerable. Below that, the column is mostly "
             "the latest-known value wearing a name that promises a fixed lag."
         )
+    if thin:
+        note += (
+            f" WARNING: window(s) {thin} held a median of fewer than two "
+            "observations — see window_observations. An average over one point is "
+            "that point, so the column is the latest-known value under a name that "
+            "promises a summary. A window has to reach well past the horizon you "
+            "forecast before it contains anything to average."
+        )
+    if unfillable:
+        note += (
+            f" WARNING: window(s) {unfillable} are longer than the shortest "
+            f"training prefix ({shortest_prefix:g} in {order!r}), so the earliest "
+            "fold cannot fill them while a served row can. The column you train on "
+            "and the column you serve then average different numbers of "
+            "observations under one name. Prefer window lengths at or below "
+            f"{shortest_prefix:g}; the count is no guide here, since an unfillable "
+            "window can report more observations than a healthy shorter one."
+        )
 
     return {
         "table": session.rel(out_path),
@@ -952,7 +1014,15 @@ def fit_history(
         "n_rows_without_value": n_missing,
         # {offset: share of rows where the lag was exactly that far back}.
         "offsets_answerable": answerable,
-        # In the ordering column's units, so an offset can be chosen against it.
+        # {window: median number of observations that fell inside it}. Read it
+        # beside `shortest_training_prefix`: on its own it sees only the training
+        # side, and a window too long to fill reports a healthy-looking count.
+        "window_observations": window_counts,
+        # The narrowest history any fold was fitted on. A window longer than this
+        # measures one thing in training and another at serving.
+        "shortest_training_prefix": shortest_prefix,
+        # In the ordering column's units, so an offset or a window length can be
+        # chosen against it.
         "block_span": block_span,
         "note": note,
     }

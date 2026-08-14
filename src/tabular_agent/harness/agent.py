@@ -298,6 +298,7 @@ def build_agent(model=DEFAULT_MODEL):
         offsets: list[float] | None = None,
         keep: int | None = None,
         table: str | None = None,
+        windows: list | None = None,
     ) -> dict:
         """Give each row its group's most recent earlier value, and its age.
 
@@ -333,13 +334,30 @@ def build_agent(model=DEFAULT_MODEL):
                 forecast_horizon; without that declaration, leave this empty and
                 take the last-known pair.
             keep: Observations retained per group. Defaults to just enough for
-                the largest offset; raise it for a series with gaps.
+                the largest offset or window; raise it for a series with gaps.
+            windows: Trailing averages, as [length, statistic] pairs — e.g.
+                [[90, "mean"], [364, "median"]] for "this group's mean over the
+                90 periods before this row" and "its median over the last 364".
+                Statistics are mean, std and median. Where an offset gives one
+                observation, a window averages a stretch of them — steadier, and
+                it cannot be thrown by a single unusual day.
+
+                Length is the whole game, and it fails at *both* ends. Too short
+                and the window holds almost nothing, because stored history stops
+                where the forecast starts; each length adds a `_count` column
+                saying how many observations it really held. Too long and the
+                earliest fold cannot fill it while a served row can, so the
+                column you train on and the column you serve are different
+                quantities — the result reports
+                `shortest_training_prefix`, and going past it is the more
+                expensive mistake of the two. The count will not warn you about
+                that one.
             table: Path to the source table. Omit to use the run's work table.
         """
         return _retryable(
             lambda: tools.fit_history(
                 ctx.deps.session, by=by, value=value, offsets=offsets,
-                keep=keep, table=table,
+                keep=keep, table=table, windows=windows,
             )
         )
 

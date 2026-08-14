@@ -173,6 +173,11 @@ Vocabulary used throughout:
   *(why history's columns are all `_ago`, why the offset's age became a 1/0 `_exact`
   flag while the latest-known one stayed a number, why no name says "days", and why
   `fit_history` now reports the block span the agent had no way to compute)*
+- [0052 — A window is a worse estimator of a better idea](0052-a-window-is-a-worse-estimator-of-a-better-idea.md)
+  *(slice 3 built and measured negative: the trailing window loses to 0046's
+  unbounded mean of the same key, the periodic key is the whole gain, a window
+  longer than the shortest fold prefix is train/serve skew — and the coverage
+  number added the same day rated the broken window higher than the good one)*
 
 ### Keeping the agent's surface small
 

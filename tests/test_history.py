@@ -345,3 +345,249 @@ def test_a_zero_or_negative_offset_is_refused():
         HistoryEncoder(["store"], "sales", "date", offsets=[0])
     with pytest.raises(ValueError, match="offsets must be positive"):
         HistoryEncoder(["store"], "sales", "date", offsets=[-1])
+
+
+# --- trailing windows (slice 3) ----------------------------------------------
+#
+# The panel gives store "a" one observation a day for ten days, sales 0, 2, 4 …
+# 18, so a window's contents are checkable by hand throughout.
+
+
+def test_a_window_averages_the_rows_own_stretch_of_the_past(panel):
+    enc = HistoryEncoder(["store"], "sales", "date", windows=[(3, "mean")], keep=10)
+    served = pd.DataFrame({"store": ["a"], "date": pd.to_datetime(["2015-01-11"])})
+
+    out = enc.fit(panel).transform(served)
+
+    # [01-08, 01-11) holds the 8th, 9th and 10th: 14, 16, 18.
+    assert out["store_sales_3_mean"].iloc[0] == 16.0
+    assert out["store_sales_3_count"].iloc[0] == 3.0
+
+
+def test_the_window_moves_with_the_row_rather_than_with_the_freeze(panel):
+    """0050: the property the whole slice exists for. A boundary-anchored value is
+    one draw shared by every served row; this must be a different stretch per row."""
+    enc = HistoryEncoder(["store"], "sales", "date", windows=[(3, "mean")], keep=10)
+    served = pd.DataFrame(
+        {"store": ["a"] * 3, "date": pd.to_datetime(["2015-01-11", "2015-01-12", "2015-01-13"])}
+    )
+
+    out = enc.fit(panel).transform(served)
+
+    # 14,16,18 -> 16,18 -> 18: each row draws its own window, and the count falls
+    # away as the row moves past the end of stored history.
+    assert out["store_sales_3_mean"].tolist() == [16.0, 17.0, 18.0]
+    assert out["store_sales_3_count"].tolist() == [3.0, 2.0, 1.0]
+    # `_latest` is the same number for all three, which is the contrast.
+    assert out["store_sales_latest"].tolist() == [18.0, 18.0, 18.0]
+
+
+def test_a_row_is_never_inside_its_own_window(panel):
+    """The right endpoint is strict. A self-included point in a mean over many is
+    diluted to invisibility, so this cannot be left to the per-fold freeze."""
+    enc = HistoryEncoder(["store"], "sales", "date", windows=[(3, "mean")], keep=10)
+
+    out = enc.fit(panel).transform(panel)
+    a = out[out["store"] == "a"]
+
+    # The 4th day's own sales are 6, and its window is the 1st-3rd: 0, 2, 4.
+    assert a["store_sales_3_mean"].iloc[3] == 2.0
+    # The first row has no past at all, and gets an empty window rather than itself.
+    assert a["store_sales_3_count"].iloc[0] == 0.0
+    assert np.isnan(a["store_sales_3_mean"].iloc[0])
+
+
+def test_an_empty_window_is_a_zero_count_and_a_missing_mean(panel):
+    """Distinct from a group that was never seen, which knows nothing at all."""
+    enc = HistoryEncoder(["store"], "sales", "date", windows=[(3, "mean")], keep=10)
+    enc.fit(panel)
+
+    past_the_end = enc.transform(
+        pd.DataFrame({"store": ["a"], "date": pd.to_datetime(["2015-02-20"])})
+    )
+    unseen = enc.transform(
+        pd.DataFrame({"store": ["zzz"], "date": pd.to_datetime(["2015-01-11"])})
+    )
+
+    assert past_the_end["store_sales_3_count"].iloc[0] == 0.0
+    assert np.isnan(past_the_end["store_sales_3_mean"].iloc[0])
+    # Nothing was stored for this group, so even the count is unknown.
+    assert np.isnan(unseen["store_sales_3_count"].iloc[0])
+
+
+def test_the_count_is_emitted_once_per_length_however_many_stats_are_asked(panel):
+    enc = HistoryEncoder(
+        ["store"], "sales", "date",
+        windows=[(3, "mean"), (3, "std"), (5, "median")], keep=10,
+    )
+
+    assert enc.output_columns[-3:] == [
+        "store_sales_5_median", "store_sales_3_count", "store_sales_5_count",
+    ]
+    assert enc.output_columns.count("store_sales_3_count") == 1
+
+
+def test_the_spread_of_a_single_observation_is_missing_not_zero(panel):
+    """A confident zero off one point says "this group never moves", which is the
+    same class of lie as a mean over one."""
+    enc = HistoryEncoder(["store"], "sales", "date", windows=[(3, "std")], keep=10)
+    served = pd.DataFrame(
+        {"store": ["a", "a"], "date": pd.to_datetime(["2015-01-11", "2015-01-13"])}
+    )
+
+    out = enc.fit(panel).transform(served)
+
+    # 14, 16, 18 -> sample sd 2; then a single observation -> nothing.
+    assert out["store_sales_3_std"].iloc[0] == pytest.approx(2.0)
+    assert np.isnan(out["store_sales_3_std"].iloc[1])
+
+
+def test_a_window_of_one_repeated_value_has_a_spread_of_zero():
+    """Zero is the honest answer when there really were several observations, and
+    float error must not turn it into a NaN that reads as "no data"."""
+    df = pd.DataFrame({"g": ["a"] * 4, "t": [1, 2, 3, 4], "v": [7.0, 7.0, 7.0, 7.0]})
+    enc = HistoryEncoder(["g"], "v", "t", windows=[(3, "std")], keep=10).fit(df)
+
+    out = enc.transform(pd.DataFrame({"g": ["a"], "t": [5]}))
+
+    assert out["g_v_3_std"].iloc[0] == 0.0
+
+
+def test_the_median_ignores_a_spike_the_mean_carries():
+    """0050's failure in miniature: the last open day before a holiday sold 53%
+    above normal, and it is the newest observation that a mean weights fully."""
+    df = pd.DataFrame(
+        {"g": ["a"] * 5, "t": [1, 2, 3, 4, 5], "v": [10.0, 10.0, 10.0, 10.0, 100.0]}
+    )
+    enc = HistoryEncoder(
+        ["g"], "v", "t", windows=[(5, "mean"), (5, "median")], keep=10
+    ).fit(df)
+
+    out = enc.transform(pd.DataFrame({"g": ["a"], "t": [6]}))
+
+    assert out["g_v_5_mean"].iloc[0] == 28.0
+    assert out["g_v_5_median"].iloc[0] == 10.0
+
+
+def test_a_window_answer_does_not_depend_on_the_batch(panel):
+    """0011, for the new columns: stored state, so one row alone and the same row
+    in company get identical answers."""
+    enc = HistoryEncoder(
+        ["store"], "sales", "date", windows=[(4, "mean"), (4, "std")], keep=10
+    ).fit(panel)
+    served = pd.DataFrame(
+        {"store": ["a", "b", "a"], "date": pd.to_datetime(["2015-01-11"] * 3)}
+    )
+
+    batch = enc.transform(served)
+    alone = enc.transform(served.iloc[[2]])
+
+    for col in ("store_sales_4_mean", "store_sales_4_std", "store_sales_4_count"):
+        assert alone[col].iloc[0] == batch[col].iloc[2]
+
+
+# --- windows: what is refused ------------------------------------------------
+
+
+def test_windows_need_a_declared_horizon(panel, ordered_folds):
+    with pytest.raises(ValueError, match="forecast_horizon"):
+        fit_history(
+            panel, ["store"], "sales", "date", folds=ordered_folds,
+            windows=[(3, "mean")],
+        )
+
+
+def test_a_window_shorter_than_the_horizon_is_refused(panel, ordered_folds):
+    """Stored history stops one horizon before the earliest row predicted, so such
+    a window covers only the gap and is empty for every served row."""
+    with pytest.raises(ValueError, match="shorter than the declared forecast horizon"):
+        fit_history(
+            panel, ["store"], "sales", "date", folds=ordered_folds,
+            windows=[(2, "mean")], forecast_horizon=5,
+        )
+
+
+def test_an_unknown_window_statistic_is_refused():
+    with pytest.raises(ValueError, match="unknown window statistic"):
+        HistoryEncoder(["store"], "sales", "date", windows=[(3, "mode")])
+
+
+def test_min_and_max_are_off_the_menu():
+    """0046's reasoning at a shorter range: an extreme over a trailing window is
+    close to a single observation, which is what 0049 was written about."""
+    for stat in ("min", "max", "sum"):
+        with pytest.raises(ValueError, match="deliberately absent"):
+            HistoryEncoder(["store"], "sales", "date", windows=[(3, stat)])
+
+
+def test_a_bare_length_is_refused_rather_than_assumed_to_mean_the_mean():
+    with pytest.raises(ValueError, match=r"\(length, statistic\) pairs"):
+        HistoryEncoder(["store"], "sales", "date", windows=[90])
+
+
+def test_a_zero_or_negative_window_is_refused():
+    with pytest.raises(ValueError, match="window lengths must be positive"):
+        HistoryEncoder(["store"], "sales", "date", windows=[(0, "mean")])
+
+
+def test_keep_defaults_to_covering_the_longest_window():
+    enc = HistoryEncoder(["g"], "v", "t", offsets=[7], windows=[(90, "mean")])
+    assert enc.keep == 91
+
+
+def test_a_window_too_long_to_store_is_refused_not_quietly_shortened():
+    """A window that averages the most recent 1000 observations of a longer series
+    is a wrong number under a confident name."""
+    with pytest.raises(ValueError, match="more history than an encoder may carry"):
+        HistoryEncoder(["g"], "v", "t", windows=[(5000, "mean")])
+
+
+def test_a_sparse_series_may_say_so_with_an_explicit_keep():
+    """Weekly readings over a year-long window need 52 slots, not 365, and the
+    caller is the only one who knows that."""
+    enc = HistoryEncoder(["g"], "v", "t", windows=[(5000, "mean")], keep=60)
+    assert enc.keep == 60
+
+
+# --- windows: serialisation --------------------------------------------------
+
+
+def test_a_windowed_encoder_survives_a_round_trip(panel):
+    enc = HistoryEncoder(
+        ["store"], "sales", "date", windows=[(4, "mean"), (4, "median")], keep=10
+    ).fit(panel)
+    served = pd.DataFrame({"store": ["a", "b"], "date": pd.to_datetime(["2015-01-12"] * 2)})
+
+    import json
+
+    revived = ENCODER_CLASSES[enc.kind].from_dict(json.loads(json.dumps(enc.to_dict())))
+
+    pd.testing.assert_frame_equal(enc.transform(served), revived.transform(served))
+
+
+def test_a_bundle_written_before_windows_existed_still_loads(panel):
+    enc = HistoryEncoder(["store"], "sales", "date", offsets=[2], keep=6).fit(panel)
+    old = {k: v for k, v in enc.to_dict().items() if k != "windows"}
+
+    revived = ENCODER_CLASSES[enc.kind].from_dict(old)
+
+    assert revived.windows == []
+    assert "store_sales_2_ago" in revived.output_columns
+
+
+def test_windows_are_frozen_per_fold_like_everything_else(panel, ordered_folds):
+    """The freeze is what makes a validation row's window match a served row's, so
+    the count has to fall away across a block rather than staying full."""
+    oof, _ = fit_history(
+        panel, ["store"], "sales", "date", folds=ordered_folds,
+        windows=[(4, "mean")], forecast_horizon=1, keep=10,
+    )
+
+    _, va = ordered_folds[-1]
+    block = oof.iloc[va]
+    counts = block["store_sales_4_count"].dropna()
+
+    assert len(counts) > 0
+    # Later rows in the block are further past the freeze, so their windows hold
+    # less — the same degradation `_latest_ago` reports as a growing age.
+    assert counts.iloc[-1] < counts.iloc[0]

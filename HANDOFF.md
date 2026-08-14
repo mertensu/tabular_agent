@@ -8,6 +8,100 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-14 (night, latest) — slice 3 built, and the measurement says it lost
+
+**Machine:** MacBook Air | **Branch:** master | **suite green.**
+Written up as [0052](docs/decisions/0052-a-window-is-a-worse-estimator-of-a-better-idea.md).
+
+Windows are in `fit_history(windows=[[364, "mean"]])`. Row-anchored `[row - w, row)`,
+strict right endpoint, `_count` per length, `WINDOW_STATS = (mean, std, median)`.
+Then three hand-driven Rossmann probes said it was not worth building.
+
+### The result, in the order it has to be read
+
+**1. The key is the gain, not the averaging.** Same tool, same 364 days, same stat:
+
+| key | probe | vs baseline |
+|---|---|---|
+| `Store` | 0.22072 | −0.00263 |
+| `Store`+`DayOfWeek` | 0.17352 | **+0.04458** |
+
+**2. And that +0.045 is mostly 0046, not slice 3.** The control nobody had run:
+
+| | probe | vs baseline |
+|---|---|---|
+| **all-time target mean of `Store_DOW` (0046)** | **0.15762** | **+0.06048** |
+| trailing 364 mean, `Store`+`DayOfWeek` (slice 3) | 0.17352 | +0.04458 |
+| both | 0.16944 | +0.04866 |
+
+**Slice 3 bought −0.01590 over what 0046 already had**, and stacking it on top of
+the all-time mean is *worse than the all-time mean alone*. The winner's *"sales
+for this store on a typical Monday over the last 6 months"* is two halves and
+**the half we were missing was the periodic key** — built in 0046, paid for in v7.
+
+`docs/slice3_windows.md` pre-registered exactly this: "if a window adds nothing,
+that is a publishable result and the slice should stop."
+
+### The new failure mode, and it is general
+
+Length sweep at a fixed key. Registered prediction was **monotone**; wrong:
+
+| window | probe | obs |
+|---|---|---|
+| 91 | 0.23365 | 3 |
+| **364** | **0.17352** | 39 |
+| 546 | 0.21840 | 58 |
+| 728 | 0.31097 | **59** |
+
+546 and 728 hold the *same* number of observations and are 0.093 apart, so
+coverage is not the mechanism. It is:
+
+> **A window longer than the shortest fold's training prefix cannot be filled in
+> training, while a served row fills it completely.**
+
+Work half 850 days, fold 0's prefix **136**. So w=728 trained at median 59 obs and
+served at **101** (1.71x); w=364 ran 39 against 49 (1.26x). Train/serve skew
+through a door 0048 did not cover — not *when* history stops but *how much* there
+was to summarise.
+
+### The gotcha, and it is mine again
+
+**`window_observations`, added this session to catch a badly-chosen window, rated
+the catastrophic one higher than the good one** (59 vs 39). The damage is in the
+*ratio between the training and serving sides* and the count only sees one side.
+0031's shape in the reporting layer for the second time in three records (0050
+caught it in `summarise_history`).
+
+Fixed generally: `fit_history` now returns **`shortest_training_prefix`** and warns
+when a window exceeds it, saying outright that the count is no guide there.
+
+### Decisions taken with Ulf
+
+- **Keep the code, record the loss.** One dataset is one reading, and Rossmann is
+  unusually stable per store-weekday — the feature was tested where it had least
+  to offer. A negative result that stays retestable is worth more than one that
+  does not.
+- **Keep `median`, explicitly unvalidated.** 0.0003 from the mean on the good key,
+  worse on `Store`. Dropping a stat because one dataset did not need it is the
+  mirror of adding one because it did.
+
+### Carry forward
+
+- **None of these gaps has a yardstick.** Ordered split ⇒ val is one period,
+  `val_se` is `None`, n=1 in the unit that varies (0022/0036/0041). Directions are
+  consistent across three comparisons; the numbers have no error bars. **0036's
+  paired bootstrap is still not wired in and is what would fix this.**
+- **Offsets `[364,728]` scored −0.0229 here against +0.0217 in v8.** Likely because
+  v8's agent had filtered `Open == 1` first, so a 364-day lookup could not land on
+  a closed day. Plausible, untested, named so it is not later assumed.
+- **Unexplained:** on the `Store` key, offsets alone −0.0229 and window alone
+  −0.0026 combined to **+0.0458**. Recorded as an oddity, not narrated.
+- Scripts: `probe_rossmann_windows.py`, `..._windows_control.py`,
+  `..._window_length.py`. All register predictions in their docstrings.
+- **Notebook** `phase5_history_and_the_horizon.ipynb` now 55 cells, sections 6–11,
+  ships unexecuted, every code cell smoke-tested in order.
+- **Quiz for slice 3 still owed** (0041/0042/0044's too).
+
 ## 2026-08-14 (night, later) — naming changed, flag replaces lag age, slice 3 planned
 
 **Machine:** MacBook Air | **Branch:** master | **426 tests pass.**
