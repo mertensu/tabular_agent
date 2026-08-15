@@ -8,6 +8,88 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-15 (later) — Restaurant v1 ran and was scored; the seal is a lower bound
+
+**Machine:** MacBook Air | **Branch:** master.
+Written up as [0060](docs/decisions/0060-the-seal-is-optimistic-at-a-horizon-it-cannot-reach.md).
+**Next session: 0057 — but follow [0058](docs/decisions/0058-the-ranking-failure-was-one-feature-not-the-block.md)'s
+revised order, not 0057's own.** 0057 step 1 says "fix the ranking block first";
+0058 withdrew that and 0059 built the interval instead. So: **lead-time-restricted
+aggregates first, then per-group trend extrapolation.**
+
+`scripts/run_restaurant_v1.py`, Rossmann v8's config verbatim. 17 tables, 5 terminal
+fits, 21.9 min, agent finalized itself. Five predictions registered before the run.
+
+### The measurement, and the ordering is the finding
+
+| | rmsle |
+|---|---|
+| validation (lgbm, selected) | 0.52099 |
+| **sealed holdout, blend — shipped** | **0.50176** |
+| Kaggle public (nearer half) | 0.51301 |
+| **Kaggle private (further half)** | **0.54398** |
+
+Val→sealed optimism was **negative on all five models** (−0.012 to −0.026), which
+reads as "the exam is honest" — the same signature v5 produced on Rossmann. It was
+not. **sealed→private is +0.042.** Four windows in time order, each fair about
+itself, each flattering the next.
+
+> **A sealed score is a lower bound on the error at the horizon you will be graded
+> at, not an estimate of it.**
+
+Ranks, both boards (2,150 teams): public ~1544 (top 72%), **private ~1369 (top
+64%), only +0.0118 above the median** (0.53223). For scale, 0054 measured
+store-identity + capacity on this dataset at **+0.0283** — one already-measured
+mechanism clears both median and top 10%.
+
+### A mechanism refuted, and only the private board could do it
+
+Prediction 2 said Kaggle would punish more at the far edge. Direction right (+0.031
+public→private). **Mechanism wrong:** joining both boards on team, the field's mean
+private−public is **+0.04464** against our **+0.03097**. Everyone decays with
+horizon and **we decay less than average** — our rank *improves* 72%→64%. So the
+decay says nothing about the cut reservation stream it was predicted to expose. A
+control run with those columns withheld is one script, not yet written.
+
+Read against the public board alone the story was available and wrong.
+
+### The other predictions
+
+- **1 confirmed** — 6 reservation features in the shipped model (67 total).
+- **3 confirmed** — **6 of 17 comparisons `sign_stable: False`**, the block mode's
+  first live firing. Every unstable table has |gain| < 0.003 against a block sd 2-5x
+  larger; two negative. The four real steps (+0.190, +0.034, +0.032, +0.013) are all
+  5/5 stable. It separated signal from tail cleanly.
+- **4 untested, still open** — the agent built 90/180/365-*day* windows on a
+  **ragged** spine where `fit_history` counts **rows**. Nothing caught it, nothing
+  measured it. Real gap in the tool.
+- **5 confirmed** — below median.
+
+### Unpredicted: the agent used the new instrument
+
+Stopped at 17 of 25 permitted tables, saying gains were *"below the probe's own
+standard error and not cross-block-stable … so I stopped rather than overfit."*
+0059 was eight hours old. **Patience cannot explain it** — on an ordered split
+`probe_se` is `None`, so the bar floors at zero and every positive gain still counts
+as progress. Weigh against 0027 (three advisory steers that changed nothing). n=1.
+
+Also: the agent read the sealed score post-finalize and narrated it. Known, open
+since 0042.
+
+### Not done, deliberately
+
+Submission **not clipped** — one prediction of 32,019 came out at 2868.5 against a
+training max of 877 (~0.0015 of rmsle). Flooring it after seeing the score is the
+correction 0022 exists to refuse. A general "predictions outside the training
+range" diagnostic would be legitimate and names no dataset.
+
+### Also this session
+
+`docs/decisions/README.md` indexed; HANDOFF pruned to the ~2-week rule and the
+08-05..08-13 entries compressed to summaries (full text at `801b52d:HANDOFF.md`).
+
+---
+
 ## 2026-08-15 — the ruler is fixed, and it would not have caught the thing it was built for
 
 **Machine:** MacBook Air | **Branch:** master | **479 tests pass** (was 456).

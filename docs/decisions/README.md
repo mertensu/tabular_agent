@@ -230,6 +230,18 @@ Vocabulary used throughout:
   instrument's power is **window length, not block count**. 0036's pairing ratio
   replicates on a second dataset; `min_gain_ratio` is deliberately still not gated
   on any of it)*
+- [0060 — The sealed block is optimistic at a horizon it cannot reach](0060-the-seal-is-optimistic-at-a-horizon-it-cannot-reach.md)
+  *(the first agent run on Recruit Restaurant, scored externally: validation was
+  **pessimistic** about the sealed block and the sealed block was **optimistic by
+  0.042** about Kaggle's private half — four windows in time order, each a fair
+  reading of itself and each flattering the next, so a sealed score is a **lower
+  bound** on the error at the graded horizon rather than an estimate of it. Confirms
+  0059's stated limitation on a second dataset. Also: 6 of 17 comparisons came back
+  `sign_stable: False` — the block mode's first live firing — and the agent stopped
+  early **citing it**, which is advisory information changing behaviour where 0027
+  recorded three failures. And a mechanism refuted by having both boards: our
+  horizon decay is **smaller** than the field's average, so it is a property of the
+  task and says nothing about the reservation skew it was predicted to expose)*
 
 ### Keeping the agent's surface small
 
