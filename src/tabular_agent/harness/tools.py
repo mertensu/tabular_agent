@@ -19,6 +19,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from ..compare import compare_predictions
 from ..cv import make_folds
 from ..encoders import TARGET_STATS
 from ..encoders import fit_encoding as _fit_encoding
@@ -273,8 +274,15 @@ def _score_on_held_out(
     spec,
     y_work: pd.Series,
     target_transform: str = "none",
-) -> tuple[float | None, float | None, str | None]:
-    """Score just-fitted models on held-out rows. ``(score, se, why_not)``.
+) -> tuple[float | None, float | None, str | None, np.ndarray | None]:
+    """Score just-fitted models on held-out rows. ``(score, se, why_not, preds)``.
+
+    The predictions come back with the score because they are the only thing that
+    makes a *paired* comparison possible later (`compare.py`): the difference
+    between two candidates can only be given an interval if both were evaluated on
+    the same rows and both prediction vectors survived. Recomputing them means
+    refitting, so they are returned here, where they already exist, and the caller
+    decides whether to keep them.
 
     ``models`` is a list because a run can ship an equal-weight average of the
     terminal candidates rather than one of them (0044). One model and several go
@@ -308,7 +316,7 @@ def _score_on_held_out(
 
     missing = [c for c in feature_names if c not in features.columns]
     if missing:
-        return None, None, f"replaying the table's lineage did not produce {missing[:5]}"
+        return None, None, f"replaying the table's lineage did not produce {missing[:5]}", None
 
     classes = None
     if spec.task_type in ("binary", "multiclass"):
@@ -349,7 +357,7 @@ def _score_on_held_out(
         if session.split_on
         else _bootstrap_se(spec.metric, y_val, preds, classes, spec.seed)
     )
-    return score, se, None
+    return score, se, None, np.asarray(preds)
 
 
 def _score_on_val(
@@ -360,7 +368,7 @@ def _score_on_val(
     spec,
     y_work: pd.Series,
     target_transform: str = "none",
-) -> tuple[float | None, float | None, str | None]:
+) -> tuple[float | None, float | None, str | None, np.ndarray | None]:
     """`_score_on_held_out` against the validation half — the leaderboard's exam.
 
     Kept as its own name because every caller in the run is this one, and the
@@ -370,6 +378,58 @@ def _score_on_val(
         session, session.val_path, source_path, models, feature_names, spec, y_work,
         target_transform=target_transform,
     )
+
+
+def _probe_preds_path(session: RunSession, table_path: str) -> str:
+    """Where a table's probe predictions on the validation half are kept.
+
+    One vector per table, `float64` over the validation rows — 400KB on a 50k-row
+    validation half, bounded by the table count the stop rule already caps. Kept
+    because a paired comparison needs both candidates' predictions on the same
+    rows (`compare.py`), and the alternative is refitting the parent every time a
+    child is scored, which doubles the cost of the one thing that runs on every
+    table.
+
+    Named from the table's own filename, so it survives a resume for the same
+    reason the tables do: the run directory is the state.
+    """
+    stem = os.path.splitext(os.path.basename(table_path))[0]
+    return session.ctx.path("probe_preds", f"{stem}.npy")
+
+
+def _load_probe_preds(session: RunSession, table_path: str) -> np.ndarray | None:
+    """A table's stored probe predictions, or ``None`` if it has none.
+
+    Missing is normal rather than exceptional: tables probed before this existed
+    have no file, and a table the probe could not score never wrote one. Callers
+    degrade to reporting the difference without an interval.
+    """
+    path = _probe_preds_path(session, table_path)
+    if not os.path.exists(path):
+        return None
+    try:
+        return np.load(path)
+    except Exception:  # noqa: BLE001 - a corrupt sidecar must not kill a tool call
+        return None
+
+
+def _val_order_values(session: RunSession) -> np.ndarray | None:
+    """The validation half's ordering column, or ``None`` on a random split.
+
+    This is what picks `compare_predictions`' mode, and it is read from the rows
+    rather than passed around as a flag — see that function for why. Returns
+    ``None`` when the column is missing from the validation file, which would
+    otherwise silently produce blocks cut on nothing.
+    """
+    if not session.split_on:
+        return None
+    try:
+        val = load_table(session.val_path)
+    except Exception:  # noqa: BLE001
+        return None
+    if session.split_on not in val.columns:
+        return None
+    return val[session.split_on].to_numpy()
 
 
 def probe_table(session: RunSession, table_path: str) -> dict:
@@ -418,7 +478,7 @@ def probe_table(session: RunSession, table_path: str) -> dict:
             }
         y = df[spec.target]
         fit = fit_probe(X, y, spec.task_type, spec.metric, spec.target_transform)
-        score, se, why_not = _score_on_val(
+        score, se, why_not, preds = _score_on_val(
             session, table_path, [fit.model], fit.feature_names, spec, y,
             target_transform=fit.target_transform,
         )
@@ -427,6 +487,15 @@ def probe_table(session: RunSession, table_path: str) -> dict:
 
     if score is None:
         return {"probe_score": None, "probe_unavailable": why_not}
+    if preds is not None:
+        # Written after the score, so a table with a number always has its
+        # predictions and never the reverse. Failing to persist them costs an
+        # interval on a later comparison, never the score itself, so it is not
+        # allowed to turn a successful probe into a failed tool call.
+        try:
+            np.save(_probe_preds_path(session, table_path), np.asarray(preds, dtype=float))
+        except Exception:  # noqa: BLE001 - see the docstring: this cannot fail loudly
+            pass
     return {
         "probe_score": round(score, 6),
         "probe_se": None if se is None else round(se, 6),
@@ -450,7 +519,48 @@ def _probe_and_compare(session: RunSession, table_path: str, source_rel: str) ->
     before = _source_reference(session, source_rel)
     if before is not None:
         out["probe_vs_source_table"] = _gain(out["probe_score"], before, session.resolved().metric)
+        out.update(_difference_interval(session, table_path, source_rel))
     return out
+
+
+def _difference_interval(session: RunSession, table_path: str, source_rel: str) -> dict:
+    """An interval around `probe_vs_source_table` — 0036's instrument, applied.
+
+    The gain on its own says a table beat its parent by some amount; it has never
+    said whether that amount is bigger than the evaluation rows' own noise. Every
+    feature decision this project has recorded was made without one, and several
+    were later withdrawn.
+
+    Returns an empty dict rather than nulls when it cannot be computed — a table
+    probed before predictions were stored, a parent that was never scored, a
+    validation half too small to block. An absent key reads as "not measured",
+    where a null field invites the reader to treat it as "measured, and zero".
+    """
+    parent_path = session.resolve_table(None) if source_rel is None else os.path.join(
+        session.run_dir, source_rel
+    )
+    mine = _load_probe_preds(session, table_path)
+    theirs = _load_probe_preds(session, parent_path)
+    if mine is None or theirs is None:
+        return {}
+    try:
+        val = load_table(session.val_path)
+        spec = session.resolved()
+        y_val = val[spec.target]
+        labels = (
+            sorted(pd.unique(y_val)) if spec.task_type in ("binary", "multiclass") else None
+        )
+        result = compare_predictions(
+            spec.metric, y_val, mine, theirs,
+            order_values=_val_order_values(session),
+            labels=labels,
+            seed=spec.seed,
+        )
+    except Exception:  # noqa: BLE001 - an interval is a nicety; the score is not
+        return {}
+    if result is None:
+        return {}
+    return {"probe_vs_source_interval": result}
 
 
 def _source_reference(session: RunSession, source_rel: str) -> float | None:
@@ -1557,7 +1667,7 @@ def train_tabular_model(
 
     cv_score = float(np.mean(result.fold_metrics))
     fold_spread = float(np.std(result.fold_metrics))
-    val_score, val_se, val_unavailable = _score_on_val(
+    val_score, val_se, val_unavailable, _ = _score_on_val(
         session, path, [result.final_model], result.feature_names, spec, y, target_transform
     )
 
@@ -1837,7 +1947,33 @@ _TABLE_COLUMNS = [
     # frame is the run's feature search, complete, and `tables.sort_values(
     # "probe_score")` is the question the search is actually asking.
     "probe_score", "probe_se", "probe_vs_source_table",
+    # The difference's own uncertainty (0036), flattened out of the nested record
+    # for the same reason `params` is a JSON string: a dict cell is unhashable and
+    # cannot be grouped, sorted or compared, which is all anyone wants to do with
+    # it. The full record stays on the journal row.
+    "probe_vs_source_se", "probe_vs_source_mode", "probe_vs_source_sign_stable",
 ]
+
+
+def _interval_columns(t: dict) -> dict:
+    """The scalar view of a table's difference interval, for `explore_journal`.
+
+    ``probe_vs_source_se`` deliberately carries a *different* quantity in each
+    mode — the paired standard error across resampled rows on a random split, the
+    standard deviation across consecutive blocks on an ordered one — because in
+    each case it is the spread of the same decision quantity, `vs_source_table`,
+    over the thing that actually varies there. ``probe_vs_source_mode`` is beside
+    it so nobody has to guess which, and comparing the two across split types is
+    the reader's error to avoid rather than a number to reconcile.
+    """
+    rec = t.get("probe_vs_source_interval") or {}
+    se = rec.get("paired_se") if rec.get("mode") == "paired_bootstrap" else rec.get("block_sd")
+    return {
+        "probe_vs_source_se": se,
+        "probe_vs_source_mode": rec.get("mode"),
+        # Ordered splits only: a random split has no periods to disagree.
+        "probe_vs_source_sign_stable": rec.get("sign_stable"),
+    }
 
 
 def _journal_frames(session: RunSession) -> dict:
@@ -1898,6 +2034,7 @@ def _journal_frames(session: RunSession) -> dict:
             "probe_score": t.get("probe_score"),
             "probe_se": t.get("probe_se"),
             "probe_vs_source_table": t.get("probe_vs_source_table"),
+            **_interval_columns(t),
         }
         for t in j.get("tables") or []
     ], columns=_TABLE_COLUMNS)
@@ -2308,7 +2445,7 @@ def _score_on_holdout(
             model = joblib.load(os.path.join(exp_dir, "final_model.joblib"))
             source_path = session.resolve_table(meta["source_table"])
             y_work = load_table(source_path)[spec.target]
-            score, se, why_not = _score_on_held_out(
+            score, se, why_not, _ = _score_on_held_out(
                 session, holdout_path, source_path, [model], meta["feature_names"], spec,
                 y_work, target_transform=meta.get("target_transform", "none"),
             )
@@ -2344,7 +2481,7 @@ def _score_on_holdout(
         try:
             source_path = session.resolve_table(head["source_table"])
             y_work = load_table(source_path)[spec.target]
-            score, se, why_not = _score_on_held_out(
+            score, se, why_not, _ = _score_on_held_out(
                 session, holdout_path, source_path, blend["models"],
                 head["feature_names"], spec, y_work,
                 target_transform=head.get("target_transform", "none"),
@@ -2407,7 +2544,7 @@ def finalize_run(session: RunSession) -> dict:
         # a number for it in the same units — and so its `optimism` on the sealed
         # rows is comparable to theirs. This is a measurement, not a selection:
         # nothing downstream compares it to anything before deciding.
-        val_score, val_se, _ = _score_on_val(
+        val_score, val_se, _, _ = _score_on_val(
             session, source_path, models, head["feature_names"], spec,
             load_table(source_path)[spec.target],
             target_transform=head.get("target_transform", "none"),

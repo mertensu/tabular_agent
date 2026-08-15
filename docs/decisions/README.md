@@ -218,6 +218,18 @@ Vocabulary used throughout:
   block is the odd one on composition rather than on recency, and n=4 gives a
   perfect ordering 1 time in 24 anyway; what survives is a composition diagnostic
   and ranking stability across blocks, neither of which changes which block ranks)*
+- [0059 — The interval belongs to the difference, not the score](0059-the-interval-belongs-to-the-difference-not-the-score.md)
+  *(builds 0036's unbuilt instrument and 0058's block diagnostic: a run now reports
+  an interval around `probe_vs_source_table` — a paired bootstrap over rows on a
+  random split, the difference recomputed across consecutive blocks on an ordered
+  one, the mode chosen by passing the ordering column rather than a flag because
+  the validation half is **not** stored in its own order. Measured against the
+  history arm Kaggle refuted: the row bootstrap called a difference that reverses
+  externally 27 standard errors from zero, blocking widened it 16x and still called
+  it stable over 44 days, and only a 90-day window exposed the decay — so the
+  instrument's power is **window length, not block count**. 0036's pairing ratio
+  replicates on a second dataset; `min_gain_ratio` is deliberately still not gated
+  on any of it)*
 
 ### Keeping the agent's surface small
 

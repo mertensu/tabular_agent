@@ -8,6 +8,98 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-15 — the ruler is fixed, and it would not have caught the thing it was built for
+
+**Machine:** MacBook Air | **Branch:** master | **479 tests pass** (was 456).
+Written up as [0059](docs/decisions/0059-the-interval-belongs-to-the-difference-not-the-score.md).
+0036's paired bootstrap is **built** — owed since 2026-08-13 and named the blocking
+item in four entries.
+
+**Priority call:** 0058's list is capabilities; this is the instrument that measures
+them. Seven feature readings had been decided on differences with no interval, and
+0052/0053/0058 are a trail of mechanisms withdrawn afterwards. Lead-time-restricted
+aggregates (0058 item 1) is still next; it now has a yardstick to be measured with.
+
+### What was built
+
+`src/tabular_agent/compare.py`. Every table-vs-parent comparison now carries an
+interval around the *difference*, not two point scores against a pooled `val_se`.
+
+- **Random split → paired bootstrap over rows.** One resample, both candidates
+  scored on it. That requires both prediction vectors, so `probe_table` now stores
+  each table's validation predictions (`run_dir/probe_preds/<id>.npy`, one float64
+  vector, 400KB on Rossmann, bounded by `max_tables`).
+- **Ordered split → the difference recomputed across consecutive blocks.** A row
+  bootstrap is refused there for the reason `val_se` already was: the rows are one
+  *period*, and resampling inside it cannot see which period it is.
+- **The mode is chosen by passing the ordering column, not a flag** — a flag lets a
+  caller say "ordered" without supplying the order, the one case that cannot be
+  served.
+- `_score_on_held_out` returns a 4-tuple now (predictions alongside the score); six
+  call sites unpack one more value.
+
+### The bug the design was written around
+
+**The validation half is not stored in its ordering column's order.** `RunSession`
+picks the val positions in time order then writes them with `np.sort(val_pos)` —
+which sorts the *positions*, so the file comes back in the input's row order.
+Rossmann's raw file is **reverse** chronological (`ship_rossmann_median.py` was
+already bitten by this). Blocking on file order would have cut five arbitrary
+slices and reported a reassuring number. The ordering column is a required argument
+and the sort happens inside the instrument.
+
+### The measurement, and my prediction half failed
+
+`scripts/probe_difference_interval.py`, against the history arm Kaggle already
+refuted (t9 vs t8 in `_runs/ship_rossmann_median`; **−0.0301 private**).
+
+| instrument | reading |
+|---|---|
+| pooled gain, t9 over t8 | **+0.02028** |
+| paired bootstrap over rows | se **0.00074** → **gain/se 27.3** |
+| pairing ratio | **0.371** |
+| blocks, 44-day val window | sd **0.01214**, `sign_stable` **True**, 5/5 |
+| blocks, 90-day window (val+holdout) | sd **0.01670**, `sign_stable` **False**, 8/10 |
+| Kaggle, Aug–Sep | **−0.0301** |
+
+1. **The row bootstrap is confidently wrong** — 27 standard errors from zero for a
+   difference that reverses externally.
+2. **0036's pairing ratio replicated**: 0.371 inside its 0.18–0.37, on a second
+   dataset, a different metric, 50,175 val rows against 292. 0036 named that as the
+   thing it could not establish.
+3. **Blocking helped 16x and was still not enough.** `gain/se` 27.3 → 1.7, but all
+   five blocks still favoured the history table. **A run would not have caught it.**
+   Registered prediction 2 said the blocks would disagree; on the window the harness
+   actually uses, they did not.
+4. **The window was the problem, not the block count.** At 90 days the blocks
+   disagree, the pooled gain nearly halves, and the decay is direct: first five
+   blocks **+0.0200**, last five **+0.0022**. Kaggle's window starts two weeks later
+   and reads −0.0301 — the same line continued.
+
+So the limitation `compare.py` states in its own docstring *before* it was measured
+is the one that bit: blocking samples the periods it has. More blocks over the same
+44 days would not help; reaching further out would, and that is 0043's trade-off,
+not this instrument's.
+
+### Deliberately not done
+
+**`min_gain_ratio` is unchanged at 0.25.** 0028 left the magnitude open and 0036
+proposed this as a candidate, but that is one comparison on one dataset — picking a
+multiple of the block sd from it is 0034's refusal verbatim. The interval is
+reported; nothing is gated on it.
+
+Also: `tests/test_compare.py` (15), `tests/test_compare_harness.py` (8),
+`notebooks/phase5_the_interval_on_a_difference.ipynb` (35 cells, 14 code, ships
+unexecuted, every code cell smoke-tested in order).
+
+### Still owed
+
+**Quizzes**: this chunk (asked, unanswered), slice 3, 0041/0042/0044, house-prices
+capacity. `scripts/run_rossmann.py` still broken since 0035. The request timeout is
+still only patched in one driver.
+
+---
+
 ## 2026-08-14 (night, newest) — four submissions, and the ruler is the problem
 
 **Machine:** MacBook Air | **Branch:** master.
