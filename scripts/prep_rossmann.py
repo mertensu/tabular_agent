@@ -151,6 +151,51 @@ SPLIT_ON = "Date"
 
 TEST_OUT = os.path.join(RAW, "test_joined.parquet")
 
+#: Both boards, because comparing across them is a real error and this project
+#: made it. Every Rossmann script until now carried a hardcoded `median: 0.11677`
+#: taken from the **public** board, while the numbers quoted beside it — v7's
+#: 0.13813, the four-arm table in 0056 — are **private** scores. The private
+#: median is 0.12967, so that comparison overstated the gap by 0.0129, which is
+#: larger than the gap itself (0061).
+#:
+#: Read from the files rather than typed, so the constant cannot drift from the
+#: board it claims to describe.
+LEADERBOARD_PUBLIC = os.path.join(
+    RAW, "rossmann-store-sales-publicleaderboard-2026-08-11T08:17:02.csv"
+)
+LEADERBOARD_PRIVATE = os.path.join(
+    RAW, "rossmann-store-sales-privateleaderboard-2026-08-15T11:59:39.csv"
+)
+
+
+def leaderboard(private: bool = True) -> dict:
+    """Best / top-10% / median off a board. Private by default — it is the one
+    that decides the competition, and the one our submissions are scored on."""
+    path = LEADERBOARD_PRIVATE if private else LEADERBOARD_PUBLIC
+    if not os.path.exists(path):
+        return {}
+    s = pd.read_csv(path)["Score"].sort_values().reset_index(drop=True)
+    n = len(s)
+    return {"best": round(float(s.iloc[0]), 5),
+            "top 10%": round(float(s.iloc[n // 10]), 5),
+            "median": round(float(s.iloc[n // 2]), 5)}
+
+
+def leaderboard_rank(score: float, private: bool = True) -> str:
+    """Where an rmspe would have placed. **Pass a score from the same board.**
+
+    The default is private because that is what a submission is finally judged on;
+    passing a public score here silently answers a different question, which is
+    the mistake this helper exists to make harder.
+    """
+    path = LEADERBOARD_PRIVATE if private else LEADERBOARD_PUBLIC
+    if not os.path.exists(path):
+        return "no leaderboard file"
+    s = pd.read_csv(path)["Score"].sort_values().reset_index(drop=True)
+    rank = int((s < score).sum()) + 1
+    board = "private" if private else "public"
+    return f"rank ~{rank}/{len(s)} (top {rank / len(s):.0%}, {board})"
+
 
 def prep_test() -> pd.DataFrame:
     """The competition's test rows, put through the *same* join and typing.

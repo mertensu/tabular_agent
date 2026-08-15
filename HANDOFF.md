@@ -8,6 +8,56 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
+## 2026-08-15 (latest) — we were measuring against the wrong board
+
+**Machine:** MacBook Air | **Branch:** master.
+Written up as [0061](docs/decisions/0061-we-were-measuring-against-the-wrong-board.md).
+
+Every Rossmann script hardcoded `median: 0.11677` off the **public** board while
+quoting **private** scores beside it. Found only because 0060 made the identical
+mistake on Restaurant an hour earlier, so Rossmann got checked.
+
+| board | best | top 10% | median |
+|---|---|---|---|
+| public | 0.08932 | 0.10294 | 0.11678 |
+| **private** | 0.10021 | 0.11774 | **0.12967** |
+
+**v7 blend: private 0.13813 = top 58%, +0.00846 from the median** — not the
++0.0214 this file has been repeating. **The gap is a third of what we thought.**
+Distance to private top 10% is 0.0204.
+
+That does not make the work better — the rank is what it always was — but it
+changes what counts as worth building: **a mechanism worth 0.01 now clears the
+median**, where under the old reference line nothing short of 0.021 did.
+
+**The trap in reading that optimistically:** capacity *was* already spent, on a
+bare feature block, and that arm sits at top 69% — behind v7's chain at 200 trees
+(top 58%). The untested cell is still **v7's chain at a real budget**.
+
+### Unlooked-for: we are more horizon-robust than the field, on both datasets
+
+| | field mean, private − public | ours | Spearman |
+|---|---|---|---|
+| Rossmann | +0.01473 | **+0.00881** | 0.969 |
+| Restaurant | +0.04464 | **+0.03097** | 0.928 |
+
+Rank improves on both (62%→58%, 72%→64%). Either the ordered split asks the
+forecasting question honestly (0029), or a mid-table model has less to lose and
+this is regression to the mean. **Not resolved** — the test is whether it survives
+among teams at similar public scores, one groupby, not run.
+
+Also: Rossmann's between-board Spearman is **0.969**. Its shake-up reputation is
+about rank movement at the very top, not a noisy score distribution — which means
+0045 treated the private board as a cleaner seal than it credited.
+
+### Fixed
+
+`prep_rossmann.leaderboard(private=True)` / `leaderboard_rank(score,
+private=True)` read both CSVs from disk, defaulting to private. Runner constants
+deliberately **not** rewritten — they are inputs to runs that already happened.
+
+---
+
 ## 2026-08-15 (later) — Restaurant v1 ran and was scored; the seal is a lower bound
 
 **Machine:** MacBook Air | **Branch:** master.

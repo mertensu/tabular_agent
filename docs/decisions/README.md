@@ -242,6 +242,16 @@ Vocabulary used throughout:
   recorded three failures. And a mechanism refuted by having both boards: our
   horizon decay is **smaller** than the field's average, so it is a property of the
   task and says nothing about the reservation skew it was predicted to expose)*
+- [0061 — We were measuring against the wrong board](0061-we-were-measuring-against-the-wrong-board.md)
+  *(every Rossmann script hardcoded the **public** median 0.11677 while quoting
+  **private** scores beside it. The private median is **0.12967**, so our best
+  submission is **+0.0085** from median and top 58%, not the +0.021 the project has
+  been repeating — a mechanism worth 0.01 now clears the bar where nothing under
+  0.021 did. Found only because 0060 made the same mistake on Restaurant an hour
+  earlier. Also, on **both** datasets the field degrades more than we do from the
+  public to the private half of the test block (+0.0147 vs our +0.0088; +0.0446 vs
+  our +0.0310) — cause unresolved, and regression to the mean is not ruled out.
+  Corrects a reference line, no measurement)*
 
 ### Keeping the agent's surface small
 
