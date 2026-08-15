@@ -8,7 +8,45 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-15 (latest) — we were measuring against the wrong board
+## 2026-08-15 (latest) — 0057 item 1 designed, build started
+
+**Machine:** MacBook Air | **Branch:** master.
+Design written up as [0062](docs/decisions/0062-a-stream-is-a-second-input-and-its-observation-time-is-a-column.md)
+**before** the code. Read that first — it is the plan, not a summary of one.
+
+Building 0057 item 1 (lead-time-restricted stream aggregates), per 0058's revised
+order. **No code written yet at the time of this entry.**
+
+**The build order is 0062's, and its step list is the todo list:**
+
+1. `StreamAggregateEncoder` in `encoders.py` + tests
+2. stream registry on `RunSession`, surfaced in `inspect_data` + brief
+3. `fit_stream_aggregate` in `harness/tools.py` + `harness/agent.py`
+4. `Pipeline.transform(df, streams=...)`, `predict_bundle`, bundle manifest
+5. `prep_restaurant.py` writes the stream out (collapsed column stays, 0029)
+6. notebook + quiz Ulf
+
+**Two decisions already taken, do not re-litigate them:**
+
+- **Recipe, not materialised state.** The encoder stores only
+  `(by, value, event_time, observed_at, lead, stat)`; the stream is passed in
+  again at predict time. Storing the precomputed `{(key, event_time) -> value}`
+  map needs no plumbing at all and was still rejected — it only works while the
+  stream file already contains the future, which is true of a Kaggle download and
+  false of any real serving. See 0062's "What was rejected".
+- **No probe first.** Measuring "does the lead help on Restaurant" was proposed
+  and dropped: that is the leaderboard-shaped question CLAUDE.md rules out. The
+  library question is whether the agent can express it; 0029 says the agent
+  decides whether to use it.
+
+**Gotcha for whoever picks this up:** 0057 claims item 1 was found independently
+twice. 0062 narrows that — the Rossmann winner's "month ahead models" restrict an
+aggregate of the *main table's own past*, which `fit_history` largely does
+already. The bitemporal-stream-at-another-grain case is one dataset of four.
+
+---
+
+## 2026-08-15 — we were measuring against the wrong board
 
 **Machine:** MacBook Air | **Branch:** master.
 Written up as [0061](docs/decisions/0061-we-were-measuring-against-the-wrong-board.md).

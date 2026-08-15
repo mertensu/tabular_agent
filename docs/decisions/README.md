@@ -252,6 +252,17 @@ Vocabulary used throughout:
   public to the private half of the test block (+0.0147 vs our +0.0088; +0.0446 vs
   our +0.0310) — cause unresolved, and regression to the mean is not ruled out.
   Corrects a reference line, no measurement)*
+- [0062 — A stream is a second input, and its observation time is a column](0062-a-stream-is-a-second-input-and-its-observation-time-is-a-column.md)
+  *(**accepted, being built** — the record 0057 item 1 asks for. A related file at
+  a finer grain whose records carry both the time they are *about* and the time
+  they became *knowable*: collapsing it to a column discards the second, and 36% of
+  this dataset's reservations were booked with zero days' notice, so the column is
+  systematically larger in training than at serving and no guard here sees it. The
+  encoder stores the **recipe, not the numbers** (0010) and the stream is handed in
+  again at predict; materialising it was rejected because it only works while the
+  file already contains the future, which is 0050's frozen anchor. Also narrows
+  0057's "found twice" claim — the principle was, the second-input plumbing was
+  not)*
 
 ### Keeping the agent's surface small
 
