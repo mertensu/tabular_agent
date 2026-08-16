@@ -289,6 +289,18 @@ Vocabulary used throughout:
   and a per-feature knob lets the agent work around the exam instead of fixing it.
   The discriminating test against the stream: there, no combination of existing
   tools could express the honest feature at all)*
+- [0065 — The agent found the leak, built the honest table, and the ruler overruled it](0065-the-agent-found-the-leak-and-the-ruler-overruled-it.md)
+  *(**the first run with a declared stream**, and it is v1 with exactly one change.
+  The agent reached both streams, chose a ladder of leads (7/14/30 — the
+  registered prediction of "at the declared horizon" was wrong), and diagnosed the
+  cut on its own off `column_notes`, building the table without the collapsed
+  columns. **The probe scored that honest table 0.0085 worse — 2.9 block sd, every
+  block agreeing — and `best_table` is the argmax, so the leaky table shipped.**
+  Adding honest columns helped (+0.005); removing dishonest ones was punished.
+  Supplying the capability is necessary and not sufficient: no block of these rows
+  can measure the difference, because every one shares the cut. 0059's interval was
+  confident and wrong for the second time. No fix chosen — three shapes named,
+  spanning 0030, 0035 and 0041/0043)*
 
 ### Keeping the agent's surface small
 

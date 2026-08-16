@@ -206,16 +206,24 @@ def summarise_streams(run_dir: str) -> dict:
         {},
     )
     feats = row.get("features") or []
+    # The two kinds of reservation column in the shipped model, separated by the
+    # columns the stream tables actually produced rather than by a substring.
+    #
+    # The first version of this tested `"_lead" in f` and so counted
+    # `air_reserve_lead_days` as honest — a *collapsed* column from the prep
+    # script holding the mean booking notice, carrying the same timing caveat as
+    # the rest of the collapse. It printed 11 honest and 4 collapsed where the
+    # truth is 9 and 6. 0050's gotcha in the reporting layer again: a script's
+    # summary of its own run is not evidence for anything.
+    produced = {c for t in stream_tables for c in (t.get("new_columns") or [])}
+    honest = [f for f in feats if f in produced]
+    collapsed = [f for f in feats if "reserve" in f and f not in produced]
     return {
         "stream_tables_built": len(stream_tables),
         "leads_asked_for": sorted({x for t in stream_tables for x in (t.get("leads") or [])}),
         "streams_used": sorted({t.get("stream") for t in stream_tables}),
-        # The two kinds of reservation column in the shipped model, side by side.
-        # `_lead` is the honest one; the rest are the collapse.
-        "honest_features_shipped": [f for f in feats if "_lead" in f],
-        "collapsed_features_shipped": [
-            f for f in feats if "reserve" in f and "_lead" not in f
-        ],
+        "honest_features_shipped": honest,
+        "collapsed_features_shipped": collapsed,
         "best_n_features": len(feats),
     }
 

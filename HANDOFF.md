@@ -8,7 +8,75 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-16 (latest) — 0062 steps 1-4 built; the grain moved into the library
+## 2026-08-16 (latest) — Restaurant v2 ran: the agent found the leak and lost the argument
+
+**Machine:** MacBook Air | **Branch:** master | **553 tests pass**.
+Written up as [0065](docs/decisions/0065-the-agent-found-the-leak-and-the-ruler-overruled-it.md).
+0062 steps 5 and the run are done; **step 6 (notebook) is the only one left**.
+
+`scripts/run_restaurant_v2.py` — v1 with **one change**, the streams declared. 13
+tables, 5 terminal fits, 8.2 min, agent finalized itself. Five predictions
+registered in the docstring before it started.
+
+### The result, and the ordering is the finding
+
+| table | | probe | vs parent | block sd | stable |
+|---|---|---|---|---|---|
+| t4 | stream aggregate, air, leads 7/14/30 | 0.55340 | **+0.00497** | 0.00287 | True |
+| t5 | stream aggregate, hpg, leads 7/14 | 0.55546 | −0.00206 | 0.00091 | True |
+| **t7** | target — **shipped** | **0.52135** | +0.03205 | 0.00458 | True |
+| **t8** | t7 with the collapsed reservation columns dropped | 0.52984 | **−0.00849** | 0.00297 | True |
+
+The agent used both streams, **diagnosed the cut itself off `column_notes`**, built
+the honest table — and `best_table` is the argmax of the probe, so the leaky one
+shipped. Its own closing words: *"I deliberately built and tested a version without
+them (t8, 0.5298) to avoid that leak, but the harness's automatic selection of the
+best table chose the version that includes them."*
+
+> **Adding honest columns helped. Removing dishonest ones was punished, at 2.9
+> block sd with every block agreeing.** The ruler is not undecided; it is confident
+> and pointing the wrong way — because no block of these rows can measure the
+> difference, every one of them sharing the cut.
+
+Predictions: **1 confirmed** (it reached the stream at all), **2 refuted** (it chose
+a *ladder* 7/14/30, not the declared horizon of 1 — the tool's own intended use,
+which the prediction failed to consider), **3 confirmed in a sharper form**,
+**4 confirmed** (9 honest and 6 collapsed columns shipped, of 58), **5 open**.
+
+Sealed optimism negative on all five (−0.009 to −0.025) — v1's exact signature
+before Kaggle punished it by +0.042. **A run cannot detect this from inside
+itself.**
+
+### Owed, and it is the actionable item
+
+**`_runs/restaurant_v2/submission.csv` is written and not scored.** 0065 registers
+the prediction that v2 decays *less* sealed→private than v1's +0.042, despite v2's
+sealed number (0.50571) being marginally worse than v1's (0.50176). Upload it
+before doing anything else with this thread — the record says which way to read
+both outcomes.
+
+### Two gotchas
+
+- **0059's block interval was confident and wrong, for the second time.** t8 reads
+  `sign_stable: True` at 2.9 sd. That is not a bug — blocking samples the periods
+  it has, and all of them share the defect — but stop citing `sign_stable` as if it
+  bore on honesty.
+- **My summariser flattered the run.** It classified shipped columns as honest by
+  testing `"_lead" in name`, which caught `air_reserve_lead_days` — a *collapsed*
+  column. Printed 11 honest / 4 collapsed; truth is 9 / 6. 0050's shape in the
+  reporting layer for the third time.
+
+### The open decision, deliberately not taken
+
+Three shapes for letting an agent's correct diagnosis survive, none chosen: a
+channel to mark a table as not-to-ship (narrower than returning the terminal
+choice, which 0035 removed on purpose); extending the serving declaration from
+*presence* to *provenance* (the gap 0030 leaves); or an evaluation block that does
+not share the cut (0041/0043). Needs its own record and probably a second dataset.
+
+---
+
+## 2026-08-16 — 0062 steps 1-4 built; the grain moved into the library
 
 **Machine:** MacBook Air | **Branch:** master | **552 tests pass** (was 479).
 Two new records: [0063](docs/decisions/0063-the-grain-is-measured-from-the-table-not-required-of-the-caller.md)
