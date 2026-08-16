@@ -43,7 +43,50 @@ class Pipeline:
             {"type": "filter", "code": code, "func_name": func_name, "train_only": True}
         )
 
-    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+    def stream_requirements(self) -> dict[str, dict]:
+        """``{stream name: what its file must contain}`` (0062).
+
+        A stream aggregate stores the *recipe* and recomputes from the file, so
+        the file has to come back at predict time. Read off the steps rather than
+        tracked separately: a requirement kept in a second place is a requirement
+        that can disagree with what the steps actually need.
+
+        The columns are named because whoever calls ``predict_bundle`` a year
+        later has the file and no idea which of its timestamps this bundle read as
+        the observation time — and reading the wrong one builds the feature out of
+        the future without erroring.
+        """
+        needed: dict[str, dict] = {}
+        for step in self.steps:
+            if step["type"] != "encode":
+                continue
+            enc = step["encoder"]
+            if enc["kind"] != "stream_aggregate":
+                continue
+            needed.setdefault(enc["stream"], {
+                "event_time": enc["event_time"],
+                "observed_at": enc["observed_at"],
+                "columns": [],
+            })
+            for col in [*enc["by"], enc["value"]]:
+                if col not in needed[enc["stream"]]["columns"]:
+                    needed[enc["stream"]]["columns"].append(col)
+        return needed
+
+    def required_streams(self) -> list[str]:
+        """Named second inputs this pipeline cannot be replayed without."""
+        return sorted(self.stream_requirements())
+
+    def transform(self, df: pd.DataFrame, streams: dict | None = None) -> pd.DataFrame:
+        """Replay every step. ``streams`` supplies the second inputs by name.
+
+        Default ``None``, so every pipeline built before streams existed replays
+        exactly as it did. A pipeline that *needs* one and is handed none fails
+        loudly rather than producing the column from nothing — see
+        :class:`~tabular_agent.encoders.StreamAggregateEncoder`, where the refusal
+        lives, because only the encoder knows which stream it wanted.
+        """
+        streams = streams or {}
         out = df
         for step in self.steps:
             # Train-only steps are history, not instructions. Replaying a row
@@ -54,7 +97,13 @@ class Pipeline:
                 continue
             if step["type"] == "encode":
                 enc = ENCODER_CLASSES[step["encoder"]["kind"]].from_dict(step["encoder"])
-                out = enc.transform(out)
+                # Only the encoders that declare a stream are handed one, so the
+                # other four keep their one-argument signature and nothing about
+                # them had to change to make room for this.
+                if step["encoder"]["kind"] == "stream_aggregate":
+                    out = enc.transform(out, streams.get(step["encoder"]["stream"]))
+                else:
+                    out = enc.transform(out)
             elif step["type"] == "transform":
                 # Imported lazily so predict does not require the sandbox unless
                 # a code step is actually present.
@@ -93,6 +142,13 @@ def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_name
         # in log-dollars and look plausible doing it.
         "target_transform": target_transform,
     }
+    # Derived from the steps, never passed in. A bundle that needs a second input
+    # has to say so where somebody will read it — the alternative is a file that
+    # predicts only when the caller happens to know, and a `streams=` argument
+    # nobody knew to pass is indistinguishable from one that was not needed.
+    requirements = pipeline.stream_requirements()
+    if requirements:
+        manifest["streams"] = requirements
     with open(os.path.join(bundle_dir, "pipeline.json"), "w") as f:
         json.dump(manifest, f, indent=2)
     return bundle_dir
@@ -111,11 +167,23 @@ def load_bundle(bundle_dir: str) -> dict:
         # Bundles written before target transforms existed have no such key and
         # must keep predicting exactly as they did.
         "target_transform": manifest.get("target_transform", "none"),
+        # {name: the columns that file must carry}. Absent on every bundle
+        # written before streams existed, which is what "needs nothing extra"
+        # looks like.
+        "streams": manifest.get("streams", {}),
     }
 
 
-def predict_bundle(bundle: dict, raw_df: pd.DataFrame) -> np.ndarray:
+def predict_bundle(bundle: dict, raw_df: pd.DataFrame,
+                   streams: dict | None = None) -> np.ndarray:
     """Replay the lineage, predict with every model in the bundle, combine.
+
+    ``streams`` supplies the second inputs a stream aggregate needs, by name
+    (0062). It is the caller's job to hand in the file **as it stands now** rather
+    than as it stood at fit time — that is the entire reason the encoder stores a
+    recipe instead of the numbers, and a bundle that shipped its own copy would be
+    frozen the moment it was written. A bundle that requires one and is given none
+    is refused here, with the columns its file has to carry.
 
     **Each model's target transform is inverted before the weights are applied**,
     so the combination is an average of predicted *targets*. The other order —
@@ -130,7 +198,27 @@ def predict_bundle(bundle: dict, raw_df: pd.DataFrame) -> np.ndarray:
     a single-model bundle the two are identical, which is every bundle this
     library wrote before 0044.
     """
-    features = bundle["pipeline"].transform(raw_df)
+    streams = streams or {}
+    # Checked here rather than left to the encoder, which knows only its own name.
+    # One message naming everything that is missing, and what each file must hold,
+    # beats discovering them one raised exception at a time.
+    requirements = bundle["pipeline"].stream_requirements()
+    absent = [name for name in sorted(requirements) if name not in streams]
+    if absent:
+        needs = "; ".join(
+            f"{name}: event time {requirements[name]['event_time']!r}, observation "
+            f"time {requirements[name]['observed_at']!r}, plus "
+            f"{requirements[name]['columns']}"
+            for name in absent
+        )
+        raise ValueError(
+            f"this bundle was built on stream(s) {absent} and cannot predict without "
+            f"them: pass streams={{name: frame}}. Each needs — {needs}. Hand in the "
+            "file as it stands now, not a copy from training time: the whole point of "
+            "storing the recipe is that the records which have arrived since are the "
+            "ones a served row should be reading."
+        )
+    features = bundle["pipeline"].transform(raw_df, streams=streams)
     X = features[bundle["feature_names"]]
     task_type = bundle["task_type"]
     transform = bundle.get("target_transform", "none")

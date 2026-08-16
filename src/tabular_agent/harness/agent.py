@@ -366,6 +366,62 @@ def build_agent(model=DEFAULT_MODEL):
         )
 
     @agent.tool
+    def fit_stream_aggregate(
+        ctx: RunContext[Deps],
+        stream: str,
+        by: list[str],
+        value: str,
+        leads: list[float],
+        stats: list[str] | None = None,
+        table: str | None = None,
+    ) -> dict:
+        """Summarise a second input per row, counting only what was knowable in time.
+
+        Use when the run declares a **stream** — `inspect_data` lists them. A
+        stream is a related file at a finer grain than the table: several of its
+        records belong to one row of yours, and each record says both what time it
+        is *about* and when it became *knowable*.
+
+        That second time is the point. Records keep arriving right up to the
+        moment a thing happens, so a training row can be shown bookings made the
+        same day while a row you are asked to forecast never can. Summing the file
+        as it stands builds exactly that column, it scores beautifully in
+        validation — which is drawn from the same uncut file — and it is worth
+        much less than it looks at predict time.
+
+        `leads` fixes it. `leads=[7]` counts only the records observed at least 7
+        periods before each row, which is what a forecast issued a week ahead
+        would have had. Several leads are several features, not alternatives.
+
+        Every statistic gets a `_count` column beside it. Read them together: an
+        aggregate over one record and one over forty are the same number under the
+        same name, and only the count separates them.
+
+        Args:
+            stream: Name of a stream declared on this run — see `inspect_data`.
+            by: Column(s) forming the join key. Must carry the **same names** in
+                the table and in the stream, and must exist at predict time.
+            value: The stream column to aggregate. It lives in the stream, not in
+                your table.
+            leads: How far ahead of a row a record had to be observed to count,
+                in the ordering column's units — e.g. [7, 30]. Each must be at
+                least the task's declared forecast_horizon, since no row you are
+                scored on could have anything more recent. Note the horizon is the
+                *floor* of a scored block: a lead at the floor is honest for the
+                block's earliest rows and generous towards its far edge, and the
+                result reports `block_span` so you can pick against it.
+            stats: Which statistics of `value`, from sum, mean and std. Defaults
+                to ["sum"]. The count comes with all of them, always.
+            table: Path to the source table. Omit to use the run's work table.
+        """
+        return _retryable(
+            lambda: tools.fit_stream_aggregate(
+                ctx.deps.session, stream=stream, by=by, value=value, leads=leads,
+                stats=stats, table=table,
+            )
+        )
+
+    @agent.tool
     def filter_rows(
         ctx: RunContext[Deps],
         code: str,

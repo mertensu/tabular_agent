@@ -133,6 +133,19 @@ def render_brief(session: RunSession) -> str | None:
             "what the data is — which `inspect_data` returns and nothing else has."
         )
 
+    # Read off the session, not the journal: a stream is declared on the run and
+    # is true from the first call, where the journal only learns about it once
+    # `inspect_data` has run. An episode that skips `inspect_data` — which the
+    # prompt tells a resumed agent to do — would otherwise never hear that the
+    # run has a second input at all, and no other tool mentions one.
+    if session.streams:
+        names = ", ".join(session.stream_names())
+        lines.append(
+            f"Second inputs declared: {names}. These are streams, not tables — no "
+            "tool returns rows from them. Reach one with fit_stream_aggregate; "
+            "`inspect_data` describes what each holds."
+        )
+
     idle = _never_trained(j)
     if idle:
         shown = ", ".join(idle[:MAX_LISTED_TABLES])

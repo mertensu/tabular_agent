@@ -8,7 +8,99 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-15 (latest) — 0057 item 1 designed, build started
+## 2026-08-16 (latest) — 0062 steps 1-4 built; the grain moved into the library
+
+**Machine:** MacBook Air | **Branch:** master | **552 tests pass** (was 479).
+Two new records: [0063](docs/decisions/0063-the-grain-is-measured-from-the-table-not-required-of-the-caller.md)
+and [0064](docs/decisions/0064-month-ahead-is-the-same-idea-and-does-not-get-the-same-tool.md).
+**Nothing has been run against real data yet** — every number below is a test, not
+a measurement.
+
+**0062's build order, steps 1-4 done, 5-6 open:**
+
+| | | tests |
+|---|---|---|
+| 1 | `StreamAggregateEncoder` in `encoders.py` | 33 |
+| 2 | stream registry on `RunSession`, `inspect_data`, brief | 18 |
+| 3 | `fit_stream_aggregate` in `tools.py` + `agent.py` | 17 |
+| 4 | `Pipeline.transform(streams=)`, `predict_bundle`, manifest | 5 |
+| 5 | `prep_restaurant.py` writes the stream out | **open** |
+| 6 | notebook + quiz | **open** |
+
+### The design call 0062 left open, and Ulf overruled my first answer
+
+A stream is stamped finer than the table it feeds (a booking at 18:00, a
+store-day row). Something has to say which row a record belongs to. **I first
+required the two to line up and left the aligning to `prep_restaurant.py`.** Ulf
+rejected it, and the reason generalises past this dataset: *"etwas dem prep skript
+überlassen ist gefährlich … es sollte so wenig wie möglich in prep stehen müssen
+und alles was dort drin stehen muss, muss festgehalten werden. sonst können andere
+mein tool nicht nutzen."*
+
+He is right, and it sharpens a line CLAUDE.md draws loosely: `prep_*.py` is a home
+for **dataset knowledge**, not for **library preconditions**. A rule every user
+must obey that the library never states, checks or records is a trap — and getting
+it wrong here yields a well-formed column of zeros, not an error.
+
+So **`fit` measures the table's commonest row spacing, stores it as a width plus a
+phase, and floors both sides onto it** (0063). Believed only if every distinct
+ordering value sits on that grid; otherwise it refuses and asks for `event_grain`
+to be declared. Three properties keep it defensible: the **lead keeps full
+resolution** (flooring picks the row, never what was knowable), the grid is
+**stored arithmetic and not a calendar** (every serving row is past the end of the
+fitted table), and **raggedness does not move it** (gaps are read table-wide).
+
+Why this is not 0051's inference: 0051 forbids guessing a *unit*. The unit is
+already fixed; what is measured is the row spacing *in that unit*, and it is
+checked against the data it came from. An inference that cannot be falsified is a
+guess; this one is falsified by any row off the grid.
+
+### 0064 — a capability refused after it passed every test for adding one
+
+Ulf, reading the tool description: *"'month-ahead models' hat keinen zweiten input
+oder?"* Correct. **0057 item 1 is two capabilities in one sentence** and only the
+bitemporal-stream half is built.
+
+0062 said `fit_history` "substantially does it already". **True in shape, false in
+scale**: there is no `gap` argument, and the gap that does appear comes from the
+fold geometry — a training row sits 0..`block_span` past its block's freeze, a
+served row `horizon`..`horizon + block_span`. 0049 measured it: training ages
+1-305, validation ages 1-45.
+
+Refused anyway, and the third reason is the one that decides it: **0053 showed the
+*existing* knob cannot be searched** (+0.047 at `n_splits=3`, −0.093 at 5, identical
+counts), so a second free parameter enlarges only what the agent must guess. The
+real objection is that the asymmetry belongs to the **evaluation geometry**
+(0041/0043) — a per-feature knob lets the agent work around the exam instead of
+fixing it. Discriminating test against the stream: *there, no combination of
+existing tools could express the honest feature at all.*
+
+### Gotchas for whoever picks this up
+
+- **`probe_table` replays the lineage to check servability, so step 3 could not
+  work without part of step 4.** Without the run's stream reaching
+  `Pipeline.transform`, every stream table would have been marked unservable and
+  **silently left unscored** — a missing number, not an error. `_run_streams()`
+  and a test pin it.
+- **A stale stream does not raise.** Hand the training-time copy back to
+  `predict_bundle` and it predicts, with `_count` reading 0. What protects the
+  caller is the count column, which is why it is never optional.
+- **The manifest names `event_time` and `observed_at`.** Which of two timestamps
+  is the observation time cannot be recovered by looking, and reading the wrong
+  one builds the feature out of the future without failing.
+- Adding an agent tool trips `test_harness_agent.py`'s pinned tool set on purpose
+  (0018) — that failure is the guard working.
+
+### Still owed
+
+**Quizzes for all four steps** — none asked yet this session, on top of the
+backlog (slice 3, 0041/0042/0044, house-prices capacity). `scripts/run_rossmann.py`
+still broken since 0035. The `fit_history` train/serve age diagnostic named in
+0064's cost section is not built (0058 item 3: instruments when a run needs them).
+
+---
+
+## 2026-08-15 — 0057 item 1 designed, build started
 
 **Machine:** MacBook Air | **Branch:** master.
 Design written up as [0062](docs/decisions/0062-a-stream-is-a-second-input-and-its-observation-time-is-a-column.md)

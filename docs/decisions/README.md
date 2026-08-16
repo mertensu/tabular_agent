@@ -263,6 +263,32 @@ Vocabulary used throughout:
   file already contains the future, which is 0050's frozen anchor. Also narrows
   0057's "found twice" claim — the principle was, the second-input plumbing was
   not)*
+- [0063 — The grain is measured from the table, not required of the caller](0063-the-grain-is-measured-from-the-table-not-required-of-the-caller.md)
+  *(settles a question 0062 left open. A stream is stamped finer than the table it
+  feeds, so something must say which row an 18:00 booking belongs to. The first
+  build left that to `prep_*.py`; Ulf rejected it — a rule every user must obey
+  that the library never states, checks or records is a trap, and getting it wrong
+  yields a column of zeros rather than an error. Instead `fit` **measures** the
+  table's commonest row spacing, stores it as a width and a phase, and floors both
+  sides onto it; the lead keeps full resolution. Believed only if every ordering
+  value sits on that grid — otherwise it refuses and asks for `event_grain` to be
+  declared. Why that is a measurement and not 0051's inference: it can be, and is,
+  checked against the data it came from)*
+- [0064 — "Month ahead" is the same idea and does not get the same tool](0064-month-ahead-is-the-same-idea-and-does-not-get-the-same-tool.md)
+  *(**a decision not to build**. Ulf asked why the new tool is described as being
+  for a second input when the Rossmann winner's month-ahead models have only one —
+  and he is right: 0057 item 1 is two capabilities in one sentence, and only the
+  bitemporal-stream half is built. Corrects 0062's claim that `fit_history`
+  "substantially does it already": true in shape, false in scale, since the gap
+  between a row and its history there comes from the fold geometry rather than a
+  declaration — 0049 measured training ages 1–305 against validation ages 1–45.
+  Refused anyway: found once not twice, on a feature family with five negative
+  readings and one external refutation, and 0053 showed its *existing* knob cannot
+  be searched, so a second one enlarges only what the agent must guess. The real
+  objection is that the asymmetry belongs to the evaluation geometry (0041/0043),
+  and a per-feature knob lets the agent work around the exam instead of fixing it.
+  The discriminating test against the stream: there, no combination of existing
+  tools could express the honest feature at all)*
 
 ### Keeping the agent's surface small
 

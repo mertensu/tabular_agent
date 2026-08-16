@@ -21,12 +21,12 @@ import pandas as pd
 
 from ..compare import compare_predictions
 from ..cv import make_folds
-from ..encoders import TARGET_STATS
+from ..encoders import STREAM_STATS, TARGET_STATS, StreamAggregateEncoder
 from ..encoders import fit_encoding as _fit_encoding
 from ..encoders import fit_group_stats as _fit_group_stats
 from ..encoders import fit_history as _fit_history
 from ..encoders import to_periods as _to_periods
-from ..inspect import profile_dataframe
+from ..inspect import profile_dataframe, profile_stream
 from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import predict_model, train_cv
@@ -121,6 +121,43 @@ def _unavailable_at_predict_time(session: RunSession, df: pd.DataFrame) -> list[
     ]
 
 
+def _run_streams(session: RunSession) -> dict:
+    """The run's declared streams, loaded, for replaying a lineage inside the run.
+
+    Inside a run the stream is the copy pinned in the run directory, so every
+    experiment sees the same file and two tables stay comparable. At predict time
+    the caller supplies it instead, deliberately — a stream that has moved on
+    since the fit is the one a served model should be reading (0062).
+
+    Loaded per call rather than cached on the session: a cached frame is a frame
+    that outlives the reason it was read, and these are read on a path that
+    already touches disk twice.
+    """
+    return {
+        name: load_table(session.stream_path(name)) for name in session.stream_names()
+    }
+
+
+def _profile_streams(session: RunSession, df: pd.DataFrame) -> dict:
+    """Each declared stream, summarised against the table it would attach to.
+
+    The overlap with ``df.columns`` is the useful half: it is the set of possible
+    join keys, and computing it here is the difference between the agent being
+    told a second file exists and being told how it attaches.
+    """
+    out = {}
+    for name in session.stream_names():
+        spec = session.stream_spec(name)
+        out[name] = profile_stream(
+            load_table(session.stream_path(name)),
+            event_time=spec["event_time"],
+            observed_at=spec["observed_at"],
+            table_columns=list(df.columns),
+            notes=spec.get("notes"),
+        )
+    return out
+
+
 def _refuse_if_unservable(
     session: RunSession, path: str, df: pd.DataFrame, feature_names: list[str]
 ) -> dict | None:
@@ -162,7 +199,9 @@ def _refuse_if_unservable(
     probe = raw.drop(columns=absent + [spec.target], errors="ignore")
 
     try:
-        produced = _load_lineage(path, spec.task_type).transform(probe)
+        produced = _load_lineage(path, spec.task_type).transform(
+            probe, streams=_run_streams(session)
+        )
     except Exception as e:
         return {
             "trained": False,
@@ -312,7 +351,9 @@ def _score_on_held_out(
     pipeline = _load_lineage(source_path, spec.task_type)
     # The target is dropped before the pipeline sees the rows (0009): a transform
     # that can read the target is a transform that can leak it.
-    features = pipeline.transform(val.drop(columns=[spec.target]))
+    features = pipeline.transform(
+        val.drop(columns=[spec.target]), streams=_run_streams(session)
+    )
 
     missing = [c for c in feature_names if c not in features.columns]
     if missing:
@@ -607,8 +648,10 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
         session.run_dir, target=spec.target, task_type=spec.task_type, metric=spec.metric
     )
     journal.set_split(session.run_dir, session.split_record())
+    journal.set_streams(session.run_dir, session.stream_record())
 
     unavailable = _unavailable_at_predict_time(session, df)
+    streams = _profile_streams(session, df)
     columns = prof["columns"]
     truncated = len(columns) > MAX_REPORTED_COLUMNS
     shown = dict(list(columns.items())[:MAX_REPORTED_COLUMNS])
@@ -639,6 +682,21 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
         # about — the note says so, so the refusal is not a surprise.
         **({"columns_not_available_at_predict_time": unavailable}
            if unavailable else {}),
+        # Only when the run declares one. A stream is a *second input* — a related
+        # file at a finer grain, whose records say both what they are about and
+        # when they became knowable — and it is invisible to every other tool, so
+        # if it is not named here the agent never learns it exists.
+        **({"streams": streams,
+            "streams_note": (
+                "These are second inputs, not tables: no tool returns rows from "
+                "them. Reach one with fit_stream_aggregate, which aggregates a "
+                "stream's records per row of a table, counting only the records "
+                "already observed a stated lead before that row. 'notice' says how "
+                "far ahead of the event its records typically arrived — where "
+                "notice_zero_share is large, a lead you can actually serve at will "
+                "discard that share, and the column you would get without one is "
+                "richer in training than it can ever be at predict time."
+            )} if streams else {}),
         # Present only when the data's owner supplied it. Facts about the dataset
         # as a whole — what a row is, which rows the real scoring ignores, how it
         # was collected — that have no single column to attach to. Per-column
@@ -1168,6 +1226,235 @@ def fit_history(
         "longest_training_prefix": longest_prefix,
         # In the ordering column's units, so an offset or a window length can be
         # chosen against it.
+        "block_span": block_span,
+        "note": note,
+    }
+
+
+def fit_stream_aggregate(
+    session: RunSession,
+    stream: str,
+    by: list[str],
+    value: str,
+    leads: list[float],
+    stats: list[str] | None = None,
+    table: str | None = None,
+) -> dict:
+    """Aggregate a declared stream per row, counting only what was knowable in time.
+
+    The tool for a **second input**: a related file at a finer grain than the
+    table, whose records carry both the time they are *about* and the time they
+    became *knowable*. Several records collapse into one number per row, and the
+    obvious collapse keeps the first time and discards the second — which builds a
+    column that is systematically richer in training than at serving, by an amount
+    that grows with the horizon, and that nothing else in this harness can see.
+
+    Each ``lead`` is a separate feature, not a competing setting: ``leads=[7, 30]``
+    answers both "what could a forecast issued a week ahead see" and "what could
+    one issued a month ahead see", and the model may use either.
+
+    Every statistic comes with a ``_count``, always. A sum over one record and a
+    sum over forty are the same number wearing the same name, and the count is
+    what says which one a row got.
+
+    Leads shorter than the declared ``forecast_horizon`` are refused. Not because
+    they would leak — the restriction is backward from each row either way — but
+    because no served row could ever have one, so the column would be built out of
+    knowledge the forecast does not get.
+    """
+    refusal = _refuse_if_finished(session)
+    if refusal is not None:
+        return refusal
+
+    path = session.resolve_table(table)
+    spec = session.resolved()
+    df = load_table(path)
+    declared = session.stream_spec(stream)
+    stream_df = load_table(session.stream_path(stream))
+
+    by = list(by)
+    leads = [float(x) for x in leads]
+    stats = list(stats) if stats else ["sum"]
+
+    if session.split_on is None:
+        raise ValueError(
+            "this run is not split on an ordering column, so 'what was knowable a "
+            "week before this row' has no meaning — the rows are exchangeable and "
+            "none of them is before another. A stream aggregate is for runs whose "
+            "task is to predict later rows from earlier ones."
+        )
+    order = session.split_on
+    if not leads:
+        raise ValueError(
+            "leads must name at least one lead time. Without one this is the naive "
+            "collapse of the stream, which counts records no forecast could have "
+            "seen — the thing this tool exists to avoid."
+        )
+    if spec.forecast_horizon is None:
+        raise ValueError(
+            f"leads={leads} need the task to declare how far ahead it forecasts. Set "
+            "TaskSpec.forecast_horizon to the gap between the end of history and the "
+            f"earliest row you are asked to predict, in {order!r}'s units. Without it "
+            "there is no way to tell a lead a forecast could actually be issued at "
+            "from one that reads records nobody would have had."
+        )
+    too_short = [x for x in leads if x < spec.forecast_horizon]
+    if too_short:
+        raise ValueError(
+            f"leads {too_short} are shorter than the declared forecast horizon of "
+            f"{spec.forecast_horizon:g}. Every row you are scored on sits at least "
+            "that far past the end of history, so a record observed later than that "
+            "cannot exist for any of them — the column would be built from knowledge "
+            "the forecast never gets, and validation would confirm it because "
+            f"validation is drawn from the same file. Use leads of at least "
+            f"{spec.forecast_horizon:g}."
+        )
+    bad_stats = [s for s in stats if s not in STREAM_STATS]
+    if bad_stats:
+        raise ValueError(
+            f"unknown statistic(s) {bad_stats}; pick from {list(STREAM_STATS)}"
+        )
+
+    missing_table = [c for c in [*by, order] if c not in df.columns]
+    if missing_table:
+        raise ValueError(f"columns not in {session.rel(path)}: {missing_table}")
+    # The key has to name the same columns on both sides, and saying which side is
+    # missing them is the whole of the message: "no rows matched" sends a caller
+    # looking at the data when the answer is a column name.
+    missing_stream = [c for c in [*by, value] if c not in stream_df.columns]
+    if missing_stream:
+        raise ValueError(
+            f"columns not in stream {stream!r}: {missing_stream}. It has "
+            f"{list(stream_df.columns)}. The grouping columns are matched by name "
+            f"across both files; the table has {[c for c in by if c in df.columns]}."
+        )
+    if spec.target in by:
+        raise ValueError(
+            f"refusing to group by the target column {spec.target!r}: the group key "
+            "has to exist at predict time and the target never does"
+        )
+    unavailable_keys = [
+        c for c in [*by, order] if c in _unavailable_at_predict_time(session, df)
+    ]
+    if unavailable_keys:
+        raise ValueError(
+            f"cannot key a stream aggregate on {unavailable_keys}: these columns will "
+            "not exist when a prediction is asked for, so the stream could never be "
+            "attached to a served row."
+        )
+
+    encoder = StreamAggregateEncoder(
+        stream, by, value, declared["event_time"], declared["observed_at"], order,
+        leads=leads, stats=stats,
+    ).fit(df, stream=stream_df)
+    # No fold loop, and that is the design rather than an omission. `fit_history`
+    # re-freezes per fold because *last known* is defined relative to the fitting
+    # set, so fitting it once on everything lets a validation row read the future.
+    # Here the restriction is `observed_at <= row - lead`, which is backward from
+    # each row individually: a row cannot reach past its own position whichever
+    # fold it lands in, and the serving asymmetry a freeze would reproduce is
+    # exactly what the lead already is.
+    out = encoder.transform(df, stream_df)
+    new_columns = encoder.output_columns
+
+    table_id = journal.next_table_id(session.run_dir)
+    out_path = session.ctx.path("tables", f"{table_id}.parquet")
+    save_parquet(out, out_path)
+
+    lineage = _load_lineage(path, spec.task_type)
+    lineage.add_encoder(encoder)
+    with open(_lineage_path(out_path), "w") as f:
+        json.dump(lineage.to_dict(), f, indent=2)
+
+    scored = _probe_and_compare(session, out_path, session.rel(path))
+    journal.append_table(session.run_dir, {
+        "id": table_id,
+        "path": session.rel(out_path),
+        "source_table": session.rel(path),
+        "method": "stream_aggregate",
+        "stream": stream,
+        "group_by": by,
+        "value_column": value,
+        "order_column": order,
+        "leads": leads,
+        "stats": stats,
+        "new_columns": new_columns,
+        "n_steps": len(lineage.steps),
+        **scored,
+    })
+
+    # What each lead actually left, per row. This is the readout the whole tool
+    # turns on: a lead the data cannot support does not fail, it quietly empties
+    # the aggregate, and `records_per_row` at 0 beside a healthy `n_records` is
+    # what that looks like.
+    records_per_row = {}
+    empty_share = {}
+    for lead in leads:
+        counts = out[encoder.count_column(lead)].dropna()
+        if len(counts):
+            records_per_row[f"{lead:g}"] = round(float(np.median(counts)), 3)
+            empty_share[f"{lead:g}"] = round(float((counts == 0).mean()), 3)
+    starved = [k for k, v in records_per_row.items() if v < 1]
+
+    # How wide a scored block is, so a lead can be read against something. The
+    # agent cannot get this anywhere else — `inspect_data` reports `n_val` as a row
+    # count and nothing converts that to a span — and it is the number that shows
+    # the limit below.
+    periods = _to_periods(df[order])
+    folds = make_folds(df[spec.target], spec.task_type, n_splits=spec.n_splits,
+                       seed=spec.seed, order=_fold_order(session, df))
+    spans = [
+        float(np.nanmax(periods[va]) - np.nanmin(periods[va]))
+        for _, va in folds if len(va)
+    ]
+    block_span = round(float(np.median(spans)), 3) if spans else None
+
+    note = (
+        "This table is scored above; build on it to keep the new columns. Each row "
+        "counts only the stream records observed at least `lead` before it, so a "
+        "training row is restricted exactly as a served row at the same lead would "
+        f"be. Every statistic has a `_count` beside it — read them together, since "
+        "a sum over one record and a sum over forty look identical otherwise."
+    )
+    if block_span is not None:
+        note += (
+            f" The horizon you declared ({spec.forecast_horizon:g} in {order!r}) is "
+            f"the *floor* of a scored block, and a block spans about "
+            f"{block_span:g}. A lead at the floor is therefore honest for the "
+            "block's earliest rows and more generous than the far edge could ever "
+            "be; a lead nearer the far edge is honest throughout and sees less. "
+            "Both are legitimate and the counts say what each costs."
+        )
+    if starved:
+        note += (
+            f" WARNING: lead(s) {starved} left a median of fewer than one record per "
+            "row — see records_per_row. At that point the column is mostly absence, "
+            "and whatever signal it carries is the pattern of which rows had "
+            "anything at all rather than the aggregate itself."
+        )
+
+    return {
+        "table": session.rel(out_path),
+        "new_columns": new_columns,
+        "stream": stream,
+        "n_records": encoder.n_records_,
+        # Distinct (key, event-time) buckets the stream forms — the granularity it
+        # can actually answer at, which is not the number of rows in the table.
+        "n_buckets": encoder.n_buckets_,
+        # Share of this table's rows the stream has any bucket for at all. Low is
+        # not an error — a feed covering a third of the shops is a real feed — but
+        # it bounds what the feature can be worth before any lead is applied.
+        "matched_rows": encoder.matched_rows_,
+        # The bucket width measured off the table's own row spacing, in `order`'s
+        # units, and stored in the lineage so predict time buckets identically.
+        "event_grain": encoder.grain_,
+        "n_rows": int(len(out)),
+        "source_table": session.rel(path),
+        **scored,
+        # {lead: median records per row}, and the share of rows a lead left with
+        # nothing. Together they are what a badly-chosen lead looks like.
+        "records_per_row": records_per_row,
+        "rows_without_records": empty_share,
         "block_span": block_span,
         "note": note,
     }
@@ -2644,6 +2931,12 @@ def finalize_run(session: RunSession) -> dict:
         "baseline_score": j["baseline"]["val_score"],
         "n_experiments": len(j["leaderboard"]),
         "bundle_dir": session.rel(bundle_dir),
+        # Second inputs this bundle cannot predict without. Named in the return
+        # value and not only in the manifest, because whoever ships from this run
+        # reads the finalize result — and a bundle that needs a file nobody knew
+        # to pass looks broken rather than under-supplied.
+        **({"required_streams": pipeline.required_streams()}
+           if pipeline.required_streams() else {}),
         "report_path": session.rel(report_path),
         # Which links in the winning table's history were actually measured. An
         # unmeasured one means the score cannot be attributed to the columns

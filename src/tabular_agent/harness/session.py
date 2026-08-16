@@ -12,6 +12,7 @@ stays movable (0003).
 """
 
 import os
+import re
 
 import numpy as np
 
@@ -20,6 +21,23 @@ from ..io import load_table, save_parquet
 from ..runctx import RunContext
 from ..taskspec import ResolvedSpec, TaskSpec, resolve_taskspec
 from .stop import StopPolicy
+
+#: A stream's name ends up inside feature column names and inside a filename, so
+#: it is held to what both can carry. Refused at declaration rather than mangled
+#: silently: a name that survives one and not the other produces a column nobody
+#: asked for or a file nobody can find.
+_STREAM_NAME = re.compile(r"[A-Za-z0-9_]+")
+
+#: What a stream declaration must say, and it is exactly the part that cannot be
+#: recovered by looking at the file. Which column is *when a record is about* and
+#: which is *when it became knowable* is invisible to any profiler — both are
+#: timestamps, and the wrong way round is a feature that reads the future.
+STREAM_REQUIRED = ("path", "event_time", "observed_at")
+
+#: Optional, and both are documentation rather than mechanism: ``notes`` is the
+#: owner's prose about the file, and every other key is refused so a typo in a
+#: declaration is an error instead of a setting that silently does nothing.
+STREAM_OPTIONAL = ("notes",)
 
 #: Hard floor, and deliberately about *computability* rather than informativeness.
 #: Below this a half cannot produce a metric worth the name at all. How many rows
@@ -47,6 +65,7 @@ class RunSession:
         split_on: str | None = None,
         serving_columns: list[str] | None = None,
         fit_time_budget_s: float | None = None,
+        streams: dict[str, dict] | None = None,
     ):
         self.ctx = RunContext(run_dir)
         # The file the user handed us. Never trained on directly — `data_path`
@@ -98,12 +117,141 @@ class RunSession:
         # 3.8 — so the blowup was environmental, and no instruction to the agent
         # and no cap on parameters would have caught it. Only wall clock does.
         self.fit_time_budget_s = fit_time_budget_s
+        # Related files at a finer grain than the table, whose records carry both
+        # the time they are *about* and the time they became *knowable* (0062).
+        #
+        # Declared, for `serving_columns`' reason: nothing recovers it by
+        # inspection. A profiler sees two datetime columns and cannot say which is
+        # which, and getting them the wrong way round builds a feature out of the
+        # future. The owner of the data knows; nobody else can.
+        #
+        # Not split into work and validation, and that is not an oversight. Every
+        # aggregate drawn from a stream is restricted per row to records observed
+        # a stated span before that row, so a work row and a validation row are
+        # bound by the same rule and neither can read past its own position. A
+        # stream cut at the work/val boundary would instead give validation rows
+        # *less* than a served row gets, which is a different lie.
+        self.streams = self._validate_streams(streams)
         self._resolved: ResolvedSpec | None = None
         self._split: tuple[str, str, str | None] | None = None
 
     @property
     def run_dir(self) -> str:
         return self.ctx.run_dir
+
+    # ----------------------------------------------------------------- streams
+
+    @staticmethod
+    def _validate_streams(streams: dict[str, dict] | None) -> dict[str, dict]:
+        """Check every declaration at construction, before a run has started.
+
+        Loudly and early, because the alternative is a run that gets ten tables in
+        before discovering that a key was misspelled — and because a declaration
+        with a silently-ignored key is worse than one that fails: it looks like it
+        said something.
+        """
+        if not streams:
+            return {}
+        checked: dict[str, dict] = {}
+        for name, spec in streams.items():
+            if not isinstance(name, str) or not _STREAM_NAME.fullmatch(name):
+                raise ValueError(
+                    f"stream name {name!r} must be letters, digits and underscores. "
+                    "It becomes part of the feature column names this stream "
+                    "produces and part of the file it is stored under, so it has to "
+                    "survive both."
+                )
+            if not isinstance(spec, dict):
+                raise ValueError(
+                    f"stream {name!r} must be declared as a dict with "
+                    f"{list(STREAM_REQUIRED)}, got {type(spec).__name__}"
+                )
+            missing = [k for k in STREAM_REQUIRED if not spec.get(k)]
+            if missing:
+                raise ValueError(
+                    f"stream {name!r} is missing {missing}. 'event_time' is when a "
+                    "record is *about* — the day of the visit, the delivery date — "
+                    "and 'observed_at' is when it became knowable. Nothing can work "
+                    "out which is which by looking at the file, and the wrong way "
+                    "round builds a feature out of the future."
+                )
+            unknown = sorted(set(spec) - set(STREAM_REQUIRED) - set(STREAM_OPTIONAL))
+            if unknown:
+                raise ValueError(
+                    f"stream {name!r} declares {unknown}, which this harness does not "
+                    f"read. Allowed: {list(STREAM_REQUIRED + STREAM_OPTIONAL)}. Which "
+                    "columns to group and aggregate by is the agent's call at tool "
+                    "time, not the declaration's."
+                )
+            if spec["event_time"] == spec["observed_at"]:
+                raise ValueError(
+                    f"stream {name!r} names {spec['event_time']!r} as both its event "
+                    "time and its observation time. A file whose two times are one "
+                    "column is not a stream in this sense — every record would count "
+                    "as knowable exactly when it happened, and there is nothing for a "
+                    "lead to restrict."
+                )
+            checked[name] = {
+                "path": os.path.abspath(str(spec["path"])),
+                "event_time": str(spec["event_time"]),
+                "observed_at": str(spec["observed_at"]),
+                **({"notes": str(spec["notes"])} if spec.get("notes") else {}),
+            }
+        return checked
+
+    def stream_names(self) -> list[str]:
+        return sorted(self.streams)
+
+    def stream_spec(self, name: str) -> dict:
+        if name not in self.streams:
+            raise ValueError(
+                f"no such stream: {name!r}. Declared: "
+                + (", ".join(repr(n) for n in self.stream_names()) or "none")
+                + ". A stream has to be declared on the run — the harness cannot "
+                "tell a stream from an ordinary file by looking at it."
+            )
+        return self.streams[name]
+
+    def stream_path(self, name: str) -> str:
+        """The stream, copied into the run directory on first use.
+
+        Copied for 0003's reason — a run directory has to stay movable, and a run
+        whose second input lives at an absolute path somewhere else is not. It
+        also fixes the file for the length of the run, which is what makes two
+        experiments in the same run comparable.
+
+        That is the opposite of what happens at *predict* time, where the stream
+        is handed in fresh precisely so a file that has moved on since the fit is
+        the one that gets used (0062). Both are right: a run is a fixed experiment
+        against fixed data; serving is not.
+        """
+        spec = self.stream_spec(name)
+        dest = os.path.join(self.run_dir, "data", "streams", f"{name}.parquet")
+        if os.path.exists(dest):
+            return dest
+        df = load_table(spec["path"])
+        missing = [
+            spec[k] for k in ("event_time", "observed_at") if spec[k] not in df.columns
+        ]
+        if missing:
+            raise ValueError(
+                f"stream {name!r} declares {missing} as time columns, but "
+                f"{spec['path']} has {list(df.columns)}"
+            )
+        save_parquet(df, dest)
+        return dest
+
+    def stream_record(self) -> dict:
+        """What was declared, for the journal — the run's second inputs, named."""
+        return {
+            name: {
+                "path": spec["path"],
+                "event_time": spec["event_time"],
+                "observed_at": spec["observed_at"],
+                **({"notes": spec["notes"]} if spec.get("notes") else {}),
+            }
+            for name, spec in sorted(self.streams.items())
+        }
 
     # ------------------------------------------------------------------ split
 

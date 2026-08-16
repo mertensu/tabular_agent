@@ -920,12 +920,530 @@ class HistoryEncoder:
         return enc
 
 
+#: What may be asked of the records a stream holds for one row, and the menu is
+#: short for :data:`WINDOW_STATS`' reasons at a different grain.
+#:
+#: ``sum`` is the one this exists for: a stream of bookings, orders or claims is
+#: about a *total*, and unlike a trailing window — where ``sum`` was left off
+#: because it is ``count * mean`` and the count is already there — here the total
+#: is the quantity and the mean is the derived one. Both are offered anyway,
+#: because "forty people booked" and "the average booking was for two" are
+#: different features. ``std`` says how uniform the records were.
+#:
+#: **``min``/``max``/``median`` are off the menu.** A bucket in a stream typically
+#: holds a handful of records, and an extreme or a middle over three of them is
+#: close to a single record — 0049's "a sample of size one" at the other end of
+#: the harness.
+STREAM_STATS = ("sum", "mean", "std")
+
+
+class StreamAggregateEncoder:
+    """An aggregate of a second input, restricted to what was knowable in time.
+
+    A **stream** is a related file at a finer grain than the table being
+    modelled, whose records carry *two* times: the time they are **about**
+    (``event_time``) and the time they became **knowable** (``observed_at``). The
+    canonical shapes are reservations against a visit, orders against a delivery
+    date, claims against an accident date — the pattern is old enough to have
+    names in two fields at once (bitemporality's *valid* vs *transaction* time in
+    data warehousing, "incurred but not reported" in insurance).
+
+    Such a file cannot be a column: several records collapse into one number per
+    row of the table. Collapsing them is the obvious thing to do and it throws
+    away ``observed_at``, which is the only thing that says which of those records
+    a *forecast* could have seen. The collapsed column is then systematically
+    larger in training than at serving, by an amount that **grows with the
+    horizon** — and no guard in this harness sees it: no fold boundary is crossed,
+    no encoder is misfitted, the column exists at predict time, and validation
+    *confirms* it, because validation is drawn from the same uncut half.
+
+    What this emits instead, per row and per requested ``lead``, is the aggregate
+    over the stream records that
+
+    * carry this row's key (the ``by`` columns, which the stream must also have),
+    * are **about** this row's position in ``order`` — ``event_time`` equal to the
+      row's ordering value, and
+    * were **observed at or before** ``order - lead``.
+
+    So ``lead=7`` answers "what would a forecast issued a week ahead have been
+    able to see", whatever the file happens to contain now.
+
+    **Emitted as a pair, never a bare value.** ``..._lead7_sum`` always comes with
+    ``..._lead7_count``, for the reason every window in :class:`HistoryEncoder`
+    carries a count: a sum over one record and a sum over forty are the same
+    number wearing the same name, and only the count says which one a given row
+    got. It is also where this design's known limit shows up — see below.
+
+    **Several leads are separate columns, not competing settings.** A short lead
+    and a long one are different features: one is what the near edge of a forecast
+    window can see, the other what the far edge can. Asking for both and letting
+    the model use both is the point.
+
+    Three properties worth stating outright, because they are what makes this
+    legal where the obvious ``merge`` + ``groupby`` in ``transform_features`` is
+    not:
+
+    * **No stored aggregate.** The encoder persists ``by``, ``value``,
+      ``event_time``, ``observed_at``, ``order``, ``leads`` and ``stats``, and
+      nothing else. The stream is handed in again at transform time and the
+      aggregate recomputed — 0010's "store the code, not the columns" applied to
+      an aggregate. Precomputing ``{(key, event_time) -> value}`` at fit time and
+      storing it would need no plumbing at all, and it only works while the stream
+      file already contains the future: true of a downloaded competition file,
+      false of every real serving situation, where next month's bookings arrive
+      after the fit. 0050 is the record of a frozen anchor costing a working model
+      two thirds of its score.
+    * **Batch independence** (0011). What a row reads is a function of the row's
+      own key and time and of the stream, never of which other rows are in the
+      frame. One row alone and a batch of a million get identical answers, which
+      an aggregate computed inside ``transform_features`` cannot promise.
+    * **No fold loop, and not by oversight.** The lead restriction is already
+      strictly backward *per row*: a training row at ``t`` reads only records
+      observed by ``t - lead``, so it cannot see anything recorded after its own
+      position, whichever fold it is in. That is the property :func:`fit_history`
+      needs its per-fold freeze to reproduce. Nothing here reads the target.
+
+    **The known limit, stated rather than hidden.** ``forecast_horizon`` is the
+    *floor* of a scored block (0047), so a lead set at the floor is honest for the
+    near edge of that block and under-restrictive for the far edge — a row 39
+    periods out is served an aggregate a row 1 period out could have had. The
+    ``_count`` column is what makes that visible per row. Declaring the far edge
+    too would close it by construction and is not built: it is one more field the
+    data's owner has to get right on every ordered run, and the count already
+    reports the damage where it lands.
+
+    **The grain is measured, stored and replayed — it is not left to the caller.**
+    A stream is almost always finer than the table it feeds: a store-day table
+    against bookings stamped ``2017-03-13 18:00``. Something has to say which
+    row a record at 18:00 belongs to, and there are three ways to decide it,
+    two of them bad:
+
+    * *Require the two to line up already*, and let a mismatch produce a
+      well-formed table of zeros. That pushes a load-bearing rule into a prep
+      script where nothing records it and nothing enforces it — an unwritten
+      precondition is not a design.
+    * *Infer a bucket at transform time* from the rows in front of it. That is
+      batch-dependent, and 0011 refuses it for good reason.
+    * **Measure the table's own spacing once, at fit time, and store it.** That is
+      what happens. :meth:`fit` reads the distinct ordering values, takes the
+      commonest gap between consecutive ones as ``grain_``, and keeps it — with
+      ``origin_`` — in the encoder, so it survives into the lineage and is
+      replayed byte-identically rather than re-derived from whatever frame turns
+      up at predict time.
+
+    Both sides are then floored onto that grid: a record at ``2017-03-13 18:00``
+    and a row at ``2017-03-13`` land in the same bucket, whichever way round the
+    resolutions happen to be. The *lead* is unaffected — it is still measured from
+    the row's true ordering value against the record's true ``observed_at``, both
+    at full resolution.
+
+    This is a measurement, not 0051's inference. 0051 is about a column whose
+    *unit* is unknown; the spacing of the rows is a fact about the table, in the
+    ordering column's own units, and one this class can check. So it does: if the
+    distinct ordering values do not sit on the grid the commonest gap implies,
+    the measurement is not trustworthy and :meth:`fit` **refuses**, asking for
+    ``event_grain`` to be declared instead of guessing. A declared grain is used
+    as given — the data's owner outranks the measurement.
+    """
+
+    kind = "stream_aggregate"
+
+    def __init__(self, stream: str, by: list[str], value: str, event_time: str,
+                 observed_at: str, order: str, leads=(), stats=("sum",),
+                 event_grain: float | None = None):
+        self.stream = str(stream)
+        self.by = [str(c) for c in by]
+        self.value = str(value)
+        self.event_time = str(event_time)
+        self.observed_at = str(observed_at)
+        self.order = str(order)
+        self.leads = [float(x) for x in leads]
+        # De-duplicated with the asked-for order preserved, so the column order a
+        # caller gets back is the one they wrote down.
+        self.stats = list(dict.fromkeys(str(s) for s in stats))
+        #: Declared bucket width, or ``None`` to measure it from the table at fit
+        #: time. Declared always wins: the data's owner knows things the spacing
+        #: of the rows cannot show.
+        self.event_grain = None if event_grain is None else float(event_grain)
+        if self.event_grain is not None and self.event_grain <= 0:
+            raise ValueError(
+                f"event_grain must be positive, got {self.event_grain:g}. It is the "
+                "width of the period one row covers, in the ordering column's units."
+            )
+        if not self.by:
+            raise ValueError("by must name at least one column to group on")
+        if not self.leads:
+            raise ValueError(
+                "leads must name at least one lead time. A stream aggregate with no "
+                "lead is the collapsed column this encoder exists to replace — it "
+                "counts records the forecast could not have seen."
+            )
+        if not self.stats:
+            raise ValueError("stats must name at least one statistic")
+        if self.event_time == self.observed_at:
+            raise ValueError(
+                f"event_time and observed_at are both {self.event_time!r}. A stream "
+                "whose two times are one column is not bitemporal: every record "
+                "would count as knowable exactly when it happened, and there is "
+                "nothing for a lead to restrict."
+            )
+        if self.value in (self.event_time, self.observed_at) or self.value in self.by:
+            raise ValueError(
+                f"value column {self.value!r} is also a key or a time column. The "
+                "value is what gets aggregated; a timestamp aggregated by its own "
+                "grouping is not a feature."
+            )
+        for name in (self.event_time, self.observed_at):
+            if name in self.by:
+                raise ValueError(
+                    f"by={self.by} may not contain the stream's time column {name!r}: "
+                    "grouping records by the moment they happened gives one record "
+                    "per group and nothing to aggregate"
+                )
+        if self.order in self.by:
+            raise ValueError(
+                f"by={self.by} may not contain the ordering column {self.order!r}"
+            )
+        bad = [s for s in self.stats if s not in STREAM_STATS]
+        if bad:
+            raise ValueError(
+                f"unknown stream statistic(s) {bad}; pick from {list(STREAM_STATS)}. "
+                "min/max and median are deliberately absent — see STREAM_STATS."
+            )
+        negative = [x for x in self.leads if x < 0]
+        if negative:
+            raise ValueError(
+                f"leads must not be negative, got {negative}. A negative lead admits "
+                "records observed *after* the row it describes, which is the leak "
+                "this encoder exists to close."
+            )
+        #: The grid both sides are floored onto. Fitted, persisted, and replayed
+        #: rather than re-derived — a bucket width that changed between fit and
+        #: predict would silently change what every column means.
+        self.grain_: float | None = self.event_grain
+        self.origin_: float | None = None
+        #: Diagnostics from the last :meth:`fit`, for the tool to report. Not
+        #: persisted: they describe the stream that was fitted against, and the
+        #: stream handed to :meth:`transform` is a different one by design.
+        self.n_records_: int | None = None
+        self.n_buckets_: int | None = None
+        self.matched_rows_: float | None = None
+
+    @property
+    def base_name(self) -> str:
+        """Everything that identifies the aggregate, including the stream's name.
+
+        The stream name is in there because two streams can carry the same key
+        and value column names — a table joined to both an internal and a partner
+        booking feed is the ordinary case — and two aggregates landing on one
+        column name would silently overwrite each other.
+        """
+        return "_".join([self.stream, *self.by, self.value])
+
+    def count_column(self, lead: float) -> str:
+        return f"{self.base_name}_lead{lead:g}_count"
+
+    @property
+    def output_columns(self) -> list[str]:
+        names = []
+        for lead in self.leads:
+            names += [f"{self.base_name}_lead{lead:g}_{s}" for s in self.stats]
+            names.append(self.count_column(lead))
+        return names
+
+    def _keys(self, frame: pd.DataFrame, what: str) -> np.ndarray:
+        missing = [c for c in self.by if c not in frame.columns]
+        if missing:
+            raise ValueError(
+                f"cannot aggregate stream {self.stream!r}: the grouping columns "
+                f"{missing} are not in {what}. The key columns are read on both "
+                "sides of the join, so they have to carry the same names in the "
+                "table and in the stream — renaming them is the prep script's job."
+            )
+        keys = frame[self.by[0]].astype(str)
+        for col in self.by[1:]:
+            keys = keys + _KEY_SEP + frame[col].astype(str)
+        return keys.to_numpy()
+
+    def _clean_stream(self, stream: pd.DataFrame) -> pd.DataFrame:
+        missing = [c for c in (self.value, self.event_time, self.observed_at)
+                   if c not in stream.columns]
+        if missing:
+            raise ValueError(
+                f"stream {self.stream!r} is missing {missing}; its columns are "
+                f"{list(stream.columns)}"
+            )
+        s = pd.DataFrame({
+            "key": self._keys(stream, f"stream {self.stream!r}"),
+            "et": to_periods(stream[self.event_time]),
+            "ot": to_periods(stream[self.observed_at]),
+            "v": pd.to_numeric(stream[self.value], errors="coerce").to_numpy(dtype=float),
+        })
+        # A record missing either time cannot be placed or dated, and one with no
+        # value would turn a whole bucket's sum into NaN. Dropping them costs the
+        # count a record it could arguably have kept; a NaN sum beside a count of
+        # forty would be worse, since it reads as "nothing was knowable" when the
+        # truth is "one record was malformed".
+        return s.dropna(subset=["key", "et", "ot", "v"]).reset_index(drop=True)
+
+    def _measure_grid(self, t: np.ndarray) -> tuple[float, float]:
+        """The bucket width and phase, taken from the table's own spacing.
+
+        The commonest gap between consecutive distinct ordering values is the
+        grain — and it is only *believed* if every distinct value sits on the grid
+        that gap implies. A daily panel with a few table-wide holidays missing
+        passes (the gaps are 1, 1, 2, 1 and every value is a whole number of days
+        from the first). An irregular event log fails, and gets asked for a
+        declaration rather than served a bucket width invented on its behalf.
+
+        A ragged spine is fine and is not what this measures: the gaps are taken
+        over the ordering values present *anywhere in the table*, so a store that
+        reports on four days a week does not make the grain four days.
+        """
+        finite = t[np.isfinite(t)]
+        if not len(finite):
+            raise ValueError(
+                f"every value of the ordering column {self.order!r} is missing, so "
+                "there is no grain to measure and nothing to align the stream to."
+            )
+        origin = float(finite.min())
+        if self.event_grain is not None:
+            return self.event_grain, origin
+        u = np.unique(finite)
+        if len(u) < 2:
+            raise ValueError(
+                f"the table has one distinct value of {self.order!r}, which shows no "
+                "spacing to measure. Pass event_grain=<width of the period one row "
+                "covers, in that column's units> to say how wide a row's bucket is."
+            )
+        gaps = np.round(np.diff(u), 9)
+        widths, counts = np.unique(gaps, return_counts=True)
+        grain = float(widths[int(counts.argmax())])
+        residual = (u - origin) / grain
+        off_grid = np.abs(residual - np.round(residual)) > 1e-6
+        if off_grid.any():
+            example = float(u[np.flatnonzero(off_grid)[0]])
+            raise ValueError(
+                f"cannot measure the grain of {self.order!r}: its commonest gap is "
+                f"{grain:g}, but {int(off_grid.sum())} of {len(u)} distinct values do "
+                f"not sit on a grid of that width (e.g. {example:g}, which is "
+                f"{(example - origin) / grain:.3f} grains from the first). Rows spaced "
+                "irregularly have no bucket width to read off them, and guessing one "
+                "would decide which records belong to which row by accident. Pass "
+                "event_grain=<width of the period one row covers> to declare it."
+            )
+        return grain, origin
+
+    def _bucket(self, values: np.ndarray) -> np.ndarray:
+        """Floor onto the fitted grid, so both sides meet at the same resolution."""
+        # A relative tolerance, not an absolute one: ordering values are often days
+        # since the epoch, where float64 resolves to tens of nanoseconds and a value
+        # sitting exactly on a boundary can land a hair below it.
+        steps = np.floor((values - self.origin_) / self.grain_ + 1e-6)
+        return self.origin_ + steps * self.grain_
+
+    def fit(self, df: pd.DataFrame, y=None, *, stream: pd.DataFrame | None = None
+            ) -> "StreamAggregateEncoder":
+        """Measure the grid, check the stream against the table, record what matched.
+
+        No aggregate is learned — that is the design (see the class docstring).
+        What is learned is the *grain*: how wide a period one row of the table
+        covers, so that a record stamped finer than the table can be placed on the
+        row it belongs to. That plus an early refusal is what this is for; the
+        failure being refused is a stream that matches nothing and therefore
+        produces a perfectly well-formed table of zeros, which is the class of
+        quietly-wrong number this whole area keeps producing.
+        """
+        if stream is None:
+            raise ValueError(
+                f"fitting a stream aggregate needs the stream itself: pass "
+                f"stream=<the {self.stream!r} frame>."
+            )
+        s = self._clean_stream(stream)
+        if self.order not in df.columns:
+            raise ValueError(
+                f"ordering column {self.order!r} is not in this frame; columns are "
+                f"{list(df.columns)}"
+            )
+        keys = self._keys(df, "the table")
+        t = to_periods(df[self.order])
+        self.grain_, self.origin_ = self._measure_grid(t)
+        self.n_records_ = int(len(s))
+        if self.n_records_ == 0:
+            raise ValueError(
+                f"stream {self.stream!r} has no usable records: every row is missing "
+                f"one of {self.value!r}, {self.event_time!r} or {self.observed_at!r}."
+            )
+        buckets = pd.MultiIndex.from_arrays(
+            [s["key"].to_numpy(), self._bucket(s["et"].to_numpy())]
+        )
+        rows = pd.MultiIndex.from_arrays([keys, self._bucket(t)])
+        matched = buckets.unique().get_indexer(rows) >= 0
+        self.n_buckets_ = int(buckets.nunique())
+        self.matched_rows_ = float(matched.mean()) if len(matched) else 0.0
+        if self.matched_rows_ == 0.0:
+            raise ValueError(
+                f"no row of the table matches any record in stream {self.stream!r}, "
+                f"bucketing both onto a grid of {self.grain_:g} in {self.order!r}. The "
+                f"keys {self.by} are the likely culprit — they are compared as text, so "
+                "a store id stored as 'A01' on one side and 'a01' on the other never "
+                "meets. Left alone this would have produced a column of zeros reading "
+                "'nothing was ever recorded'."
+            )
+        return self
+
+    def _aggregate(self, df: pd.DataFrame, stream: pd.DataFrame) -> dict[str, np.ndarray]:
+        """One pass per lead over the stream's per-bucket running totals.
+
+        The work is done by :func:`pandas.merge_asof`: with the records of each
+        ``(key, event_time)`` bucket sorted by ``observed_at`` and carrying their
+        running count and running sums, the last record at or before
+        ``row - lead`` *is* the prefix aggregate. So a lead costs one merge rather
+        than a scan per row, and adding leads is cheap enough that asking for
+        several is the normal thing to do.
+        """
+        if self.order not in df.columns:
+            raise ValueError(
+                f"ordering column {self.order!r} is not in this frame; columns are "
+                f"{list(df.columns)}"
+            )
+        if self.grain_ is None or self.origin_ is None:
+            raise ValueError(
+                "this encoder has no grid yet, so it cannot say which row a record "
+                "belongs to. Call fit(df, stream=...) — or load one that was fitted, "
+                "which carries the grid with it."
+            )
+        s = self._clean_stream(stream)
+        keys = self._keys(df, "the table")
+        t = to_periods(df[self.order])
+        n = len(df)
+
+        # Both sides floored onto the *fitted* grid. Serving rows sit past the end
+        # of the table this was fitted on, which is exactly why the grid is stored
+        # arithmetic (width + phase) and not the list of dates that were seen.
+        buckets = pd.MultiIndex.from_arrays(
+            [s["key"].to_numpy(), self._bucket(s["et"].to_numpy())]
+        )
+        uniq = buckets.unique()
+        s = s.assign(b=uniq.get_indexer(buckets), v2=s["v"] ** 2)
+        # Sorted within bucket so the cumulative columns are prefix aggregates of
+        # the records a lead can reach; `stable` so records sharing an
+        # `observed_at` keep the file's order and the result is reproducible.
+        s = s.sort_values(["b", "ot"], kind="stable").reset_index(drop=True)
+        grouped = s.groupby("b", sort=False)
+        s["csum"] = grouped["v"].cumsum()
+        s["csq"] = grouped["v2"].cumsum()
+        s["cnt"] = grouped.cumcount() + 1.0
+        # `merge_asof` wants its right side monotonic in the on-key across the
+        # whole frame, not just within `by` groups; the cumulative columns travel
+        # with their rows, so re-sorting here does not disturb them.
+        right = s.sort_values("ot", kind="stable")[["ot", "b", "cnt", "csum", "csq"]]
+
+        row_b = uniq.get_indexer(pd.MultiIndex.from_arrays([keys, self._bucket(t)]))
+        # "This key never appears in the stream at all" and "this key had nothing
+        # to report on this day" are different facts, and only the first one is a
+        # missing value. A store absent from a booking feed gets NaN; a store in
+        # the feed with no bookings that day gets a count of 0 and a sum of 0,
+        # which is the true total. Same split `_EXTENSIVE_STATS` makes.
+        known = np.isin(keys, s["key"].to_numpy()) & np.isfinite(t)
+
+        out: dict[str, np.ndarray] = {}
+        for lead in self.leads:
+            anchor = t - lead
+            cnt = np.zeros(n)
+            csum = np.zeros(n)
+            csq = np.zeros(n)
+            usable = np.flatnonzero(np.isfinite(anchor) & (row_b >= 0))
+            if len(usable):
+                left = pd.DataFrame(
+                    {"anchor": anchor[usable], "b": row_b[usable], "pos": usable}
+                ).sort_values("anchor", kind="stable")
+                merged = pd.merge_asof(
+                    left, right, left_on="anchor", right_on="ot", by="b",
+                    direction="backward", allow_exact_matches=True,
+                )
+                pos = merged["pos"].to_numpy()
+                # No match means no record of this bucket was observed in time,
+                # which is a real zero rather than an absence: the bucket exists,
+                # so this key was in the stream.
+                cnt[pos] = merged["cnt"].fillna(0.0).to_numpy()
+                csum[pos] = merged["csum"].fillna(0.0).to_numpy()
+                csq[pos] = merged["csq"].fillna(0.0).to_numpy()
+
+            filled = cnt > 0
+            with np.errstate(invalid="ignore", divide="ignore"):
+                mean = np.where(filled, csum / np.where(filled, cnt, 1.0), np.nan)
+            out[self.count_column(lead)] = np.where(known, cnt, np.nan)
+            for stat in self.stats:
+                name = f"{self.base_name}_lead{lead:g}_{stat}"
+                if stat == "sum":
+                    out[name] = np.where(known, csum, np.nan)
+                elif stat == "mean":
+                    out[name] = np.where(known, mean, np.nan)
+                else:
+                    # One record has no spread, so it gets NaN rather than the zero
+                    # a population formula hands back — a confident zero off a
+                    # single booking is the same lie as a mean over one.
+                    pair = cnt > 1
+                    with np.errstate(invalid="ignore", divide="ignore"):
+                        var = (csq - cnt * mean * mean) / np.where(pair, cnt - 1.0, 1.0)
+                    # Float error can drive a genuinely-zero variance slightly
+                    # negative, and a NaN out of a square root would read as "no
+                    # records" when the truth is "no variation".
+                    std = np.where(pair, np.sqrt(np.maximum(var, 0.0)), np.nan)
+                    out[name] = np.where(known, std, np.nan)
+        return out
+
+    def transform(self, df: pd.DataFrame, stream: pd.DataFrame | None = None
+                  ) -> pd.DataFrame:
+        if stream is None:
+            raise ValueError(
+                f"this table's features come from stream {self.stream!r}, which has "
+                "to be handed in again at predict time — the encoder stores the "
+                "recipe, not the numbers, precisely so that a stream which has moved "
+                "on since the fit is the one that gets used."
+            )
+        out = df.copy()
+        for name, values in self._aggregate(df, stream).items():
+            out[name] = values
+        return out
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": self.kind,
+            "stream": self.stream,
+            "by": self.by,
+            "value": self.value,
+            "event_time": self.event_time,
+            "observed_at": self.observed_at,
+            "order": self.order,
+            "leads": self.leads,
+            "stats": self.stats,
+            "event_grain": self.event_grain,
+            # The grid goes out with the recipe. It is the one thing here that was
+            # *measured*, so replaying it is the difference between a column that
+            # means the same at predict time and one that quietly re-derives its
+            # bucket width from whatever frame turned up.
+            "grain": self.grain_,
+            "origin": self.origin_,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "StreamAggregateEncoder":
+        enc = cls(d["stream"], d["by"], d["value"], d["event_time"], d["observed_at"],
+                  d["order"], d["leads"], d["stats"], d.get("event_grain"))
+        enc.grain_ = d.get("grain")
+        enc.origin_ = d.get("origin")
+        return enc
+
+
 ENCODER_CLASSES: dict[str, type] = {
     "target": TargetEncoder,
     "frequency": FrequencyEncoder,
     "ordinal": OrdinalEncoder,
     "group_stats": GroupStatsEncoder,
     "history": HistoryEncoder,
+    "stream_aggregate": StreamAggregateEncoder,
 }
 
 

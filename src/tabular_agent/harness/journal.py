@@ -85,6 +85,21 @@ def set_split(run_dir: str, record: dict) -> dict:
     return journal
 
 
+def set_streams(run_dir: str, record: dict) -> dict:
+    """Record the run's declared second inputs (0062).
+
+    Written once, beside the split and for the same reason: a stream is an input
+    to every number this run produced, and which file it was — and which of its
+    columns was read as the observation time — cannot be recovered afterwards
+    from the tables themselves.
+    """
+    journal = load(run_dir)
+    if record and journal.get("streams") is None:
+        journal["streams"] = record
+        save(run_dir, journal)
+    return journal
+
+
 def set_work_probe(run_dir: str, scored: dict) -> dict:
     """The ruler's score for the data as given, before any table was built.
 

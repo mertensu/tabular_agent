@@ -26,6 +26,15 @@ EXPECTED_TOOLS = {
     # served row the same distance ahead would; and it is refused outright on
     # unordered runs, where that freeze would mean nothing.
     "fit_history",
+    # Aggregates a declared second input per row, counting only the records
+    # observed a stated lead before that row. The one tool that reads a file the
+    # agent cannot otherwise reach — and it never returns rows from it, only
+    # aggregates, so the stream stays outside the agent's read surface. Safe for a
+    # different reason than `fit_history`: the restriction is backward from each
+    # row individually, so no fold freeze is needed and none would help. Refused
+    # on unordered runs, and refused below the declared forecast horizon, where
+    # the column would be built from knowledge no scored row could have.
+    "fit_stream_aggregate",
     "transform_features",
     # Runs agent-written code that *can* see the target, which is only safe
     # because nothing it produces is replayed: it selects work-half rows to fit
