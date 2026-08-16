@@ -65,6 +65,70 @@ model.
   says the probe ranks unreliably at 200 trees. Direction trustworthy, magnitude
   not a Kaggle prediction. No submission — Rossmann's board is spent (0045).
 
+### THE PLAN FOR THE NEXT CONTEXT — Ulf: *"ich möchte gerne besser als der median werden"*
+
+Read 0067 first, then this. **The priority did not change; the number did.**
++0.0068 is **80% of Rossmann's 0.00846 gap** and is still the largest measured
+lever in the project by a factor of three. What changed is that it is no longer
+expected to be *sufficient* on its own.
+
+One fact checked while writing this and worth knowing before anything else:
+**`models.py` sets `n_estimators=200` for lgbm, xgb *and* catboost, and
+`PROBE_PARAMS` does the same.** So the terminal fits — the models that actually
+ship — have never run at a real budget either. Every capacity number in this repo
+is a *probe* reading on a single lgbm.
+
+**A. Two measurements first. No LLM, no submissions, hours not days.**
+
+1. **v7's `t13` → the terminal blend at a real budget**, scored on v7's own sealed
+   holdout, against the same blend at 200 trees. This is "what would actually
+   ship", which no reading in this repo covers. Reuse
+   `probe_capacity_v7_chain.py`'s copy-the-split pattern and
+   `probe_restaurant_collapsed_columns.py`'s trick of driving the real
+   `finalize_run` rather than reimplementing it.
+2. **The same on Restaurant's `t7`** (already on disk in `_runs/restaurant_v2`).
+   Two datasets, one question, and Restaurant's gap is larger (+0.01175) so it is
+   the harder test.
+
+Register the prediction first. Mine: the blend gains **less** than the single
+lgbm's +0.0068, because an equal-weight average already recovers some of what
+capacity buys — but this is a guess and the point of A is that it is cheap.
+
+**B. Then the design decision, which is the actual build: 0054's open item 2 —
+where does the budget come from?**
+
+Not a constant (0054's rule, and 0067 strengthens it). The evidence in hand says
+the *obvious* answer is not good enough either: inner-tail early stopping chose
+1195 rounds on `t13` and delivered +0.0028 against a fixed 5000@0.03's +0.0068. So
+the question is live, it touches 0023/0029/0041/0043 (which rows may the stopping
+criterion see), and per this repo's habit it wants a **decision record before the
+code**. The code then lands in `probe.py`/`models.py` so every fit chooses.
+
+**C. Only after A and B: the remaining ~20%.**
+
+If A confirms and B ships, Rossmann sits near 0.1313 against a median of 0.12967 —
+about **0.0017 short**. That last piece is not identified. The candidate with the
+strongest prior and the right general framing:
+
+> **Every hyperparameter except `n_estimators` and `learning_rate` is a library
+> default in every run this project has ever made.** On 916k rows lgbm's
+> `num_leaves=31` is small.
+
+Same class as capacity ("the harness never chooses model capacity"), so it names
+no dataset. **But it must be built as a mechanism for choosing, never as a
+hardcoded set of winning numbers** — that is CLAUDE.md's line and 0022 one level
+up. One axis at a time (0017).
+
+**Running alongside, not after:** 0062 step 6 (the notebook) and **quizzes for all
+five blocks** are owed. CLAUDE.md is explicit that code Ulf has not followed is a
+failure even with green tests, and that debt is now five blocks deep plus the
+older backlog (slice 3, 0041/0042/0044, house-prices capacity).
+
+**Honest expectation:** A+B plausibly closes ~80% of Rossmann's gap and less of
+Restaurant's. Beating the median is *reachable* on this evidence, not *implied* by
+it. Say so in whatever gets written next rather than letting the plan read as a
+forecast.
+
 ### The methodological lesson, twice in one day
 
 Both of today's registered predictions were wrong, and both for the same reason:
