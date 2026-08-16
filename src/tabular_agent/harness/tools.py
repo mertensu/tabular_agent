@@ -1383,18 +1383,26 @@ def fit_stream_aggregate(
         **scored,
     })
 
-    # What each lead actually left, per row. This is the readout the whole tool
-    # turns on: a lead the data cannot support does not fail, it quietly empties
-    # the aggregate, and `records_per_row` at 0 beside a healthy `n_records` is
-    # what that looks like.
+    # What each lead actually left. This is the readout the whole tool turns on: a
+    # lead the data cannot support does not fail, it quietly empties the
+    # aggregate.
+    #
+    # **Two numbers on two different denominators, and saying which is which is
+    # the point.** `rows_answered` is over *every* row of the table, so it is
+    # directly comparable with `matched_rows` — the share the stream could reach
+    # at best, before any lead. The gap between them is what this lead cost.
+    # `records_per_row` is over the answered rows only, because a median across
+    # all rows of a feed covering a tenth of them is 0 whatever the lead, which
+    # says something about the feed and nothing about the choice being made.
     records_per_row = {}
-    empty_share = {}
+    answered_share = {}
     for lead in leads:
-        counts = out[encoder.count_column(lead)].dropna()
-        if len(counts):
-            records_per_row[f"{lead:g}"] = round(float(np.median(counts)), 3)
-            empty_share[f"{lead:g}"] = round(float((counts == 0).mean()), 3)
-    starved = [k for k, v in records_per_row.items() if v < 1]
+        counts = out[encoder.count_column(lead)]
+        answered = counts >= 1
+        answered_share[f"{lead:g}"] = round(float(answered.mean()), 4)
+        if answered.any():
+            records_per_row[f"{lead:g}"] = round(float(counts[answered].median()), 3)
+    starved = [k for k, v in answered_share.items() if v == 0.0]
 
     # How wide a scored block is, so a lead can be read against something. The
     # agent cannot get this anywhere else — `inspect_data` reports `n_val` as a row
@@ -1425,12 +1433,18 @@ def fit_stream_aggregate(
             "be; a lead nearer the far edge is honest throughout and sees less. "
             "Both are legitimate and the counts say what each costs."
         )
+    note += (
+        f" Read rows_answered against matched_rows ({encoder.matched_rows_:.3f}): the "
+        "second is the share of rows this stream could reach at all, the first is "
+        "what survived the lead. The distance between them is what the restriction "
+        "cost, and a large one is a finding rather than a fault — it is the size of "
+        "the gap between what training could see and what a forecast can."
+    )
     if starved:
         note += (
-            f" WARNING: lead(s) {starved} left a median of fewer than one record per "
-            "row — see records_per_row. At that point the column is mostly absence, "
-            "and whatever signal it carries is the pattern of which rows had "
-            "anything at all rather than the aggregate itself."
+            f" WARNING: lead(s) {starved} answered no rows at all. The columns are "
+            "constant and carry nothing; a shorter lead, or none of this stream, is "
+            "the choice here."
         )
 
     return {
@@ -1451,10 +1465,13 @@ def fit_stream_aggregate(
         "n_rows": int(len(out)),
         "source_table": session.rel(path),
         **scored,
-        # {lead: median records per row}, and the share of rows a lead left with
-        # nothing. Together they are what a badly-chosen lead looks like.
+        # Share of *all* rows this lead could put at least one record behind —
+        # the number to compare against `matched_rows`.
+        "rows_answered": answered_share,
+        # {lead: median records behind a row that got any}. Conditioned on being
+        # answered, so it says how much the aggregate summarises when it speaks,
+        # rather than restating how sparse the feed is.
         "records_per_row": records_per_row,
-        "rows_without_records": empty_share,
         "block_span": block_span,
         "note": note,
     }

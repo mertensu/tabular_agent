@@ -1274,12 +1274,16 @@ class StreamAggregateEncoder:
                 f"stream {self.stream!r} has no usable records: every row is missing "
                 f"one of {self.value!r}, {self.event_time!r} or {self.observed_at!r}."
             )
-        buckets = pd.MultiIndex.from_arrays(
-            [s["key"].to_numpy(), self._bucket(s["et"].to_numpy())]
-        )
-        rows = pd.MultiIndex.from_arrays([keys, self._bucket(t)])
-        matched = buckets.unique().get_indexer(rows) >= 0
-        self.n_buckets_ = int(buckets.nunique())
+        buckets = pd.DataFrame({
+            "key": s["key"].to_numpy(), "bucket": self._bucket(s["et"].to_numpy()),
+        }).drop_duplicates()
+        # A hash join rather than an index lookup: both sides carry a text key, and
+        # a `MultiIndex.get_indexer` over object levels is minutes where this is
+        # milliseconds on a table of a quarter of a million rows.
+        buckets["_hit"] = True
+        rows = pd.DataFrame({"key": keys, "bucket": self._bucket(t)})
+        matched = rows.merge(buckets, on=["key", "bucket"], how="left")["_hit"].notna()
+        self.n_buckets_ = int(len(buckets))
         self.matched_rows_ = float(matched.mean()) if len(matched) else 0.0
         if self.matched_rows_ == 0.0:
             raise ValueError(
@@ -1321,31 +1325,35 @@ class StreamAggregateEncoder:
         # Both sides floored onto the *fitted* grid. Serving rows sit past the end
         # of the table this was fitted on, which is exactly why the grid is stored
         # arithmetic (width + phase) and not the list of dates that were seen.
-        buckets = pd.MultiIndex.from_arrays(
-            [s["key"].to_numpy(), self._bucket(s["et"].to_numpy())]
-        )
-        uniq = buckets.unique()
-        s = s.assign(b=uniq.get_indexer(buckets), v2=s["v"] ** 2)
+        #
+        # The bucket stays a (key, floored time) *pair* rather than being resolved
+        # to an integer id: `merge_asof` groups on several `by` columns natively
+        # and factorizes them internally, where doing it here by hand meant a
+        # `MultiIndex.get_indexer` over a text level — minutes on a quarter of a
+        # million rows against milliseconds for the merge that follows.
+        s = s.assign(bucket=self._bucket(s["et"].to_numpy()), v2=s["v"] ** 2)
         # Sorted within bucket so the cumulative columns are prefix aggregates of
         # the records a lead can reach; `stable` so records sharing an
         # `observed_at` keep the file's order and the result is reproducible.
-        s = s.sort_values(["b", "ot"], kind="stable").reset_index(drop=True)
-        grouped = s.groupby("b", sort=False)
+        s = s.sort_values(["key", "bucket", "ot"], kind="stable").reset_index(drop=True)
+        grouped = s.groupby(["key", "bucket"], sort=False)
         s["csum"] = grouped["v"].cumsum()
         s["csq"] = grouped["v2"].cumsum()
         s["cnt"] = grouped.cumcount() + 1.0
         # `merge_asof` wants its right side monotonic in the on-key across the
         # whole frame, not just within `by` groups; the cumulative columns travel
         # with their rows, so re-sorting here does not disturb them.
-        right = s.sort_values("ot", kind="stable")[["ot", "b", "cnt", "csum", "csq"]]
+        right = s.sort_values("ot", kind="stable")[
+            ["ot", "key", "bucket", "cnt", "csum", "csq"]
+        ]
 
-        row_b = uniq.get_indexer(pd.MultiIndex.from_arrays([keys, self._bucket(t)]))
+        row_bucket = self._bucket(t)
         # "This key never appears in the stream at all" and "this key had nothing
         # to report on this day" are different facts, and only the first one is a
         # missing value. A store absent from a booking feed gets NaN; a store in
         # the feed with no bookings that day gets a count of 0 and a sum of 0,
         # which is the true total. Same split `_EXTENSIVE_STATS` makes.
-        known = np.isin(keys, s["key"].to_numpy()) & np.isfinite(t)
+        known = pd.Series(keys).isin(set(s["key"])).to_numpy() & np.isfinite(t)
 
         out: dict[str, np.ndarray] = {}
         for lead in self.leads:
@@ -1353,13 +1361,15 @@ class StreamAggregateEncoder:
             cnt = np.zeros(n)
             csum = np.zeros(n)
             csq = np.zeros(n)
-            usable = np.flatnonzero(np.isfinite(anchor) & (row_b >= 0))
-            if len(usable):
-                left = pd.DataFrame(
-                    {"anchor": anchor[usable], "b": row_b[usable], "pos": usable}
-                ).sort_values("anchor", kind="stable")
+            usable = np.flatnonzero(np.isfinite(anchor))
+            if len(usable) and len(right):
+                left = pd.DataFrame({
+                    "anchor": anchor[usable], "key": keys[usable],
+                    "bucket": row_bucket[usable], "pos": usable,
+                }).sort_values("anchor", kind="stable")
                 merged = pd.merge_asof(
-                    left, right, left_on="anchor", right_on="ot", by="b",
+                    left, right, left_on="anchor", right_on="ot",
+                    by=["key", "bucket"],
                     direction="backward", allow_exact_matches=True,
                 )
                 pos = merged["pos"].to_numpy()

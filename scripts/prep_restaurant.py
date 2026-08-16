@@ -51,14 +51,30 @@ That is a train/serve skew no guard in this harness detects: no fold boundary is
 crossed, no encoder is misfitted, and validation confirms the column is
 excellent because validation is drawn from the same uncut stream. It is 0047's
 finding — the horizon is a column, not a constant — arriving in a *feature*
-rather than in a lag, and the general capability it asks for ("aggregate a
-related stream restricted to what was knowable a given lead time ahead") does not
-exist yet.
+rather than in a lag.
 
 Following 0029 and the `Customers` precedent, the column stays and the data
 dictionary states the fact plainly. What the agent does with it is the agent's
 decision, and if it trains on it happily we will have learned something about the
 dictionary channel that a pre-cleaned table could not have taught us.
+
+**3a. Both reservation files are also written out as *streams*, uncollapsed.**
+Since 0062 the harness has a second input channel: a file at a finer grain whose
+records carry both the time they are **about** (`visit_datetime`) and the time
+they became **knowable** (`reserve_datetime`). `fit_stream_aggregate` can then
+aggregate them per store-day *restricted to a stated lead*, which is the honest
+form of the column point 3 describes.
+
+The collapsed columns stay beside them, deliberately (0029): the harness supplies
+both and the agent chooses. Handing over only the honest version would answer the
+question this dataset was kept for.
+
+**The streams are written with their timestamps untouched.** An earlier draft
+floored `visit_datetime` to the visit date so it would match the table's grain,
+and that was wrong for a reason bigger than this script (0063): a precondition the
+library never states or checks is a trap for anyone else using it. The encoder now
+measures the table's own row spacing and buckets both sides onto it, so the raw
+file is what it should be given.
 
 **4. `visit_date` is kept as a column so the run can order its split on it.**
 Training ends 2017-04-22 and the forecast window is 2017-04-23 to 2017-05-31.
@@ -92,6 +108,14 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(REPO, "restaurant_visitor")
 OUT = os.path.join(RAW, "train_joined.parquet")
 TEST_OUT = os.path.join(RAW, "test_joined.parquet")
+
+#: The two reservation files, uncollapsed, keyed so they can join the spine.
+#: Written by this script rather than pointed at in place, because the hpg one
+#: genuinely needs a join to carry `air_store_id` at all — and because a run
+#: should declare one kind of thing, not "this csv for one and that parquet for
+#: the other".
+AIR_STREAM_OUT = os.path.join(RAW, "air_reserve_stream.parquet")
+HPG_STREAM_OUT = os.path.join(RAW, "hpg_reserve_stream.parquet")
 
 #: Kept in the table, not removed — see point 3 of the module docstring.
 LEAKING_COLUMNS: list[str] = []
@@ -180,31 +204,102 @@ METRIC = "rmsle"
 #: the competition measures forecasting.
 SPLIT_ON = "visit_date"
 
+#: Days between the end of history and the earliest row the competition asks for:
+#: training stops 2017-04-22, the forecast window opens 2017-04-23.
+#:
+#: **It is the block's floor, not its width** (0047). The far edge is 39 days out,
+#: so a lead of 1 is honest for the first day of the window and more generous than
+#: the last day could ever be. Both are legitimate leads and the harness reports
+#: `block_span` beside them; which to use is the agent's call (0029).
+FORECAST_HORIZON = 1.0
+
+#: The run's second inputs (0062). Declared here because which column is *when a
+#: booking is for* and which is *when it was made* is a fact about the download
+#: that no profiler recovers — and the wrong way round builds a feature out of the
+#: future without failing.
+#:
+#: The notes are the owner's channel, same discipline as `COLUMN_NOTES`: what the
+#: file is and how it was keyed, not what to do with it.
+STREAMS = {
+    "air_reserve": {
+        "path": AIR_STREAM_OUT,
+        "event_time": "visit_datetime",
+        "observed_at": "reserve_datetime",
+        "notes": "one row per AirREGI reservation, as downloaded: the party size "
+                 "booked, the datetime of the visit it is for, and the datetime "
+                 "the booking was made. Cut at the moment the forecast is issued, "
+                 "so nothing booked after 2017-04-22 is in it.",
+    },
+    "hpg_reserve": {
+        "path": HPG_STREAM_OUT,
+        "event_time": "visit_datetime",
+        "observed_at": "reserve_datetime",
+        "notes": "one row per Hot Pepper Gourmet reservation, re-keyed onto "
+                 "air_store_id through store_id_relation.csv — so it covers only "
+                 "the 150 of 829 stores listed on both platforms. Same cut as "
+                 "air_reserve.",
+    },
+}
+
 #: The public leaderboard, downloaded from the competition. Used only to turn a
 #: score into a rank, which is the unit every conclusion in this project is
 #: actually about — 0.60 rmsle means nothing on its own, "rank 1400 of 2149" does.
 #:
 #: Lower is better here, unlike Porto Seguro's, and that difference is why
 #: `leaderboard_rank` exists rather than each caller sorting it themselves.
-LEADERBOARD_CSV = os.path.join(
+#: **Both boards, and the private one is the default** — 0061. Every Rossmann
+#: script hardcoded the public median while quoting private scores beside it, and
+#: 0060 had made the identical mistake on this dataset an hour earlier. The public
+#: board here is a third of the test rows; the private one decides the competition
+#: and is what a submission is finally judged on.
+LEADERBOARD_PUBLIC = os.path.join(
     RAW, "recruit-restaurant-visitor-forecasting-publicleaderboard-2026-08-14T18:31:32.csv"
 )
+LEADERBOARD_PRIVATE = os.path.join(
+    RAW, "recruit-restaurant-visitor-forecasting-privateleaderboard-2026-08-14T18:31:06.csv"
+)
+
+#: Kept for callers written before both boards were read. Points at the public
+#: file, which is what it always was.
+LEADERBOARD_CSV = LEADERBOARD_PUBLIC
 
 
-def leaderboard_rank(score: float) -> str:
-    """Where an rmsle would have placed on the public leaderboard.
+def leaderboard(private: bool = True) -> dict:
+    """Best / top-10% / median off a board, read from disk rather than typed.
 
-    Approximate on purpose — it is the *public* board and our holdout is not the
-    competition's test set, so this is an order-of-magnitude reading and gets
-    reported with a tilde. What it is for is answering "are we above or below the
-    median", which is the question sixteen runs have not been able to answer
-    without one of these files.
+    Private by default, for `leaderboard_rank`'s reason. The first hand-typed
+    version of these numbers on this dataset was wrong by 0.046 on the median,
+    which is twice the whole distance from median to first place.
     """
-    if not os.path.exists(LEADERBOARD_CSV):
+    path = LEADERBOARD_PRIVATE if private else LEADERBOARD_PUBLIC
+    if not os.path.exists(path):
+        return {}
+    s = pd.read_csv(path)["Score"].sort_values().reset_index(drop=True)
+    n = len(s)
+    return {"best": round(float(s.iloc[0]), 5),
+            "top 10%": round(float(s.iloc[n // 10]), 5),
+            "median": round(float(s.iloc[n // 2]), 5)}
+
+
+def leaderboard_rank(score: float, private: bool = True) -> str:
+    """Where an rmsle would have placed. **Pass a score from the same board.**
+
+    Approximate on purpose — our holdout is not the competition's test set, so
+    this is an order-of-magnitude reading and gets reported with a tilde. What it
+    is for is answering "above or below the median", which sixteen runs could not
+    answer without one of these files.
+
+    The default is private because that is what a submission is finally judged on;
+    passing a public score here silently answers a different question, which is
+    the mistake this helper exists to make harder (0061).
+    """
+    path = LEADERBOARD_PRIVATE if private else LEADERBOARD_PUBLIC
+    if not os.path.exists(path):
         return "no leaderboard file"
-    s = pd.read_csv(LEADERBOARD_CSV)["Score"].sort_values().reset_index(drop=True)
+    s = pd.read_csv(path)["Score"].sort_values().reset_index(drop=True)
     rank = int((s < score).sum()) + 1
-    return f"rank ~{rank}/{len(s)} (top {rank / len(s):.0%})"
+    board = "private" if private else "public"
+    return f"rank ~{rank}/{len(s)} (top {rank / len(s):.0%}, {board})"
 
 
 #: First date of the competition's forecast window. Everything at or after this
@@ -245,6 +340,52 @@ def _reserve_aggregate(path: str, key: str, prefix: str) -> pd.DataFrame:
     return agg
 
 
+#: What a stream file has to carry, in the order the run declares them.
+STREAM_COLUMNS = ["air_store_id", "visit_datetime", "reserve_datetime",
+                  "reserve_visitors"]
+
+
+def _hpg_rekeyed() -> pd.DataFrame:
+    """Hot Pepper Gourmet reservations, carrying `air_store_id`.
+
+    The relation table is the only bridge between the two platforms' identifiers
+    and covers 150 of 829 stores, so this is an inner join and the result is a
+    stream about a fifth of the estate. That is a fact about the data; a left join
+    would produce records keyed on nothing.
+    """
+    rel = pd.read_csv(os.path.join(RAW, "store_id_relation.csv"))
+    hpg = pd.read_csv(os.path.join(RAW, "hpg_reserve.csv"),
+                      parse_dates=["visit_datetime", "reserve_datetime"])
+    return hpg.merge(rel, on="hpg_store_id", how="inner", validate="many_to_one")
+
+
+def write_streams() -> dict[str, pd.DataFrame]:
+    """The two reservation files as streams — uncollapsed, timestamps untouched.
+
+    Nothing is aligned to the table's grain here on purpose. The encoder measures
+    the table's own row spacing and buckets both sides onto it (0063), so a
+    booking stamped 18:00 finds its store-day without this script knowing that a
+    row is a day. Handing over a pre-floored file would work and would put a rule
+    in a place nobody using the library can read.
+
+    The **cut is preserved**, which is the whole reason this dataset is worth
+    running: the file stops at the moment the forecast is issued, so the records a
+    forecast row could not have are genuinely absent rather than filtered out here.
+    """
+    air = pd.read_csv(os.path.join(RAW, "air_reserve.csv"),
+                      parse_dates=["visit_datetime", "reserve_datetime"])
+    hpg = _hpg_rekeyed()
+    written = {}
+    for name, frame, path in (
+        ("air_reserve", air, AIR_STREAM_OUT),
+        ("hpg_reserve", hpg, HPG_STREAM_OUT),
+    ):
+        out = frame[STREAM_COLUMNS].copy()
+        out.to_parquet(path, index=False)
+        written[name] = out
+    return written
+
+
 def _join_all(spine: pd.DataFrame) -> pd.DataFrame:
     """Attach every side table to a (air_store_id, visit_date) spine.
 
@@ -274,10 +415,7 @@ def _join_all(spine: pd.DataFrame) -> pd.DataFrame:
     # it covers 150 of 829 stores. Mapping first, then aggregating, keeps the
     # aggregate at the air grain — two hpg ids mapping to one air id would
     # otherwise produce two rows to join against one.
-    rel = pd.read_csv(os.path.join(RAW, "store_id_relation.csv"))
-    hpg = pd.read_csv(os.path.join(RAW, "hpg_reserve.csv"),
-                      parse_dates=["visit_datetime", "reserve_datetime"])
-    hpg = hpg.merge(rel, on="hpg_store_id", how="inner", validate="many_to_one")
+    hpg = _hpg_rekeyed()
     hpg["visit_date"] = hpg["visit_datetime"].dt.normalize()
     hpg["lead_days"] = (
         hpg["visit_date"] - hpg["reserve_datetime"].dt.normalize()
@@ -298,6 +436,7 @@ def _join_all(spine: pd.DataFrame) -> pd.DataFrame:
     # differently from AirREGI. Kept because the disagreement between two
     # descriptions of the same restaurant is real information; known only for the
     # linked stores, which is what the dictionary says.
+    rel = pd.read_csv(os.path.join(RAW, "store_id_relation.csv"))
     hpg_store = pd.read_csv(os.path.join(RAW, "hpg_store_info.csv"))
     hpg_store = hpg_store.merge(rel, on="hpg_store_id", how="inner",
                                 validate="one_to_one")
@@ -377,12 +516,30 @@ def main() -> int:
     print(f"store-days whose only bookings were same-day: "
           f"{tr_same_day} in train, {te_same_day} in the forecast window")
 
+    streams = write_streams()
+    print()
+    for name, frame in streams.items():
+        notice = (
+            frame["visit_datetime"].dt.normalize()
+            - frame["reserve_datetime"].dt.normalize()
+        ).dt.days
+        print(f"wrote {STREAMS[name]['path']}  {frame.shape}")
+        # The quantity the whole capability turns on, printed rather than
+        # asserted: it is a property of this download, and a future one without
+        # the cut would make the dictionary entry wrong rather than the code.
+        print(f"  {frame.air_store_id.nunique()} stores, "
+              f"booked with 0 days' notice: {(notice <= 0).mean():.1%}, "
+              f"median notice {notice.median():.0f} days")
+
     print("\nto start a run:")
-    print("    from scripts.prep_restaurant import ABOUT, COLUMN_NOTES, METRIC, SPLIT_ON")
+    print("    from scripts.prep_restaurant import (ABOUT, COLUMN_NOTES, "
+          "FORECAST_HORIZON,")
+    print("                                         METRIC, SPLIT_ON, STREAMS)")
     print("    RunSession(run_dir, OUT,")
     print(f"               TaskSpec(target='visitors', metric='{METRIC}',")
-    print("                        notes=ABOUT, column_notes=COLUMN_NOTES),")
-    print(f"               split_on='{SPLIT_ON}')")
+    print("                        notes=ABOUT, column_notes=COLUMN_NOTES,")
+    print(f"                        forecast_horizon={FORECAST_HORIZON}),")
+    print(f"               split_on='{SPLIT_ON}', streams=STREAMS)")
     return 0
 
 

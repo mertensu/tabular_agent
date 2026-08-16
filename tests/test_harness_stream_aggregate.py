@@ -96,6 +96,7 @@ def test_the_lead_decides_what_the_column_holds(session):
     assert set(built[col(7, "sum")].dropna()) == {5.0}
     assert set(built[col(30, "sum")].dropna()) == {2.0}
     assert out["records_per_row"] == {"7": 2.0, "30": 1.0}
+    assert out["rows_answered"] == {"7": 1.0, "30": 1.0}
 
 
 def test_every_statistic_arrives_with_its_count(session):
@@ -274,9 +275,27 @@ def test_a_lead_the_data_cannot_support_is_reported_not_hidden(session):
         session, stream="bookings", by=["store"], value="party", leads=[90],
     )
 
-    assert out["records_per_row"]["90"] == 0.0
-    assert out["rows_without_records"]["90"] == 1.0
+    assert out["rows_answered"]["90"] == 0.0
+    # No median to report when nothing was answered — an absent key rather than a
+    # zero, since "the typical answered row held 0 records" is not a fact.
+    assert "90" not in out["records_per_row"]
     assert "WARNING" in out["note"]
+
+
+def test_the_two_shares_are_reported_on_denominators_that_can_be_compared(session):
+    """`rows_answered` against `matched_rows` is the comparison that means something.
+
+    A feed reaching a tenth of the rows makes any median-over-all-rows read 0
+    whatever the lead — which describes the feed, not the choice. So the share is
+    over every row (comparable with `matched_rows`) and the median is over the
+    rows that got an answer.
+    """
+    out = fit_stream_aggregate(
+        session, stream="bookings", by=["store"], value="party", leads=[7],
+    )
+
+    assert out["rows_answered"]["7"] <= out["matched_rows"]
+    assert "matched_rows" in out["note"]
 
 
 def test_a_healthy_lead_carries_no_warning(session):
