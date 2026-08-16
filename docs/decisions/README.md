@@ -301,6 +301,20 @@ Vocabulary used throughout:
   can measure the difference, because every one shares the cut. 0059's interval was
   confident and wrong for the second time. No fix chosen — three shapes named,
   spanning 0030, 0035 and 0041/0043)*
+- [0066 — The collapsed column wins everywhere except where it is graded](0066-the-collapsed-column-wins-everywhere-except-where-it-is-graded.md)
+  *(**the controlled test**, and the measurement this dataset was kept for since
+  0054. t7 against t8, one variable — six collapsed reservation columns — on
+  identical rows, both arms shipped through the real `finalize_run` path, with the
+  t7 arm reproducing v2 to six decimals internally and digit-for-digit on Kaggle.
+  **t8 − t7 reads +0.0085 (probe), +0.0112 (val), +0.0112 (sealed), +0.0023
+  (public), −0.0015 (private)** — the collapsed column's advantage decaying
+  monotonically with distance from training and reversing at the far half. The
+  gradient is the evidence, not the flip. Refutes my own registered prediction and
+  confirms 0065. **All three internal instruments were confidently wrong in the
+  same direction, the sealed holdout worst of them** — so a sealed score is a lower
+  bound on a *difference* too, and can order two candidates backwards when the
+  defect is in the data's provenance. Magnitude is twelve ranks; the finding is
+  direction. The board is now spent for this question)*
 
 ### Keeping the agent's surface small
 

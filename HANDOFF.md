@@ -8,7 +8,71 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-16 (latest) — Restaurant v2 ran: the agent found the leak and lost the argument
+## 2026-08-16 (latest) — the controlled test landed: the agent was right, and every instrument here was wrong
+
+**Machine:** MacBook Air | **Branch:** master | **553 tests pass**.
+Written up as [0066](docs/decisions/0066-the-collapsed-column-wins-everywhere-except-where-it-is-graded.md).
+**Read this before 0065** — it confirms 0065's central claim and refutes the
+prediction I registered against it.
+
+`scripts/probe_restaurant_collapsed_columns.py`: v2's own **t7** (six collapsed
+reservation columns) against **t8** (same chain, those six dropped), on identical
+rows, both shipped through the real `finalize_run` path. Two controls passed — the
+t7 arm reproduced v2's blend val 0.519707 / sealed 0.505713 to six decimals *and*
+came back from Kaggle at 0.55124 / 0.51197, digit-identical.
+
+| t8 − t7, by distance from the end of training | |
+|---|---|
+| probe (in-sample block) | +0.00849 |
+| validation | +0.01122 |
+| sealed, adjacent | +0.01123 |
+| public (nearer half of the horizon) | +0.00228 |
+| **private (further half)** | **−0.00149** |
+
+> **The collapsed column's advantage decays monotonically with distance and
+> reverses sign where the competition grades.** The gradient is the evidence, not
+> the flip.
+
+**All three internal instruments were confidently wrong in the same direction** —
+probe +0.0085 (and it is the argmax that ships), 0059's block interval
+`sign_stable: True`, and the **sealed holdout worst of the three at +0.0112.** So:
+
+> A sealed score is a lower bound on a *difference* too, and where the defect is in
+> the data's **provenance** rather than in the model, the seal can order two
+> candidates **backwards**. No block of these rows could have caught it.
+
+**The argmax-shipping defect 0065 named is now measured, not theoretical:** the
+agent diagnosed the leak, built the clean table, and the harness shipped the leaky
+one, at 0.00149 private rmsle. Ulf's principle — *"der agent ist die Intelligenz,
+die harness sollte ihn nicht beschneiden, ihn nur in richtige bahnen leiten"* —
+was stated **before** this measurement and now has a number behind it.
+
+### The mistake worth carrying forward, and it is mine
+
+My registered prediction (t7 wins privately, the trap is a null) rested on two
+*uncontrolled* comparisons — 0060's decay reading and v1-against-v2. 0065 names
+that confound about v1/v2 in the same breath as registering the prediction, and I
+leaned on it anyway. **A confound you have written down is still a confound.**
+
+### Limits, so the number is not over-read
+
+Twelve ranks (~1446 → ~1434 of 2150, both top 67%), both arms far below the private
+median 0.53223. n=1 with no interval on the Kaggle difference; what lifts it is the
+ordered gradient. **It does not license dropping such columns as a rule** (0022, one
+level up) — the general claim is about the *instruments*. **The Restaurant private
+board is now spent for this question** (three submissions scored).
+
+### Next, and the direction is settled even though the detail is not
+
+0065's open decision now has a direction: prefer the fix that lets the agent's
+correct judgement survive (a not-to-ship channel) over the one where the harness
+decides for it (provenance in the serving declaration). 0062 step 6 — the notebook
+— is still the only unbuilt item of that build order. Quizzes still owed for all
+five blocks.
+
+---
+
+## 2026-08-16 — Restaurant v2 ran: the agent found the leak and lost the argument
 
 **Machine:** MacBook Air | **Branch:** master | **553 tests pass**.
 Written up as [0065](docs/decisions/0065-the-agent-found-the-leak-and-the-ruler-overruled-it.md).
