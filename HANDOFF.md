@@ -8,7 +8,75 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-16 (latest) — the controlled test landed: the agent was right, and every instrument here was wrong
+## 2026-08-16 (latest) — START HERE. Capacity measured on the table that ships: +0.0068, not +0.06
+
+**Machine:** MacBook Air | **Branch:** master | **553 tests pass** | **fresh context starts here.**
+Written up as [0067](docs/decisions/0067-capacity-is-worth-a-tenth-of-that-on-a-table-that-has-features.md).
+
+Ulf asked how this project gets better. I answered "capacity, three to seven times
+the gap to the median", then ran the measurement that answer rested on. **It was
+wrong**, and the correction is the most important thing in this file.
+
+### The reading
+
+`scripts/probe_capacity_v7_chain.py` — 0061's "untested cell", v7's `t13` (the
+chain that shipped) at 0054's own budgets, same grid and monkeypatch, imported not
+restated. Possible now only because `t13` predates `fit_history` and so still
+replays; v8's `t24` does not (0055).
+
+| table | 200 trees | best budget | gain |
+|---|---|---|---|
+| baseline (raw, `Customers` dropped) | 0.21810 | 0.15749 | **+0.0606** |
+| v8's feature block (code only) | 0.23331 | 0.15213 | **+0.0812** |
+| **v7's `t13` — what shipped** | **0.13202** | **0.12520** | **+0.0068** |
+
+> **Capacity and feature work substitute. Whichever you apply second is worth
+> about a tenth of what it was worth first.**
+
+They do not *converge*, though: 0.15749 / 0.15213 / **0.12520** at best budget, so
+the feature chain is worth ~0.03 that capacity cannot recover.
+
+### Why this matters more than the number
+
+If the whole +0.0068 transferred to Kaggle — and 0056 showed capacity gains do
+transfer — v7's private **0.13813 → 0.13133**, against a private median of
+**0.12967**. Still short.
+
+> **Features and capacity are both bounded now, and together they do not close the
+> gap to the median on Rossmann.** The remaining gap is made of something this
+> project has not identified.
+
+**So do not open the next session by building a capacity feature.** The obvious
+plan is now measured and it is not enough on its own. Untested candidates, none
+endorsed: one model rather than per-segment models; no row weighting of any kind;
+every hyperparameter except `n_estimators`/`learning_rate` is a library default in
+every run ever made; the blend has never been compared against a tuned single
+model.
+
+### Two things that survive unchanged
+
+- **"Do not raise the constant" (0054) is strengthened**, not weakened. The
+  inner-tail early-stopping arm chose 1195 rounds on `t13` and delivered +0.0028
+  against the fixed 5000@0.03's +0.0068 — it **under-shoots on a well-featured
+  table**. That is evidence about 0054's open item 2 (*where does the
+  early-stopping block come from*), and evidence that the obvious answer is not
+  good enough.
+- The reading is a **probe** score: one lgbm, one table, one dataset, and 0056
+  says the probe ranks unreliably at 200 trees. Direction trustworthy, magnitude
+  not a Kaggle prediction. No submission — Rossmann's board is spent (0045).
+
+### The methodological lesson, twice in one day
+
+Both of today's registered predictions were wrong, and both for the same reason:
+**they were argued from uncontrolled comparisons.** 0066's was argued from v1
+against v2 (two agent trajectories); this one from bare-table capacity readings
+against a table that ships. In both cases the confound was written down first and
+leaned on anyway. When a number is about to become a priority, check which
+comparison produced it.
+
+---
+
+## 2026-08-16 — the controlled test landed: the agent was right, and every instrument here was wrong
 
 **Machine:** MacBook Air | **Branch:** master | **553 tests pass**.
 Written up as [0066](docs/decisions/0066-the-collapsed-column-wins-everywhere-except-where-it-is-graded.md).

@@ -315,6 +315,17 @@ Vocabulary used throughout:
   bound on a *difference* too, and can order two candidates backwards when the
   defect is in the data's provenance. Magnitude is twelve ranks; the finding is
   direction. The board is now spent for this question)*
+- [0067 — Capacity is worth a tenth of that on a table that has features](0067-capacity-is-worth-a-tenth-of-that-on-a-table-that-has-features.md)
+  *(0061's "untested cell", finally measured: v7's `t13` — the chain that actually
+  shipped — swept at the same budgets 0054 used. **+0.0068**, against +0.0606 on a
+  bare table and +0.0812 on a feature block. Capacity and feature work
+  **substitute**: whichever you apply second is worth a tenth of what it was worth
+  first. Narrows 0054 without contradicting a number in it, and refutes the
+  priority argument built on it — capacity is 0.8x the gap to the private median,
+  not the 3-7x the bare-table readings suggested. **Features and capacity are both
+  bounded now and together they do not close the gap.** Also: the inner-tail
+  early-stopping arm under-shoots badly here (1195 rounds, +0.0028), which is
+  evidence about 0054's open item 2 rather than an answer to it)*
 
 ### Keeping the agent's surface small
 
