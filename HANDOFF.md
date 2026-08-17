@@ -108,6 +108,13 @@ touched. Nothing written for it yet: **`scripts/prep_ieee.py` does not exist.**
 | private board | 6,355 teams, best 0.94588, top 10% 0.92819, **median 0.91096** |
 | public board | best 0.96814, top 10% 0.95321, median 0.94127 |
 
+**`TransactionDT` is a timedelta from an undisclosed reference datetime, not a
+timestamp.** Two consequences worth knowing before anyone writes a date feature.
+Its unit is seconds, so a *relative* weekday and hour are derivable —
+`(DT // 86400) % 7` — but **which day is Monday is unknown**, and so is the
+calendar date of any row. Nothing external can be joined to it, which is
+convenient rather than limiting: 0001 keeps external data out anyway.
+
 **The 30-day gap is the point, and it is not a nuisance.** `TaskSpec.forecast_horizon`
 is expressed *in the ordering column's units*, so with `split_on="TransactionDT"` it
 is **2,592,000**, not 30 — 0051 forbids guessing units and this is where that bites.
@@ -122,10 +129,29 @@ real 30-day gap, so that refusal either holds or it does not.
 1. **0073's mechanism, n=2.** `card1` and friends are thousands of distinct values
    on 590k rows — the high-cardinality identity structure the mispricing was about.
    It appeared on Rossmann and on none of the other three datasets.
-2. **Today's categorical finding.** This table is *full* of string categoricals
-   (`ProductCD`, `card4/6`, `P_/R_emaildomain`, `DeviceInfo`, `id_30/31/33/34`) and
-   `_feature_frame` drops every one of them. The only route to them is an agent
-   encoding — the exact defect recorded in 0073's "what was rejected".
+2. **Today's categorical finding, in its sharpest available form.** The competition
+   *declares* which columns are categorical: `ProductCD`, `card1`-`card6`, `addr1`,
+   `addr2`, `P_/R_emaildomain`, `M1`-`M9` on the transaction side; `DeviceType`,
+   `DeviceInfo`, `id_12`-`id_38` on the identity side. **49 columns. The harness
+   handles every one of them wrongly, in two different ways** (measured, not
+   assumed — see the table below):
+
+   | | | |
+   |---|---|---|
+   | **31 are strings** | `ProductCD`, `card4`, `card6`, both email domains, `M1`-`M9`, `DeviceInfo` (1,786 values), `id_30/31/33/34`… | `_feature_frame` **drops** them |
+   | **18 are numeric dtype** | `card1` (**13,553 values**), `card2` (500), `id_19` (522), `id_21` (490), `id_25` (341), `addr1` (332)… | **kept, and split as ordered numbers** |
+
+   The second row is the dangerous one and it is **silent**. `_feature_frame` at
+   least reports what it dropped; nothing reports that a tree is asking
+   *"is `card1` > 9000?"* of an arbitrary identifier. Dropping is lossy and visible;
+   this is wrong and invisible.
+
+   **The prep-side fix is sanctioned, not a workaround.** `CLAUDE.md` names *the
+   typing* as one of `prep_*.py`'s jobs, so casting the 18 to string in
+   `prep_ieee.py` is exactly where that decision belongs. It converts a wrong-and-
+   invisible failure into a lossy-and-visible one, after which the only route to
+   them is an agent encoding — which is the defect 0073 recorded in "what was
+   rejected", now with 49 columns of evidence behind it rather than an argument.
 3. **0054's open item 2.** Whether the terminal fit's 200 trees is visibly part of
    why a run lands mid-table, on a board that can actually say so.
 4. **0060 / 0061.** The field decays ~0.030 AUC public -> private (median 0.94127 ->
