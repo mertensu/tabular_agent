@@ -386,6 +386,20 @@ Vocabulary used throughout:
   is a key expressed as a distance. The machinery stays
   in the class so pre-0072 bundles still predict; the refusal is pinned as a
   signature)*
+- [0073 — The ruler is mispriced on one dataset, and three mechanisms failed to say why](0073-the-ruler-is-mispriced-on-one-dataset-and-three-mechanisms-failed-to-say-why.md)
+  *(re-ruled Rossmann v7's whole chain at five budgets and every other run in
+  `_runs/` at two. **The probe inflates most feature steps, not just close calls:**
+  v7's chain is worth 0.104 as the ruler tells it and 0.032 at capacity, and the
+  argmax moves off the table that shipped. Two clean mechanisms — a row filter's
+  cost is training data a small ruler cannot use, and v7's largest fork reverses so
+  that the branch it rejected wins at every high budget. Replicates on `rossmann_v8`
+  and appears on **none** of the other three datasets. Two beliefs died: rounds and
+  learning rate are not interchangeable at matched shrinkage, and more capacity is
+  not truer — three tables overfit between 3000 and 5000 rounds, so **each table has
+  its own optimum and no fixed-budget ruler is neutral.** Three proposed mechanisms
+  all failed, and the two-budget panel is **deliberately not built**: ~10x cost on
+  every dataset for an effect seen on one. Also records that no model here has ever
+  been told a column is categorical)*
 
 ### Keeping the agent's surface small
 

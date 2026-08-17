@@ -8,7 +8,107 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-17 (latest) — START HERE. The rule landed: a feature is an average, not a row
+## 2026-08-17 (latest) — START HERE. The ruler is mispriced, on one dataset, and we do not know why
+
+**Machine:** MacBook Air | **Branch:** master | **no `src/` change** |
+**fresh context starts here.** The plan's measurement is **done**. New record:
+[0073](docs/decisions/0073-the-ruler-is-mispriced-on-one-dataset-and-three-mechanisms-failed-to-say-why.md).
+Read it before anything else here — this entry is the short form.
+
+> **The probe inflates most feature steps, not just close calls.** v7's chain is
+> worth **0.104** as the ruler tells it and **0.032** at capacity. Two thirds of
+> what this project's feature search appears to have bought is capacity the ruler
+> did not have.
+
+Two scripts, both control-passed (the 200-tree arm reproduces every journal score
+to six decimals): `probe_ruler_budget_rank.py` (v7's 14 tables x 5 budgets) and
+`probe_ruler_deflation_across_runs.py` (four datasets, six runs, 55 steps).
+
+### The three things worth not re-deriving
+
+**1. No budget is correct, so "raise the constant" was never available.** Rounds
+and learning rate are not interchangeable at matched shrinkage (`1000 @ 0.10` is
+worse than both 3000 and 5000 @ 0.03 on six of fourteen tables), and more capacity
+is not truer — `t3`, `t5`, `t7` **overfit** between 3000 and 5000. Each table has
+its own optimum, and the optimum depends on the table, which is the thing being
+ranked. That circularity is the answer to *"it is so hard to get a proper signal"*.
+
+**2. Two mechanisms are clean and name no dataset.** A **row filter's cost is
+training data**, invisible to a ruler too small to use it (v7's `t2->t3` discards
+17% of rows; +0.014 -> -0.009, monotone in both rate families). And **v7's largest
+fork reverses**: the ruler priced target encoding at +0.046 against frequency's
++0.018, and `t4` beats `t5` at all three high budgets by 0.010-0.021. Every table
+v7 shipped, including `t13`, descends from `t5`.
+
+**3. It is one dataset.** `rossmann_v8` replicates both mechanisms (`t5->t6`:
++0.0259 -> -0.0275; 5 of 11 accepted steps do not help at capacity). house-prices
+0 flips, restaurant_v1 0, restaurant_v2 0. Porto Seguro flips constantly and it is
+**noise** — every gain under 0.005 auc on a 3.6%-positive target.
+
+### What did not survive, and it is most of what I proposed
+
+Three mechanisms offered, none standing: *target-summary tools are overvalued*
+(refuted inside pass 1 — `t9->t10`, `t10->t11` are target encodings that
+**appreciate**); *deflation tracks key cardinality* (refuted, wrong sign;
+Restaurant's 8,242-way encodings are the corpus's most stable steps); *deflation
+tracks rows-per-group* (unsupported, +0.358 against cardinality's +0.295).
+
+**The 35% headline in the script output is not real.** Flipped steps are *smaller*
+than agreeing ones (median 0.00217 vs 0.00369) — the noise signature, and the
+opposite of v7. At a material threshold it is 28%, and 8% above 0.010. The
+falsifier failed to screen by magnitude; that is a flaw in the falsifier, not a
+pass. **"Not established" is the honest verdict.**
+
+### The decision taken: the panel is NOT built
+
+The design was concrete (report `probe_vs_source_table` at two budgets, never
+reconcile, leave `best_table` alone per 0017) and it fits Ulf's principle. Refused
+on its own cost argument: the second arm costs **~10x on every dataset** — fit time
+at 3000 rounds is dominated by tree count, not rows, so it is 12s even on
+house-prices' 1,168 rows — to catch an effect seen in one dataset of four.
+
+**And the tempting claim is not made:** that the misread fork cost v7 its score.
+That extrapolates a step-level reading to a chain-level outcome, which is 0066's
+and 0067's recorded error.
+
+### Found on the way, and it is nobody's decision
+
+**No model in this project has ever been told a column is categorical.**
+`_feature_frame` keeps only numeric dtypes; `_make_model` sets only
+`random_state`, `n_estimators`, `verbose` — never `cat_features` /
+`categorical_feature`. So CatBoost's ordered target statistics never engage (this
+killed a multi-family panel argument mid-session), and **the harness made
+agent-chosen encoding the only route from a categorical to a model, then measured
+that route with a ruler that overpays for it.** Not settled that declaring them
+helps; the probe cannot be the instrument that judges it.
+
+### THE PLAN FOR THE NEXT CONTEXT — one script, and it is already written
+
+**Point `probe_ruler_budget_rank.py` at `restaurant_v1`.** No new machinery,
+~30 min. Rossmann carries ~821 rows per store, Restaurant ~274. If capacity
+substitutes for an encoding only once it has enough rows per group to learn the
+effect by splitting, Restaurant's steps should flip too, **at a budget above
+3000 @ 0.03**. Decisive both ways: flips appear and the mechanism is general and
+nameable without a dataset; nothing moves and the effect is a Rossmann property,
+the panel stays unbuilt, and **0070's architecture answer returns to the front**.
+
+Register the prediction first, and **screen flips by magnitude** — the omission
+that cost this session's falsifier.
+
+**Still open, unchanged:** step 2, the stability-check hole (tests row-locality,
+not batch-independence; measure what a widened check would newly refuse *before*
+changing it). Model configuration stays blocked behind 0054's open item.
+
+### Quiz debt
+
+**None asked this session** — one was offered and Ulf chose to discuss the results
+instead. Backlog grows: this session's two passes, slice 3, 0041/0042/0044,
+house-prices capacity, and the three blocks from 08-16. **No notebook** for this
+session either; CLAUDE.md is explicit that this is the largest outstanding item.
+
+---
+
+## 2026-08-17 — The rule landed: a feature is an average, not a row
 
 **Machine:** MacBook Air | **Branch:** master | **576 tests pass** (was 573) |
 **fresh context starts here.** Steps 0 and 1 of the plan are **done and shipped**;
