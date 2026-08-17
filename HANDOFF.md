@@ -8,7 +8,78 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-16 (latest) — START HERE. The winner's writeup arrived, and it moved the priorities
+## 2026-08-17 (latest) — START HERE. The gap is a column pair nobody asked for
+
+**Machine:** MacBook Air | **Branch:** master | **573 tests pass** | **fresh context starts here.**
+Written up as [0071](docs/decisions/0071-the-gap-was-not-the-vocabulary-it-was-a-column-nobody-asked-for.md).
+Read it, then the 08-16 entry below for the three records that led here.
+
+Ulf: *"ich will nur vermeiden eine echte Lücke zu haben in unserer harness/agent."*
+So the winner's **salesmodel** was rebuilt with real tool calls, on v7's copied
+split, at 0068's budget, and scored on v7's sealed holdout.
+
+| | value |
+|---|---|
+| capability gap — the 3 calendar windows no tool expresses | +0.00122 |
+| agent gap — his salesmodel vs v7's `t13`, sealed | +0.00220 |
+| **`fit_history`'s unrequested `_latest` pair** | **+0.01428** |
+
+> **The tool defect is 6x the agent gap and 12x the capability gap**, at 5/5 blocks
+> and 2.5 block sd — the first reading in three sessions that passes 0059's
+> instrument convincingly. Sealed it is ~+0.008 (the same probe→sealed halving 0068
+> found for capacity).
+
+`fit_history` emits four columns where the winner's feature is one, and there is no
+way to decline the `_latest` / `_latest_ago` pair. 0049 and 0050 measured the
+*direction* of this; nobody had measured the **price on a table worth having**.
+
+### THE OBVIOUS NEXT STEP, and deliberately not taken yet
+
+**Do not just add the flag.** n=1, one dataset, one ablation — that is the record
+this project keeps breaking. Restaurant's `t7` is on disk and can carry the same
+ablation in about an hour. Do that first, then the few-line change to `fit_history`,
+then a record.
+
+### Two findings nobody was looking for
+
+- **The stability check tests row-locality, not batch-independence.** The naive
+  rolling-window holiday feature was **accepted**. `transform.py` resamples
+  `df.sample(n // 4)` — *rows*. With 1,115 stores per date, `0.75 ** 1115` is the
+  chance a date disappears, so `groupby(Date)` is unchanged and the column looks
+  stable. **Any column that is a function of the set of distinct keys passes**, and
+  the failure is silent. 0011's own cases (`qcut`, batch norm) are still caught.
+  Needs its own record: widening the check changes what every transform may do.
+- **`Customers` is not dropped out of inability — the harness rewards dropping
+  it.** 0030 refuses to score any table still carrying a column absent from
+  `test.csv`, so every step before the drop is `unscored`. Dropping it first is
+  rational, and it destroys the only thing it was good for (`fit_group_stats`
+  explicitly supports a train-only value column). Incentive problem, not a
+  capability one.
+
+### And the answer to "why can't we replicate the winner"
+
+His single un-ensembled model is ~0.105 private (rank ~3/3300). A faithful rebuild
+of that model's feature set lands at **0.13024 sealed**, 0.0022 better than what our
+agent found alone. **The distance is not the feature vocabulary.** It is
+architecture: four model families, segment models on the test months,
+`colsample_bytree=0.3`, 5000 rounds, an ensemble over feature subsets.
+
+### Gotchas in the probe script
+
+- `finalize_run` ships the argmax of the probe scores, so arm A's sealed number is
+  the **ablated** table and arm B's is not. The sealed B−A difference is therefore
+  mostly the `_latest` pair, not the calendar windows — the clean capability-gap
+  number is the probe at the same step of both arms. The script says so in its own
+  output now; the first version printed the misleading one.
+- `fit_encoding(["Store", "Promo"], method="target")` encodes the columns
+  **separately**. The interaction needs the key built first, and getting that wrong
+  cost 0.014 and flattered the agent.
+- `fit_history` runs **before** `filter_rows`: its windows count rows, and a row is
+  a day only while every store-day is present.
+
+---
+
+## 2026-08-16 — The winner's writeup arrived, and it moved the priorities
 
 **Machine:** MacBook Air | **Branch:** master | **fresh context starts here.**
 Three new records: [0068](docs/decisions/0068-capacity-reaches-the-shipped-blend-at-half-strength-and-validation-picks-the-wrong-budget.md),

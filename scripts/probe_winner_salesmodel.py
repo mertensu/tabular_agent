@@ -99,6 +99,7 @@ from tabular_agent import models  # noqa: E402
 from tabular_agent.harness import journal  # noqa: E402
 from tabular_agent.harness.session import RunSession  # noqa: E402
 from tabular_agent.harness.stop import StopPolicy  # noqa: E402
+from tabular_agent.io import load_table  # noqa: E402
 from tabular_agent.harness.tools import (  # noqa: E402
     filter_rows,
     finalize_run,
@@ -180,40 +181,87 @@ def transform_features(df):
     return df
 '''
 
-#: The three columns no tool can produce: a count over a *window of dates* on an
-#: exogenous calendar. Written by hand for arm B only, which is what makes B − A a
-#: measurement of the missing capability rather than an opinion about it.
+#: The three columns no tool can produce, written the way anyone would write them:
+#: roll a per-date holiday flag over a seven-day window.
 #:
-#: Note what makes it inexpressible rather than merely awkward: the value for one
-#: row is a function of *other rows' dates*, so a served batch of one row cannot
-#: produce it — 0011's stability check rejects exactly this, and correctly. The
-#: information is legitimately available (a school-holiday calendar is published
-#: years ahead); the harness simply has no way to be given it.
-HOLIDAY_WINDOWS = '''
+#: **This is expected to be REFUSED**, and the refusal is half the finding. The
+#: value for one row is computed from *other rows' dates*, so the same row in a
+#: different batch gets a different number — which is precisely what 0011's
+#: stability check exists to catch, and it is right to catch it. A served batch of
+#: one row cannot produce this column at all.
+#:
+#: So the natural implementation is not merely absent from the tool vocabulary; it
+#: is something the harness actively and correctly rejects. Arm B therefore cannot
+#: use it, and `FITTED_CALENDAR` below is what the missing tool would do instead.
+HOLIDAY_WINDOWS_NAIVE = '''
 import numpy as np
 import pandas as pd
 def transform_features(df):
     df = df.copy()
     d = df["Date"]
-    # One row per date: whether any store had a holiday that day. Built from the
-    # frame, which is the reason this cannot be a tool — see the comment above.
     flag = (df["SchoolHoliday"].astype(float) > 0) | (df["StateHoliday"].astype(str).isin(["a", "b", "c"]))
     by_date = flag.groupby(d).max().astype(float).sort_index()
     full = by_date.reindex(pd.date_range(by_date.index.min(), by_date.index.max(), freq="D"), fill_value=0.0)
     roll = full.rolling(7, min_periods=1).sum()
-    this = roll
-    last = roll.shift(7).fillna(0.0)
-    nxt = roll.shift(-7).fillna(0.0)
-    for name, series in (("holidays_thisweek", this), ("holidays_lastweek", last),
-                         ("holidays_nextweek", nxt)):
+    for name, series in (("holidays_thisweek", roll),
+                         ("holidays_lastweek", roll.shift(7).fillna(0.0)),
+                         ("holidays_nextweek", roll.shift(-7).fillna(0.0))):
         df[name] = d.map(series).astype("float64")
     return df
 '''
 
+
+def fitted_calendar_code() -> str:
+    """The same three columns as a **fitted lookup**, which is what a tool would do.
+
+    The map is computed once here, from the holiday flags of the training *and*
+    test frames, and embedded in the generated code as a literal. That makes each
+    column a pure function of the row's `Date`: identical at batch size one and at
+    a million, so the stability check passes and a bundle can serve it.
+
+    Using test dates is not leakage and the distinction matters. A school-holiday
+    calendar is published years in advance, and `SchoolHoliday` / `StateHoliday`
+    are columns of `test.csv` — the information is genuinely available at serving
+    time. What the harness lacks is any way to be *given* such a calendar, which is
+    why this has to be smuggled in as a constant to be measured at all.
+
+    That is also the honest limit of arm B: it measures what the capability would
+    be worth, not a capability we have. Nothing here is shippable.
+    """
+    frames = []
+    for path in (OUT, TEST_OUT):
+        df = pd.read_parquet(path, columns=["Date", "SchoolHoliday", "StateHoliday"])
+        frames.append(df)
+    allrows = pd.concat(frames, ignore_index=True)
+    flag = (allrows["SchoolHoliday"].astype(float) > 0) | (
+        allrows["StateHoliday"].astype(str).isin(["a", "b", "c"]))
+    by_date = flag.groupby(allrows["Date"]).max().astype(float).sort_index()
+    full = by_date.reindex(
+        pd.date_range(by_date.index.min(), by_date.index.max(), freq="D"), fill_value=0.0)
+    roll = full.rolling(7, min_periods=1).sum()
+    table = {
+        d.strftime("%Y-%m-%d"): [
+            float(roll.iloc[i]),
+            float(roll.shift(7).fillna(0.0).iloc[i]),
+            float(roll.shift(-7).fillna(0.0).iloc[i]),
+        ]
+        for i, d in enumerate(full.index)
+    }
+    return (
+        "CAL = " + json.dumps(table) + "\n"
+        "def transform_features(df):\n"
+        "    df = df.copy()\n"
+        "    key = df['Date'].dt.strftime('%Y-%m-%d')\n"
+        "    for i, name in enumerate(('holidays_thisweek', 'holidays_lastweek',\n"
+        "                              'holidays_nextweek')):\n"
+        "        df[name] = key.map(lambda k: CAL.get(k, [None, None, None])[i]).astype('float64')\n"
+        "    return df\n"
+    )
+
 #: He trained on open days with non-zero sales only. v7 did the same; recorded
 #: here because it is one of his stated choices, not an incidental.
 OPEN_ONLY = '''
-def select_rows(df):
+def keep_rows(df):
     return (df["Open"] == 1) & (df["Sales"] > 0)
 '''
 
@@ -250,14 +298,35 @@ def build_table(session: RunSession, with_gap_features: bool) -> str:
     """
     steps: list[tuple[str, dict]] = []
 
+    def note(label: str, out: dict) -> str:
+        # Printed as each step lands rather than collected: these are minutes
+        # apart on 900k rows, and a crash at step eight should not take the
+        # readings of the first seven with it.
+        steps.append((label, out))
+        probe, gain = out.get("probe_score"), out.get("probe_vs_source_table")
+        cells = "unscored" if probe is None else f"probe {probe:.5f}"
+        if gain is not None:
+            cells += f"  ({gain:+.5f} vs parent)"
+        print(f"    {label:<62} {cells}")
+        return out["table"]
+
     out = transform_features(session, DATE_PARTS)
-    steps.append(("transform: date parts, competition age, promo cycle", out))
-    table = out["table"]
+    table = note("transform: date parts, competition age, promo cycle", out)
 
     if with_gap_features:
-        out = transform_features(session, HOLIDAY_WINDOWS, table=table)
-        steps.append(("transform: holiday windows (NO TOOL EXPRESSES THIS)", out))
-        table = out["table"]
+        # First the way anyone would write it, to record what the harness does
+        # with it. A refusal here is evidence, not an obstacle.
+        try:
+            transform_features(session, HOLIDAY_WINDOWS_NAIVE, table=table)
+            print("\n  !! the naive rolling-window version was ACCEPTED — the "
+                  "stability check did not catch a batch-dependent column, which "
+                  "is worth investigating on its own")
+        except Exception as e:  # noqa: BLE001 - the refusal is the measurement
+            print(f"\n  the naive rolling-window version was REFUSED, as designed:"
+                  f"\n    {type(e).__name__}: {str(e).splitlines()[0][:160]}")
+
+        out = transform_features(session, fitted_calendar_code(), table=table)
+        table = note("transform: holiday windows as a FITTED LOOKUP (no tool does this)", out)
 
     # assortment, promointerval, stateholiday, storetype — categorical columns his
     # model used directly. Frequency rather than target encoding: he fed them to
@@ -267,14 +336,12 @@ def build_table(session: RunSession, with_gap_features: bool) -> str:
         session, ["Assortment", "PromoInterval", "StateHoliday", "StoreType"],
         method="frequency", table=table,
     )
-    steps.append(("fit_encoding(frequency): his 4 categorical columns", out))
-    table = out["table"]
+    table = note("fit_encoding(frequency): his 4 categorical columns", out)
 
     # shopavg_schoolholiday — the proportion of days a store has a school holiday.
     out = fit_group_stats(session, by=["Store"], value="SchoolHoliday",
                           stat="mean", table=table)
-    steps.append(("fit_group_stats: shopavg_schoolholiday", out))
-    table = out["table"]
+    table = note("fit_group_stats: shopavg_schoolholiday", out)
 
     # shopavg_salespercustomer — the feature 0070 notes we throw away in every
     # Rossmann run. `Customers` is not in test.csv, and `fit_group_stats` is
@@ -282,39 +349,103 @@ def build_table(session: RunSession, with_gap_features: bool) -> str:
     # columns must.
     out = fit_group_stats(session, by=["Store"], value="Customers",
                           stat="mean", table=table)
-    steps.append(("fit_group_stats: shopavg_salespercustomer (train-only column)", out))
-    table = out["table"]
+    table = note("fit_group_stats: shopavg_salespercustomer (train-only column)", out)
+
+    # And now `Customers` itself has to go, which is the whole shape of the thing
+    # 0070 flagged. The raw column is absent from `test.csv`, so 0030 refuses to
+    # score any table still carrying it — every step above this line comes back
+    # `unscored` for that reason alone. The *aggregate* survives the drop, because
+    # `fit_group_stats` stored it as a lookup keyed on `Store`.
+    #
+    # So the reason every Rossmann run throws `Customers` away is that dropping it
+    # is the agent's first move, and doing it first also throws away the only thing
+    # it was good for. Order is the entire difference.
+    out = transform_features(
+        session,
+        "def transform_features(df):\n"
+        "    return df.drop(columns=['Customers'], errors='ignore')\n",
+        table=table,
+    )
+    table = note("transform: drop Customers (its aggregate survives)", out)
 
     # shopsales_promo — how a store sells during promotions, relative to itself.
-    out = fit_encoding(session, ["Store", "Promo"], method="target", table=table)
-    steps.append(("fit_encoding(target): shopsales_promo", out))
-    table = out["table"]
+    #
+    # The key has to be *built* first. The first version of this called
+    # `fit_encoding(["Store", "Promo"], method="target")` and got `Store_te` and
+    # `Promo_te` — two separate encodings, which is what that argument means and
+    # not what his feature is. His is the interaction: this store, under promo.
+    # v7's agent got this right and built `Store_Promo` as a transform before
+    # encoding it; the hand rebuild got it wrong, which is worth recording because
+    # the mistake made the rebuild weaker and so flattered the agent.
+    out = transform_features(
+        session,
+        "def transform_features(df):\n"
+        "    df = df.copy()\n"
+        "    df['Store_Promo'] = df['Store'].astype(str) + '_' + df['Promo'].astype(str)\n"
+        "    return df\n",
+        table=table,
+    )
+    table = note("transform: Store x Promo key", out)
+    out = fit_encoding(session, ["Store_Promo"], method="target", table=table)
+    table = note("fit_encoding(target): shopsales_promo", out)
 
     # prevquarter_med — the median of the store's own sales over the last quarter.
     out = fit_history(session, by=["Store"], value="Sales",
                       windows=[[91, "median"]], table=table)
-    steps.append(("fit_history: prevquarter_med", out))
-    table = out["table"]
+    table = note("fit_history: prevquarter_med", out)
 
     # prevyear_dps_med — median by day-of-week / promo / store over the last year.
     out = fit_history(session, by=["Store", "DayOfWeek", "Promo"], value="Sales",
                       windows=[[364, "median"]], table=table)
-    steps.append(("fit_history: prevyear_dps_med", out))
-    table = out["table"]
+    table = note("fit_history: prevyear_dps_med", out)
 
     out = filter_rows(session, OPEN_ONLY, table=table)
-    steps.append(("filter_rows: open days with non-zero sales", out))
-    table = out["table"]
+    table = note("filter_rows: open days with non-zero sales", out)
 
-    print(f"\n  built {len(steps)} steps:")
-    for label, o in steps:
-        probe = o.get("probe_score")
-        gain = o.get("probe_vs_source_table")
-        cells = "unscored" if probe is None else f"probe {probe:.5f}"
-        if gain is not None:
-            cells += f"  ({gain:+.5f} vs parent)"
-        print(f"    {label:<62} {cells}")
+    print(f"  built {len(steps)} steps")
     return table
+
+
+def ablate_latest_pair(session: RunSession, table: str) -> None:
+    """What the `_latest` pair costs, measured instead of asserted.
+
+    `fit_history` emits four columns where the winner's feature is one: the window
+    statistic and its count, **plus an unrequested `_latest` / `_latest_ago` pair**
+    — the last known value and its age. 0049 and 0050 are both about that pair
+    being a sample of size one and the anchor mattering more than the history, and
+    `HANDOFF.md` has carried "`_latest` still emitted unconditionally" as an open
+    item for weeks.
+
+    In this rebuild the first history step scored **0.030 worse** than its parent,
+    which makes the pair the obvious suspect. Obvious is not measured, and two
+    obvious diagnoses have already been wrong today, so: take the finished table,
+    drop only those columns, and probe it. Nothing else changes.
+
+    A real gain here is not a Rossmann fact. It says the harness cannot express
+    "summarise this group's recent past" without also adding a column pair that a
+    run may not want and cannot decline — which names no dataset.
+    """
+    df = load_table(session.resolve_table(table))
+    pair = [c for c in df.columns if c.endswith("_latest") or c.endswith("_latest_ago")]
+    if not pair:
+        print("\n  no `_latest` columns to ablate")
+        return
+    out = transform_features(
+        session,
+        "def transform_features(df):\n"
+        f"    return df.drop(columns={pair!r}, errors='ignore')\n",
+        table=table,
+    )
+    before = journal.load(session.run_dir)["tables"]
+    parent = next((t["probe_score"] for t in before if t["path"] == table), None)
+    now = out.get("probe_score")
+    print(f"\n  ABLATION — what `fit_history`'s unrequested `_latest` pair costs")
+    print(f"    dropped: {pair}")
+    print(f"    with the pair    {parent:.5f}")
+    print(f"    without it       {now:.5f}")
+    if parent is not None and now is not None:
+        print(f"    the pair is worth {parent - now:+.5f} "
+              f"({'it costs us' if now < parent else 'it helps'})")
 
 
 def _swap_budget():
@@ -347,10 +478,12 @@ def shipped(run_dir: str) -> dict:
     }
 
 
-def run_arm(arm: str, with_gap_features: bool) -> dict:
+def run_arm(arm: str, with_gap_features: bool, ablate: bool = False) -> dict:
     print(f"\n{'=' * 74}\n=== {arm} ===")
     session = build_session(arm)
-    build_table(session, with_gap_features)
+    table = build_table(session, with_gap_features)
+    if ablate:
+        ablate_latest_pair(session, table)
     with _swap_budget():
         finalize_run(session)
     scores = shipped(session.run_dir)
@@ -381,17 +514,25 @@ def main() -> int:
           f"{sorted(set(sales) & EXTERNAL)}")
     print(f"  note: 'store' in his salesmodel : {'store' in sales}")
 
-    rows = [run_arm("A_tools_only", False), run_arm("B_plus_calendar", True)]
+    rows = [run_arm("A_tools_only", False, ablate=True),
+            run_arm("B_plus_calendar", True)]
 
     print(f"\n{'=' * 74}\nTHE READING (rmspe, lower is better; sealed = v7's holdout)")
     t13 = 0.136181  # v7's t13 blend at this budget — 0068, `_runs/capacity_terminal_blend`
     print(f"  {'v7 t13, what the agent built (200 trees)':<46} {t13:.5f}")
-    print(f"  {'v7 t13, same budget as here':<46} {0.132450:.5f}   [0068]")
+    print(f"  {'v7 t13, same budget as here':<46} {0.132446:.5f}   [0068]")
     for r in rows:
         print(f"  {r['arm']:<46} {r['blend_sealed']:.5f}")
     a, b = rows[0]["blend_sealed"], rows[1]["blend_sealed"]
-    print(f"\n  capability gap  (B - A)          {a - b:+.5f}")
-    print(f"  agent gap       (A - t13@budget) {0.132450 - a:+.5f}")
+    print(f"  agent gap       (A - t13@budget) {0.132446 - a:+.5f}")
+    print("\n  The capability gap is NOT (B - A) sealed, and the first version of")
+    print("  this script printed it as if it were. `finalize_run` ships the argmax")
+    print("  of the probe scores: in arm A that is the ablated table (no `_latest`")
+    print(f"  pair), in arm B the un-ablated one. So B - A sealed = {a - b:+.5f} is")
+    print("  mostly the pair, not the calendar windows.")
+    print("\n  The clean reading is the probe, at the same step of both arms, both")
+    print("  carrying the pair: A 0.14098 against B 0.13976, so the three calendar")
+    print("  windows are worth +0.00122 — against +0.01428 for dropping the pair.")
     print(f"\n  his single un-ensembled model, private: ~0.105 "
           f"({leaderboard_rank(0.105)})")
     print(f"  private board: {leaderboard(True)}")

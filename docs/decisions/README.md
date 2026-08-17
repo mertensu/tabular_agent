@@ -357,6 +357,17 @@ Vocabulary used throughout:
   all. Also: we can already express a per-store aggregate of a train-only column and
   throw it away in every Rossmann run. Vindicates 0064's refusal; leaves 0001 and
   the 0.985 multiplier out)*
+- [0071 — The gap was not the vocabulary; it was a column pair nobody asked for](0071-the-gap-was-not-the-vocabulary-it-was-a-column-nobody-asked-for.md)
+  *(0070's recommendation carried out: the winner's salesmodel rebuilt with real
+  tool calls and measured. **Capability gap +0.0012, agent gap +0.0022, and
+  `fit_history`'s unrequested `_latest` pair +0.0143** — the tool defect is twelve
+  times the capability gap, at 5/5 blocks and 2.5 block sd, the first solid reading
+  in three sessions. So the distance to the winner is not the feature vocabulary.
+  Two unlooked-for findings: **the stability check tests row-locality, not
+  batch-independence**, and misses any column that is a function of the set of
+  distinct keys; and `Customers` is dropped in every run because 0030's servability
+  rule makes dropping it the rational first move, which destroys the only thing it
+  was good for. No library change made — n=1)*
 
 ### Keeping the agent's surface small
 
