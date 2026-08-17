@@ -8,7 +8,111 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-17 (latest) — START HERE. The gap is a column pair nobody asked for
+## 2026-08-17 (latest) — START HERE. The notebook is written and the pair is confirmed on a second dataset
+
+**Machine:** MacBook Air | **Branch:** master | **573 tests pass** (nothing in `src/`
+changed today) | **fresh context starts here.**
+Steps 0 and 1 of the plan below are **done**. No decision record yet — it is waiting
+on one call from Ulf, named at the bottom of this entry.
+
+### Step 0 — the notebook, before any library code
+
+`notebooks/phase5_the_column_nobody_asked_for.ipynb` (27 cells, 11 code, ships
+unexecuted, every code cell smoke-tested in order). It drives `HistoryEncoder` by
+hand on v7's split and **found the mechanism 0071 did not have**:
+
+| `Store_Sales_latest` | distinct | zeros | age |
+|---|---|---|---|
+| training rows (freeze **per fold**) | 4,041 | 0.1% | 1..305 days |
+| served rows (final freeze) | 21 | **98.2%** | 1..45 days |
+
+v7's freeze lands on **1 May 2015**, a public holiday on which **1,095 of 1,115
+stores were shut**. So the model trains on a genuinely informative recent-sales
+column and is served a different column wearing the same name.
+
+> **The per-fold freeze is correct, and that is exactly what makes the pair
+> dangerous.** A naive single freeze would give training rows the same degenerate
+> value, the column would be near-constant, and a tree would ignore it — harmless.
+> Correctness makes fit and serve **procedurally consistent** and lets them drift
+> **distributionally**, so no guard can fire: 0011 sees batch independence, 0030
+> sees servability, the fold logic sees no future. There is no error to find. Only
+> a price.
+
+That is why it costs 0.014 where nine pure-noise columns cost 0.0014 (0069): the
+pair is not idle, it is **confidently wrong**.
+
+### Step 1 — confirmed on Restaurant, and the price does not transfer
+
+`scripts/probe_restaurant_latest_pair.py`. v2's `t7` against the same table with
+only `air_store_id_visitors_latest` / `_latest_ago` dropped; v2's split copied,
+real `finalize_run`, **one table per sealed arm** so there is no argmax to go
+astray (0071's gotcha). Control passed: the `with_pair` arm reproduces v2's blend
+val **0.519707** / sealed **0.505713** to six decimals.
+
+| | probe | interval | sealed |
+|---|---|---|---|
+| Rossmann (0071) | +0.01428 | sd 0.00576, 5/5, **stable** | ~ |
+| **Restaurant** | **+0.00216** | sd 0.00205, 4/5, **`sign_stable: False`** | **+0.00349** |
+
+Registered prediction held on all three counts (direction positive, magnitude
++0.000..+0.005, interval likely unstable).
+
+> **The mechanism transfers; the price is a lottery.** One value per served group
+> for the whole horizon is structural — the freeze does not move while the rows do.
+> But Restaurant's freeze is an ordinary Saturday, train and serve nearly coincide
+> (82 vs 87 distinct, no zeros), and the column is genuinely informative on the
+> scored rows (corr 0.55 against 0.69 for `_30_mean`). **Rossmann's 0.014 was a
+> holiday landing on the freeze.**
+
+**Two things nobody was looking for, and both belong in the record:**
+
+- **Sealed is *larger* than probe here** (+0.00349 against +0.00216), the opposite
+  of the probe→sealed halving 0068 measured for capacity and 0071 assumed for
+  Rossmann. That assumption is now unsupported on a second dataset.
+- **`val` points the wrong way again.** The blend gets *worse* on val without the
+  pair (0.51971 → 0.52229) and *better* sealed (0.50571 → 0.50222). 0068's
+  signature. **Any default chosen off a validation score chooses wrongly here.**
+
+### THE OPEN CALL — the default, and it is the only thing blocking the code
+
+That the argument gets added is settled: *not declinable* is the defect, and the
+pair has now failed to help on two datasets. **What the default should be is not
+derivable from the numbers** — +0.002 inside its own block noise cannot carry a
+default change. Two honest shapes, put to Ulf and unanswered at the time of
+writing:
+
+- **A — pure opt-out.** `latest=True` stays the default. Nothing existing changes,
+  everything stays replayable. Cost: the agent has to already know about the defect
+  to avoid it, and neither of these two measurements would ever arise from a run,
+  because no run performs an ablation.
+- **B — the pair is emitted when it *is* the request.** `latest=None` → emit only
+  when neither `windows` nor `offsets` were asked for; opt-in otherwise. A bare
+  `fit_history` call is asking precisely for the last-known value and 0049's
+  argument stands there untouched. Cost: it changes what existing calls emit
+  (0055's class of change), so `from_dict` without the key must mean `latest=True`
+  or old bundles break.
+
+**Recommended: B**, on Ulf's own principle — *"der agent ist die Intelligenz, die
+harness sollte ihn nicht beschneiden, ihn nur in richtige bahnen leiten"*. Four
+columns for a one-column request is a judgement the *tool* makes, that the agent
+never made and cannot see without an ablation.
+
+**Then:** the few lines, tests, bundle compatibility, and a record saying which of
+0049's and 0050's conclusions survive.
+
+**Step 2 is untouched** — the stability-check hole (see the 08-17 entry below),
+its own notebook and its own record, and measure what a widened check would newly
+refuse *before* changing it.
+
+### Quiz debt
+
+Two questions asked and answered this session (the per-fold freeze; what Restaurant
+could show that Rossmann cannot exclude). The older backlog is unchanged: slice 3,
+0041/0042/0044, house-prices capacity, and the three blocks from 08-16.
+
+---
+
+## 2026-08-17 — The gap is a column pair nobody asked for
 
 **Machine:** MacBook Air | **Branch:** master | **573 tests pass** | **fresh context starts here.**
 Written up as [0071](docs/decisions/0071-the-gap-was-not-the-vocabulary-it-was-a-column-nobody-asked-for.md).
