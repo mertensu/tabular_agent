@@ -94,13 +94,79 @@ on **every** dataset. The line: **dataset names belong in comments (evidence),
 never in docstrings the agent reads as instruction (frame).** `agent.py` is clean;
 `StreamAggregateEncoder`'s "store-day table" illustrations are untouched and open.
 
-### Next: step 2, untouched
+### THE PLAN FOR THE NEXT CONTEXT — the ruler, and Ulf asked for a fresh context
+
+> Ulf: *"halte das fest und wir gehen das mit frischem Kontext an"*
+
+He asked why we are above the median. The answer that survived the evidence: not
+the vocabulary (0071), not capacity (0068, +0.0037 on the blend), not feature
+selection (0069's null) — and those levers **substitute rather than add** (0067),
+so their sum is not the gap. What is left is that **every decision a run makes
+goes through a ruler that has now been measured wrong four times**, and a run
+makes 15–25 of them.
+
+**The naive fix is the wrong one, and this is the part worth not re-deriving.**
+0059 built a block interval and nothing is gated on it. Making it bind is the
+obvious move and it would not have caught either failure we know about:
+
+- 0066's leaky table read `sign_stable: True` at **2.9 sd**, every block agreeing
+  — and lost privately.
+- 0059's own history arm had **5/5 blocks** in favour and Kaggle read −0.0301.
+- Inverted today: Restaurant's +0.00216 came back `sign_stable: False` and was
+  real anyway.
+
+> **An interval measures variance. Every documented failure here was bias** — the
+> ruler pointing confidently the wrong way. A wider interval does not fix a
+> shifted one. (This argument deserves a record *if it survives the measurement
+> below*; it is not one yet, and no decision to refuse gating has been taken.)
+
+How often the existing interval already disagrees, counted from the journals:
+
+    restaurant_v1   17 steps, 6 unstable, 4 of those accepted as improvements
+    restaurant_v2   13 steps, 3 unstable, 3 of those accepted as improvements
+
+**So: the probe measures a different model than the one that ships.** It is one
+lgbm at 200 trees; what ships is a blend at a real budget. 0054 measured the
+*sign* of the feature block's value reversing between them (−0.0152 at 200 trees,
++0.0087 at 5000@0.03). That is a systematic shift, not noise, and every table
+decision this project has ever made rests on it.
+
+#### The measurement to run first — one script, hours not days
+
+**Re-probe every table of v7's chain at `1000 @ 0.10` and rank-correlate against
+the 200-tree probe scores already in its journal.** v7 is the run whose tables
+still replay (0055 broke v8's), which is why this is possible at all. Reuse
+`probe_capacity_v7_chain.py`'s copy-the-split pattern.
+
+Decisive both ways:
+
+- **Same ranking** → the probe is fine, the cause named here is wrong, and the
+  remaining candidate is architecture (0070).
+- **Different ranking** → every table decision in the project's history was taken
+  on an instrument measuring something else, and the open question becomes *at
+  which budget does the ranking stabilise, and is that affordable per step*.
+
+Either way it answers **0054's open item at the same time**: "where does the
+budget come from" and "what is the ruler measuring" are one problem, not two.
+Register the prediction in the script's docstring before running it.
+
+#### The ambitious follow-on, deliberately not decided
+
+0044 already settled this one level down: for **models** we ship the average, not
+the argmax, because an argmax pays selection luck. Over **tables** the harness
+still takes an argmax at every step, on a noisier instrument. The same argument
+one level up is: fit and average the best *k* tables — which is exactly the
+"ensemble over feature subsets" 0070 lists in the winner's architecture. It is the
+only idea on the table that defuses the ruler *and* matches what he actually did.
+Own record, own decision, after the measurement.
+
+### Still open: step 2
 
 **The stability-check hole** — it tests row-locality, not batch-independence, and
 accepts any column that is a function of the set of distinct keys (0071's second
 finding). Own notebook, own record, and **measure what a widened check would newly
 refuse before changing it**, because it changes what every existing transform may
-do.
+do. Not superseded, just not chosen for the next context.
 
 **Not next, unchanged and for measured reasons:** model configuration is blocked
 behind 0054's open item (0068 measured `val` choosing the budget wrongly on both
