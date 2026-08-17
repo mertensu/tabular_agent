@@ -67,26 +67,30 @@ def unordered_session(tmp_path, panel):
     )
 
 
-def test_it_adds_the_pair_and_records_the_ordering_column(session):
-    out = fit_history(session, by=["store"], value="sales")
+def test_it_adds_the_window_and_its_count_and_records_the_ordering_column(
+    forecasting_session,
+):
+    out = fit_history(forecasting_session, by=["store"], value="sales",
+                      windows=[[20, "mean"]], keep=40)
 
-    assert out["new_columns"] == ["store_sales_latest", "store_sales_latest_ago"]
-    row = journal.load(session.run_dir)["tables"][-1]
+    assert out["new_columns"] == ["store_sales_20_mean", "store_sales_20_count"]
+    row = journal.load(forecasting_session.run_dir)["tables"][-1]
     assert row["method"] == "history"
     assert row["order_column"] == "day"
     assert row["value_column"] == "sales"
 
 
-def test_the_target_may_be_the_value_column(session):
+def test_the_target_may_be_the_value_column(forecasting_session):
     """The difference from `fit_group_stats`, which refuses the target outright.
 
     A per-group *statistic* of the target is target encoding and has its own tool.
-    A per-group *most recent* target is not, and cannot be smuggled out of a
-    served frame either, because the target is not in one.
+    A *trailing* summary of the target's own past is not, and cannot be smuggled
+    out of a served frame either, because the target is not in one.
     """
-    out = fit_history(session, by=["store"], value="sales")
+    out = fit_history(forecasting_session, by=["store"], value="sales",
+                      windows=[[20, "mean"]], keep=40)
 
-    assert "store_sales_latest" in out["new_columns"]
+    assert "store_sales_20_mean" in out["new_columns"]
 
 
 def test_an_unordered_run_is_refused(unordered_session):
@@ -95,8 +99,9 @@ def test_an_unordered_run_is_refused(unordered_session):
         fit_history(unordered_session, by=["store"], value="sales")
 
 
-def test_the_first_period_has_no_value_and_the_tool_says_so(session):
-    out = fit_history(session, by=["store"], value="sales")
+def test_the_first_period_has_no_value_and_the_tool_says_so(forecasting_session):
+    out = fit_history(forecasting_session, by=["store"], value="sales",
+                      windows=[[20, "mean"]], keep=40)
 
     assert out["n_rows_without_value"] > 0
     assert "first period" in out["note"]
@@ -130,76 +135,52 @@ def test_an_iso_date_column_read_back_from_csv_works(tmp_path, panel):
     session = RunSession(
         str(tmp_path / "run_dates"),
         dated,
-        TaskSpec(target="sales", task_type="regression", metric="rmse", n_splits=3),
+        TaskSpec(target="sales", task_type="regression", metric="rmse", n_splits=3,
+                 forecast_horizon=1),
         split_on="date",
     )
 
-    out = fit_history(session, by=["store"], value="sales")
+    out = fit_history(session, by=["store"], value="sales",
+                      windows=[[20, "mean"]], keep=40)
 
     table = load_table(session.resolve_table(out["table"]))
-    seen = table["store_sales_latest_ago"].notna()
-    # Days, not the nanosecond integers a naive conversion would hand back.
-    assert table.loc[seen, "store_sales_latest_ago"].max() < 365
+    held = table["store_sales_20_count"].dropna()
+    # Days, not the nanosecond integers a naive conversion would hand back: in
+    # nanoseconds a 20-unit window spans no time at all and every count is zero.
+    assert held.max() > 1
+    assert held.max() <= 20
 
 
-def test_offsets_need_the_task_to_declare_its_horizon(session):
-    with pytest.raises(ValueError, match="forecast_horizon"):
-        fit_history(session, by=["store"], value="sales", offsets=[3])
+def test_a_call_with_no_window_is_refused(forecasting_session):
+    """0072: what a bare call used to return was the last-known pair.
 
-
-def test_a_declared_horizon_makes_a_long_enough_offset_legal(tmp_path, panel):
-    session = RunSession(
-        str(tmp_path / "run_horizon"),
-        panel,
-        TaskSpec(
-            target="sales", task_type="regression", metric="rmse", n_splits=3,
-            forecast_horizon=7,
-        ),
-        split_on="day",
-    )
-
-    out = fit_history(session, by=["store"], value="sales", offsets=[7], keep=10)
-
-    assert "store_sales_7_ago" in out["new_columns"]
-    assert "store_sales_7_ago_exact" in out["new_columns"]
-
-
-def test_the_tool_reports_what_share_of_rows_each_offset_could_answer(tmp_path, panel):
-    """0050: an offset shorter than the period being predicted is answerable for
-    the earliest rows and silently becomes the last-known value for the rest.
-
-    On Rossmann v8 a 7-day offset over a 44-day block was honoured for 11% of
-    rows and nothing said so. This is the line that would have said so.
+    The tool has no lag argument either, and the unit tests pin that as a
+    signature. Here what matters is that a run cannot reach the old behaviour by
+    simply asking for nothing.
     """
-    session = RunSession(
-        str(tmp_path / "run_answerable"),
-        panel,
-        TaskSpec(
-            target="sales", task_type="regression", metric="rmse", n_splits=3,
-            forecast_horizon=1,
-        ),
-        split_on="day",
-    )
-
-    out = fit_history(
-        session, by=["store"], value="sales", offsets=[2, 60], keep=80
-    )
-
-    short, long = out["offsets_answerable"]["2"], out["offsets_answerable"]["60"]
-    # The blocks here are ~30 days wide, so a 2-day offset is answerable only for
-    # the first rows of each and a 60-day one reaches back past the boundary.
-    assert short < long
-    assert "WARNING" in out["note"] and "'2'" in out["note"]
+    with pytest.raises(ValueError, match="needs at least one window"):
+        fit_history(forecasting_session, by=["store"], value="sales")
 
 
-def test_the_bundle_predicts_rows_dated_after_every_row_it_saw(session, tmp_path):
+def test_no_run_can_produce_a_single_observation_column(forecasting_session):
+    out = fit_history(forecasting_session, by=["store"], value="sales",
+                      windows=[[20, "mean"], [40, "mean"]], keep=60)
+
+    assert not [c for c in out["new_columns"] if c.endswith(("_latest", "_latest_ago"))]
+    assert not [c for c in out["new_columns"] if c.endswith("_ago_exact")]
+    row = journal.load(forecasting_session.run_dir)["tables"][-1]
+    assert "offsets" not in row
+
+
+def test_the_bundle_predicts_rows_dated_after_every_row_it_saw(forecasting_session):
     """The serving case history exists for: a contiguous future block, unlabelled,
     later than all stored history."""
-    table = fit_history(session, by=["store"], value="sales")["table"]
-    train_tabular_model(session, table=table)
-    out = finalize_run(session)
+    table = fit_history(forecasting_session, by=["store"], value="sales",
+                        windows=[[20, "mean"]], keep=40)["table"]
+    train_tabular_model(forecasting_session, table=table)
+    out = finalize_run(forecasting_session)
 
-    bundle = load_bundle(os.path.join(session.run_dir, out["bundle_dir"]))
+    bundle = load_bundle(os.path.join(forecasting_session.run_dir, out["bundle_dir"]))
     future = pd.DataFrame(
         {
             "store": ["s1", "s2", "s1"],
@@ -214,13 +195,14 @@ def test_the_bundle_predicts_rows_dated_after_every_row_it_saw(session, tmp_path
     assert np.isfinite(preds).all()
 
 
-def test_a_served_row_reads_history_not_its_own_batch(session):
+def test_a_served_row_reads_history_not_its_own_batch(forecasting_session):
     """0011's property at the level that matters: one row alone and the same row
     inside a batch get the same feature."""
-    table = fit_history(session, by=["store"], value="sales")["table"]
-    train_tabular_model(session, table=table)
-    out = finalize_run(session)
-    bundle = load_bundle(os.path.join(session.run_dir, out["bundle_dir"]))
+    table = fit_history(forecasting_session, by=["store"], value="sales",
+                        windows=[[20, "mean"]], keep=40)["table"]
+    train_tabular_model(forecasting_session, table=table)
+    out = finalize_run(forecasting_session)
+    bundle = load_bundle(os.path.join(forecasting_session.run_dir, out["bundle_dir"]))
 
     batch = pd.DataFrame(
         {"store": ["s1", "s1", "s1"], "day": [121, 122, 123], "promo": [0, 0, 0]}
@@ -232,17 +214,18 @@ def test_a_served_row_reads_history_not_its_own_batch(session):
     )
 
 
-def test_the_stored_values_are_the_frozen_ones_not_the_rows_own(session):
+def test_the_stored_values_are_the_frozen_ones_not_the_rows_own(forecasting_session):
     """The table the model trains on holds per-fold values, so a row's own sales
-    can never be the number beside it."""
-    out = fit_history(session, by=["store"], value="sales")
-    table = load_table(session.resolve_table(out["table"]))
+    can never be inside the number beside it."""
+    out = fit_history(forecasting_session, by=["store"], value="sales",
+                      windows=[[20, "mean"]], keep=40)
+    table = load_table(forecasting_session.resolve_table(out["table"]))
 
-    seen = table["store_sales_latest"].notna()
+    seen = table["store_sales_20_mean"].notna()
     assert seen.any()
-    # Never the row's own value: the freeze is strictly in that row's past.
-    assert (table.loc[seen, "store_sales_latest"] != table.loc[seen, "sales"]).all()
-    assert (table.loc[seen, "store_sales_latest_ago"] > 0).all()
+    # The window's right endpoint is strict, so the row is never in its own mean.
+    assert (table.loc[seen, "store_sales_20_mean"] != table.loc[seen, "sales"]).all()
+    assert (table.loc[seen, "store_sales_20_count"] > 0).all()
 
 
 # --- trailing windows --------------------------------------------------------
@@ -269,7 +252,6 @@ def test_a_window_adds_its_statistic_and_its_count(forecasting_session):
     )
 
     assert out["new_columns"] == [
-        "store_sales_latest", "store_sales_latest_ago",
         "store_sales_20_mean", "store_sales_20_std", "store_sales_20_count",
     ]
     row = journal.load(forecasting_session.run_dir)["tables"][-1]
@@ -277,8 +259,9 @@ def test_a_window_adds_its_statistic_and_its_count(forecasting_session):
 
 
 def test_the_tool_reports_how_much_each_window_actually_held(forecasting_session):
-    """`offsets_answerable`'s counterpart. A window that averages two points on the
-    rows that matter is 0050's degraded lag in new clothing."""
+    """A window that averages two points on the rows that matter has collapsed
+    back into the single stored observation 0072 refuses, and the count is the
+    only thing that shows it."""
     out = fit_history(
         forecasting_session, by=["store"], value="sales",
         windows=[[2, "mean"], [40, "mean"]], keep=60,

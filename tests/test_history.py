@@ -172,31 +172,44 @@ def test_an_unanswerable_offset_degrades_into_last_and_flags_itself(panel):
     assert out["store_sales_3_ago_exact"].iloc[0] == 0.0
 
 
-def test_offsets_are_refused_without_a_declared_horizon(panel, ordered_folds):
-    with pytest.raises(ValueError, match="forecast_horizon"):
-        fit_history(
-            panel, ["store"], "sales", "date", folds=ordered_folds, offsets=[1]
-        )
+# --- what may be *fitted* (0072) ---------------------------------------------
+#
+# The two families above still compute, because bundles written before 0072 hold
+# them and must keep predicting. Nothing new may build them, and the boundary is
+# `fit_history` rather than the class.
 
 
-def test_offsets_shorter_than_the_horizon_are_refused(panel, ordered_folds):
-    """A `_lag1` column on a block starting seven days out holds a seven-day-old
-    number under a name that promises one day."""
-    with pytest.raises(ValueError, match="shorter than the declared forecast horizon"):
-        fit_history(
-            panel, ["store"], "sales", "date", folds=ordered_folds,
-            offsets=[1], forecast_horizon=7,
-        )
+def test_a_fit_with_no_window_is_refused(panel, ordered_folds):
+    """The last-known pair used to be what a bare call returned."""
+    with pytest.raises(ValueError, match="needs at least one window"):
+        fit_history(panel, ["store"], "sales", "date", folds=ordered_folds)
 
 
-def test_an_offset_at_the_horizon_is_allowed(panel, ordered_folds):
+def test_the_fitting_path_takes_no_offsets_and_no_latest(panel, ordered_folds):
+    """Pinned as a signature, not as a behaviour.
+
+    A refusal inside the body could be softened by one `if`; an argument that does
+    not exist cannot be passed by accident, and re-adding it has to be a decision
+    someone makes on purpose. Same reason the agent's tool set is pinned (0018).
+    """
+    import inspect
+
+    from tabular_agent.harness.tools import fit_history as tool
+
+    for fn in (fit_history, tool):
+        params = inspect.signature(fn).parameters
+        assert "offsets" not in params
+        assert "latest" not in params
+
+
+def test_a_windowed_fit_does_not_smuggle_the_pair_in_beside_it(panel, ordered_folds):
     oof, enc = fit_history(
         panel, ["store"], "sales", "date", folds=ordered_folds,
-        offsets=[7], forecast_horizon=7, keep=10,
+        windows=[(3, "mean")], forecast_horizon=1,
     )
 
-    assert "store_sales_7_ago" in oof.columns
-    assert "store_sales_7_ago_exact" in oof.columns
+    assert list(oof.columns) == ["store_sales_3_mean", "store_sales_3_count"]
+    assert enc.latest is False
 
 
 # --- the per-fold freeze (0048) ---------------------------------------------
@@ -208,60 +221,74 @@ def test_random_folds_are_refused(panel):
     random_folds = make_folds(panel["sales"], "regression", n_splits=3)
 
     with pytest.raises(ValueError, match="forward-chaining folds"):
-        fit_history(panel, ["store"], "sales", "date", folds=random_folds)
+        fit_history(panel, ["store"], "sales", "date", folds=random_folds,
+                    windows=[(3, "mean")], forecast_horizon=1)
 
 
 def test_the_first_block_is_never_validated_and_keeps_nan(panel, ordered_folds):
-    oof, _ = fit_history(panel, ["store"], "sales", "date", folds=ordered_folds)
+    oof, _ = fit_history(panel, ["store"], "sales", "date", folds=ordered_folds,
+                         windows=[(3, "mean")], forecast_horizon=1)
 
     validated = np.unique(np.concatenate([va for _, va in ordered_folds]))
     unvalidated = sorted(set(range(len(panel))) - set(validated.tolist()))
 
     assert unvalidated, "forward chaining should leave the first block unvalidated"
-    assert oof["store_sales_latest"].iloc[unvalidated].isna().all()
+    assert oof["store_sales_3_mean"].iloc[unvalidated].isna().all()
 
 
 def test_a_validation_row_never_reads_its_own_or_a_later_period(panel, ordered_folds):
     """The leak this would have if history were fitted on "everything outside the
     validation fold" — the rule `fit_group_stats` correctly follows and this one
     must not."""
-    oof, _ = fit_history(panel, ["store"], "sales", "date", folds=ordered_folds)
+    oof, _ = fit_history(panel, ["store"], "sales", "date", folds=ordered_folds,
+                         windows=[(3, "mean")], forecast_horizon=1)
 
-    values = oof["store_sales_latest"]
-    ages = oof["store_sales_latest_ago"]
-    seen = ~values.isna()
+    means = oof["store_sales_3_mean"]
+    seen = ~means.isna()
 
-    # Every value read is strictly older than the row that read it.
-    assert (ages[seen] > 0).all()
-    # And it is a value that genuinely occurred earlier in the same store.
+    # Every average is over values that genuinely occurred earlier in the same
+    # store, so it lies inside their range and can never reach the row's own.
     for i in np.flatnonzero(seen.to_numpy()):
         row = panel.iloc[i]
         earlier = panel[(panel["store"] == row["store"]) & (panel["date"] < row["date"])]
-        assert values.iloc[i] in set(earlier["sales"].tolist())
+        assert len(earlier)
+        assert earlier["sales"].min() <= means.iloc[i] <= earlier["sales"].max()
 
 
-def test_the_freeze_makes_age_grow_across_a_validation_block(panel, ordered_folds):
+def test_the_freeze_makes_the_window_thin_out_across_a_validation_block(
+    panel, ordered_folds
+):
     """Serving symmetry: within one block the feature goes stale exactly as it
-    would across a real forecast horizon, instead of being refreshed daily."""
-    oof, _ = fit_history(panel, ["store"], "sales", "date", folds=ordered_folds)
+    would across a real forecast horizon, instead of being refreshed daily.
+
+    The window's left edge moves with the row while its right edge is pinned at
+    the freeze, so it holds fewer observations the further into the block a row
+    sits — and the count says so. That graceful decay is the reason a window is
+    the shape this encoder emits and a single stored observation is not: the same
+    freeze turns *that* into one number repeated across the whole block, with
+    nothing to show for it (0072).
+    """
+    oof, _ = fit_history(panel, ["store"], "sales", "date", folds=ordered_folds,
+                         windows=[(4, "mean")], forecast_horizon=1)
 
     _, va = ordered_folds[-1]
     block = panel.iloc[va]
     a_rows = va[(block["store"] == "a").to_numpy()]
-    ages = oof["store_sales_latest_ago"].iloc[a_rows].to_numpy()
+    counts = oof["store_sales_4_count"].iloc[a_rows].to_numpy()
 
-    assert len(ages) > 1
-    assert (np.diff(ages) > 0).all(), "age must grow across the block, not reset"
+    assert len(counts) > 1
+    assert (np.diff(counts) < 0).all(), "the window must thin out, not refill"
 
 
-def test_a_naive_backward_lag_would_look_fresher_than_the_frozen_one(panel, ordered_folds):
+def test_a_naive_rolling_mean_would_look_fuller_than_the_frozen_one(panel, ordered_folds):
     """0048's stated cost, pinned so it is not later mistaken for a bug: the honest
-    feature is staler than the one that reads neighbouring validation rows."""
-    oof, _ = fit_history(panel, ["store"], "sales", "date", folds=ordered_folds)
+    feature is thinner than one that reads neighbouring validation rows."""
+    oof, _ = fit_history(panel, ["store"], "sales", "date", folds=ordered_folds,
+                         windows=[(4, "mean")], forecast_horizon=1)
 
-    frozen_age = oof["store_sales_latest_ago"].dropna()
-    # A naive within-store shift would give every row an age of exactly one day.
-    assert frozen_age.max() > 1.0
+    counts = oof["store_sales_4_count"].dropna()
+    # A naive within-store rolling mean would fill every window completely.
+    assert counts.min() < 4
 
 
 # --- serialisation and replay ------------------------------------------------
@@ -279,15 +306,18 @@ def test_the_encoder_survives_a_round_trip(panel):
 def test_it_replays_through_a_pipeline(panel, ordered_folds):
     from tabular_agent.pipeline import Pipeline
 
-    _, enc = fit_history(panel, ["store"], "sales", "date", folds=ordered_folds)
+    _, enc = fit_history(panel, ["store"], "sales", "date", folds=ordered_folds,
+                         windows=[(4, "mean")], forecast_horizon=1)
     pipe = Pipeline("regression")
     pipe.add_encoder(enc)
     served = pd.DataFrame({"store": ["a"], "date": pd.to_datetime(["2015-01-11"])})
 
     out = Pipeline.from_dict(pipe.to_dict()).transform(served)
 
-    assert out["store_sales_latest"].iloc[0] == 18.0
-    assert out["store_sales_latest_ago"].iloc[0] == 1.0
+    # Store "a" sold 12, 14, 16, 18 on Jan 7..10, and the row is Jan 11, so the
+    # window [Jan 7, Jan 11) holds all four.
+    assert out["store_sales_4_mean"].iloc[0] == pytest.approx(15.0)
+    assert out["store_sales_4_count"].iloc[0] == 4.0
 
 
 # --- the ordering column -----------------------------------------------------
@@ -378,8 +408,12 @@ def test_the_window_moves_with_the_row_rather_than_with_the_freeze(panel):
     # away as the row moves past the end of stored history.
     assert out["store_sales_3_mean"].tolist() == [16.0, 17.0, 18.0]
     assert out["store_sales_3_count"].tolist() == [3.0, 2.0, 1.0]
-    # `_latest` is the same number for all three, which is the contrast.
-    assert out["store_sales_latest"].tolist() == [18.0, 18.0, 18.0]
+    # The contrast that decided 0072: the last stored observation is 18 for all
+    # three of these rows and for every row after them. One number, repeated
+    # across the horizon, with nothing on it to say it has stopped meaning
+    # anything — where the window's own count falls 3, 2, 1 in plain sight.
+    legacy = HistoryEncoder(["store"], "sales", "date", keep=10).fit(panel)
+    assert legacy.transform(served)["store_sales_latest"].tolist() == [18.0] * 3
 
 
 def test_a_row_is_never_inside_its_own_window(panel):
@@ -573,6 +607,88 @@ def test_a_bundle_written_before_windows_existed_still_loads(panel):
 
     assert revived.windows == []
     assert "store_sales_2_ago" in revived.output_columns
+
+
+# --- what a bundle written before 0072 must still do -------------------------
+#
+# The rule is enforced at the *fitting* entry point, not in the class, and this
+# is why: an encoder restored from a bundle has to emit what it emitted when it
+# was fitted, or the artifact hands a model a different column set than the one
+# it was trained on. That is a failure at predict time on something that used to
+# work (0055), and it is the whole reason the machinery below still exists.
+
+
+def _pre_0072(enc) -> dict:
+    """An encoder's dict as the code before 0072 wrote it: no `latest` key.
+
+    Faithful to the artifacts on disk — a stored history step from a real run
+    reads `{'kind': 'history', 'by': [...], 'offsets': [], 'keep': 92,
+    'windows': [[91.0, 'median']], ...}` and nothing else.
+    """
+    return {k: v for k, v in enc.to_dict().items() if k != "latest"}
+
+
+def test_a_windowed_bundle_written_before_the_rule_still_emits_its_pair(panel):
+    """The dangerous case, because the resolved default would silently disagree.
+
+    A windowed encoder built today emits no pair. The identical dict written
+    before 0072 was fitted *with* one, and the model behind it has a column for
+    it, so `from_dict` must not re-derive the flag from the arguments.
+    """
+    fitted_then = HistoryEncoder(["store"], "sales", "date", windows=[(3, "mean")],
+                                 keep=10, latest=True).fit(panel)
+    served = pd.DataFrame({"store": ["a"], "date": pd.to_datetime(["2015-01-11"])})
+    expected = fitted_then.transform(served)
+
+    revived = ENCODER_CLASSES["history"].from_dict(_pre_0072(fitted_then))
+
+    assert revived.latest is True
+    pd.testing.assert_frame_equal(revived.transform(served), expected)
+    assert "store_sales_latest" in revived.output_columns
+
+
+def test_a_lagged_bundle_written_before_the_rule_still_emits_its_lags(panel):
+    fitted_then = HistoryEncoder(["store"], "sales", "date", offsets=[3],
+                                 keep=10).fit(panel)
+    served = pd.DataFrame({"store": ["a"], "date": pd.to_datetime(["2015-01-11"])})
+
+    revived = ENCODER_CLASSES["history"].from_dict(_pre_0072(fitted_then))
+
+    out = revived.transform(served)
+    assert out["store_sales_3_ago"].iloc[0] == 14.0
+    assert out["store_sales_3_ago_exact"].iloc[0] == 1.0
+    assert out["store_sales_latest"].iloc[0] == 18.0
+
+
+def test_such_a_bundle_replays_through_a_whole_pipeline(panel):
+    """End to end, because `from_dict` being right is not the same as the bundle
+    that wraps it being right."""
+    from tabular_agent.pipeline import Pipeline
+
+    fitted_then = HistoryEncoder(["store"], "sales", "date", windows=[(3, "mean")],
+                                 keep=10, latest=True).fit(panel)
+    pipe = Pipeline("regression")
+    pipe.add_encoder(fitted_then)
+    stored = pipe.to_dict()
+    for step in stored["steps"]:
+        step.pop("latest", None)
+    served = pd.DataFrame({"store": ["a"], "date": pd.to_datetime(["2015-01-11"])})
+
+    out = Pipeline.from_dict(stored).transform(served)
+
+    assert out["store_sales_latest"].iloc[0] == 18.0
+    assert out["store_sales_latest_ago"].iloc[0] == 1.0
+    assert out["store_sales_3_mean"].iloc[0] == 16.0
+
+
+def test_a_windowed_encoder_fitted_today_records_that_it_has_no_pair(panel):
+    """The other direction: the flag is written, so tomorrow's loader does not
+    have to re-derive it either."""
+    enc = HistoryEncoder(["store"], "sales", "date", windows=[(3, "mean")],
+                         keep=10).fit(panel)
+
+    assert enc.to_dict()["latest"] is False
+    assert ENCODER_CLASSES["history"].from_dict(enc.to_dict()).latest is False
 
 
 def test_windows_are_frozen_per_fold_like_everything_else(panel, ordered_folds):

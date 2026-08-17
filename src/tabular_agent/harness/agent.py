@@ -295,27 +295,31 @@ def build_agent(model=DEFAULT_MODEL):
         ctx: RunContext[Deps],
         by: list[str],
         value: str,
-        offsets: list[float] | None = None,
+        windows: list,
         keep: int | None = None,
         table: str | None = None,
-        windows: list | None = None,
     ) -> dict:
-        """Give each row its group's most recent earlier value, and its age.
+        """Give each row a trailing average of its own group's recent past.
 
-        For "what did this store last sell, and how long ago" — the one fact
-        about a group that depends on *when* rather than *how much*, which
-        `fit_group_stats` and `fit_encoding` both average away.
+        For the level a group has been running at lately — the one fact about a
+        group that depends on *when* as well as *how much*, which
+        `fit_group_stats` and `fit_encoding` both average away by summarising all
+        of a group's rows at once.
 
-        Adds a **pair** of columns, `<by>_<value>_latest` and `..._latest_ago`. The
-        value on its own would be a number that quietly goes stale the further
-        ahead you predict; the age is what lets the model discount it.
+        Every column this adds is an average over a stretch of the past, beside a
+        count of how many observations it found. **There is no lag and no
+        last-known-value option.** A single row's value is not offered, because
+        this tool's history is frozen: one stored observation is the *same number*
+        for every row you predict, while it varies across the folds you train on,
+        so a model learns to use it and is then served a constant.
 
-        Unlike `fit_group_stats`, `value` may be the target — a lag of the target
-        can only come from stored history, never from a served frame.
+        Unlike `fit_group_stats`, `value` may be the target — a summary of the
+        target's own past can only come from stored history, never from a served
+        frame.
 
         Each fold's history stops at the end of that fold's training rows, so a
         validation row sees what a real prediction the same distance ahead would
-        see. This scores lower than a lag that peeks at neighbouring rows, and
+        see. This scores lower than a window that peeks at neighbouring rows, and
         that gap is what the peeking was worth. Only for runs split on an
         ordering column; rows in the first period keep a missing value.
 
@@ -323,24 +327,19 @@ def build_agent(model=DEFAULT_MODEL):
             by: Column(s) forming the group key — the series to store one of.
                 Read at predict time, so they must exist then.
             value: The column whose past is stored. May be the target.
-            offsets: True lags, in the ordering column's units, e.g. [7] for
-                "the value 7 days before this row". Each adds a value column and
-                an `_exact` flag: 1 where the lag really is that far back, 0
-                where no such observation existed and the lookup fell back to the
-                latest one instead. Prefer offsets longer than the whole period
-                you predict — a shorter one is answerable for the first rows and
-                quietly becomes the last-known value for the rest, which the flag
-                is there to show. Each must be at least the task's declared
-                forecast_horizon; without that declaration, leave this empty and
-                take the last-known pair.
             keep: Observations retained per group. Defaults to just enough for
-                the largest offset or window; raise it for a series with gaps.
+                the longest window; raise it for a series with gaps.
             windows: Trailing averages, as [length, statistic] pairs — e.g.
                 [[90, "mean"], [364, "median"]] for "this group's mean over the
                 90 periods before this row" and "its median over the last 364".
-                Statistics are mean, std and median. Where an offset gives one
-                observation, a window averages a stretch of them — steadier, and
-                it cannot be thrown by a single unusual day.
+                Statistics are mean, std and median. A window averages a stretch
+                of observations, so it cannot be thrown by a single unusual day —
+                which is the entire reason this tool has no lag argument. To
+                reach a *seasonal* value, put the season in the key rather than
+                in a distance: group by the entity **and** its position in the
+                cycle, then take a window spanning several cycles. That averages
+                the comparable periods instead of reading the single one that
+                happens to sit a fixed step back.
 
                 Length is the whole game, and it fails at *both* ends. Too short
                 and the window holds almost nothing, because stored history stops
@@ -360,7 +359,7 @@ def build_agent(model=DEFAULT_MODEL):
         """
         return _retryable(
             lambda: tools.fit_history(
-                ctx.deps.session, by=by, value=value, offsets=offsets,
+                ctx.deps.session, by=by, value=value,
                 keep=keep, table=table, windows=windows,
             )
         )

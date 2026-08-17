@@ -368,6 +368,24 @@ Vocabulary used throughout:
   distinct keys; and `Customers` is dropped in every run because 0030's servability
   rule makes dropping it the rational first move, which destroys the only thing it
   was good for. No library change made — n=1)*
+- [0072 — A feature is an average over a stretch, not the value of one row](0072-a-feature-is-an-average-over-a-stretch-not-the-value-of-one-row.md)
+  *(the rule that came out of 0071, and it is wider than the measurement was:
+  **`fit_history` emits trailing windows and nothing else** — no last-known pair,
+  no lags. The mechanism is that the per-fold freeze is **correct** and therefore
+  silent: a stored single observation varies across four thousand values in
+  training and is one frozen per-group constant at serving, so the model is fitted
+  on one column and served another of the same name. Priced at +0.0143 on Rossmann
+  (where the one draw fell on a public holiday) and +0.0022 probe / +0.0035 sealed
+  on Restaurant, where it is `sign_stable: False` — the defect transfers, the price
+  is a lottery. Supersedes 0049's and 0050's conclusion that pairing a value with
+  its age makes it honest enough to keep. And the offset half turns up a sharper
+  rule than the one it was built on: a 364-day lag and a 364-day window score
+  0.829 against 0.818 on a coarse key — the **window is worse** — and 0.829
+  against 0.950 once the weekday and promo move into the key. So it is not that
+  averages beat points; it is that **comparability belongs in the key**, and a lag
+  is a key expressed as a distance. The machinery stays
+  in the class so pre-0072 bundles still predict; the refusal is pinned as a
+  signature)*
 
 ### Keeping the agent's surface small
 

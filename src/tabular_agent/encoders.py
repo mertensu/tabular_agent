@@ -559,60 +559,40 @@ def to_periods(values) -> np.ndarray:
 
 
 class HistoryEncoder:
-    """A group's own past, frozen at fit time and replayed as latest-known + distance.
+    """A group's own recent past, frozen at fit time and replayed as trailing windows.
 
     The fourth case, and the one the others cannot reach. :class:`TargetEncoder`
     and :class:`GroupStatsEncoder` summarise a group across *all* of its rows at
     once — the average, the spread — which throws away the order the rows came
-    in. Nothing in the vocabulary could say "what this store sold most recently",
-    because that is a statement about *when*, not about *how much*.
+    in. Nothing else in the vocabulary can say what level a group has been running
+    at *lately*, because that is a statement about *when* as well as *how much*.
 
     What it stores, per group, is the tail of the series: the last ``keep``
     observations of ``value`` in ``order``. Bounded by construction — the
     encoder's size is (number of groups × ``keep``), never a function of how many
     rows the table has, which is what makes it storable in a lineage at all.
 
-    What it emits, per row, is a pair of columns and never a bare value:
+    **What it emits is always an average over a stretch, never the value of one
+    row** (0072). That is the rule the whole class is organised around, and it has
+    a price and a reason.
 
-    * ``..._latest`` — the most recent observation for this row's group, as of the
-      freeze point.
-    * ``..._latest_ago`` — how far back that observation sits from *this row*, in
-      the ordering column's units. Named for the same word the offset columns use:
-      in ``..._364_ago`` the distance is a literal, here it is measured.
+    A feature that is one row's value carries the noise of one row. Worse, in this
+    encoder's fold geometry it does not stay one row's value: a *training* row
+    reads its own fold's freeze, so across the folds the column takes thousands of
+    values at ages spanning the whole table, while every *served* row reads the
+    **final** freeze, so the column is one draw per group, constant for the whole
+    horizon, with only its age moving. The model is fitted on a varying
+    recent-value feature and served a frozen constant wearing the same name. Where
+    that one draw lands on an unrepresentative period it is not idle but
+    confidently wrong — measured at 0.014 rmspe on one dataset (the draw fell on a
+    public holiday, and 98% of groups were shut) and 0.002 rmsle on another, each
+    time against the table that would otherwise have shipped.
 
-    The unit is deliberately absent from the names. It is days for a date column
-    and whatever the column counts otherwise, and a name reading ``_days_old``
-    over a series indexed in weeks would be the exact class of confidently-wrong
-    label the ``_ago`` column exists to prevent.
+    A window has the same freeze and degrades gracefully instead: its left edge
+    moves with the row, so each row averages its own stretch, and its ``_count``
+    says how much it actually found.
 
-    **The pair is the design, not a convenience.** Serving the last known value
-    alone is the same number with the honesty removed: it drifts further from the
-    truth the further past the freeze point you predict, and says nothing about
-    it. This project's characteristic failure is a number that looks fine and
-    describes something else, and a bare carry-forward is that failure in feature
-    form. The ``_ago`` column is what lets a model discount a value it should not
-    trust.
-
-    ``offsets`` add true lags on the same machinery — ``..._7_ago`` is the most
-    recent observation at or before ``row - 7``, paired with ``..._7_ago_exact``:
-    ``1.0`` when the observation really is 7 back, ``0.0`` when the lookup had to
-    reach further.
-
-    **A lag that is not exact has silently become ``_latest``**, and that is the
-    case worth flagging: ask for a 7-day lag on a row 60 days past the freeze
-    point and there is no 7-day-old observation to find, so you get the newest
-    one there is. The value is the honest answer to "what could be known"; the
-    flag is what stops it being read as an answer to "what happened a week ago".
-
-    A flag rather than an age, because for an offset the age is near-constant —
-    it equals the offset whenever the lookup succeeded — so all of its
-    information is in the failures. ``_latest`` keeps a real age, which genuinely
-    varies from row to row.
-
-    Whether an offset is *legal* is a separate question, and one this class does
-    not answer — see :func:`fit_history`.
-
-    ``windows`` aggregate the stored tail instead of picking one point out of it.
+    ``windows`` aggregate the stored tail rather than picking one point out of it.
     ``windows=[(90, "mean")]`` emits ``..._90_mean`` — the mean of every stored
     observation in ``[row - 90, row)`` — beside ``..._90_count``, how many
     observations that actually was.
@@ -623,20 +603,36 @@ class HistoryEncoder:
     working model two thirds of its score. ``[row - w, row)`` moves with the row,
     so each row averages its own stretch of the past.
 
-    **The count is emitted with every window and is not optional**, for the reason
-    the ``_ago`` column is not optional: a mean over two observations and a mean
-    over ninety are the same number wearing the same name, and only one of them is
-    a summary. A window that quietly averages two points on the rows that matter is
-    0050's degraded ``lag7`` in new clothing, and the count is what makes it
-    visible. It is emitted once per distinct window length, however many statistics
-    that length was asked for.
+    **The count is emitted with every window and is not optional.** A mean over
+    two observations and a mean over ninety are the same number wearing the same
+    name, and only one of them is a summary. A window that quietly averages two
+    points on the rows that matter has collapsed back into the single draw this
+    class exists to avoid, and the count is what makes that visible. It is emitted
+    once per distinct window length, however many statistics that length was asked
+    for.
+
+    That is also the honest limit of the rule above: a window is only an average
+    while it holds several observations. At exactly the forecast horizon it holds
+    one — the freeze-point observation — which is the old ``_latest`` with extra
+    arithmetic. The count says so; :func:`fit_history` refuses lengths below the
+    horizon outright.
 
     **The right endpoint is strict.** The window ends *before* the row's own
-    ordering value, so the row can never be inside its own summary. ``_latest``
-    relies on the per-fold freeze for that (0048), and a window must not: a
-    self-included point in a mean over ninety is diluted to invisibility, where a
-    self-included ``_latest`` shows up as a perfect correlation. A guarantee that
-    only holds when the numbers are checked is not a guarantee.
+    ordering value, so the row can never be inside its own summary. A self-included
+    point in a mean over ninety is diluted to invisibility rather than showing up
+    as a perfect correlation, so this cannot be left to the per-fold freeze the way
+    a point lookup could (0048). A guarantee that only holds when the numbers are
+    checked is not a guarantee.
+
+    **Two families this class still knows how to compute and will not fit any
+    more**: the last-known pair (``_latest`` / ``_latest_ago``) and true lags
+    (``offsets`` → ``..._7_ago`` and its ``_exact`` flag). Both are one row's
+    value, both are refused by :func:`fit_history` since 0072, and the machinery
+    survives here for exactly one reason: **bundles written before that change must
+    still load and predict.** An encoder restored by :meth:`from_dict` emits what
+    it emitted when it was fitted, or the artifact silently produces a different
+    column set than the model it serves was trained on (0055). Nothing new
+    constructs them.
 
     Two properties worth stating, because they are why this is allowed where the
     obvious ``groupby().shift()`` is not:
@@ -655,12 +651,27 @@ class HistoryEncoder:
     kind = "history"
 
     def __init__(self, by: list[str], value: str, order: str, offsets=(),
-                 keep: int | None = None, windows=()):
+                 keep: int | None = None, windows=(), latest: bool | None = None):
         self.by = [str(c) for c in by]
         self.value = str(value)
         self.order = str(order)
         self.offsets = [float(o) for o in offsets]
         self.windows = _clean_windows(windows)
+        #: Whether to emit the last-known pair. Defaults to "only when there is
+        #: nothing else to emit", so a construction that predates 0072 — offsets
+        #: alone, or nothing at all — still produces what it used to, while a
+        #: windowed one does not acquire it. :meth:`from_dict` passes it
+        #: explicitly, because a restored bundle's column set is not negotiable.
+        self.latest = (
+            bool(latest) if latest is not None else not (self.offsets or self.windows)
+        )
+        if not self.latest and not self.offsets and not self.windows:
+            raise ValueError(
+                "nothing to emit: no windows, no offsets, and latest=False. A "
+                "history encoder needs at least one trailing window — see "
+                "fit_history for why a single stored observation is no longer a "
+                "feature this builds."
+            )
         #: Distinct lengths in first-asked order — one count column each, not one
         #: per (length, statistic) pair, since the count is a property of the
         #: window and not of what was asked of it.
@@ -715,7 +726,9 @@ class HistoryEncoder:
 
     @property
     def output_columns(self) -> list[str]:
-        names = [f"{self.base_name}_latest", f"{self.base_name}_latest_ago"]
+        names = []
+        if self.latest:
+            names += [f"{self.base_name}_latest", f"{self.base_name}_latest_ago"]
         for o in self.offsets:
             names += [f"{self.base_name}_{o:g}_ago", f"{self.base_name}_{o:g}_ago_exact"]
         for w, stat in self.windows:
@@ -871,9 +884,10 @@ class HistoryEncoder:
         out = df.copy()
         keys = self._keys(df)
         t = to_periods(df[self.order])
-        last, last_age = self._asof(keys, t, None)
-        out[f"{self.base_name}_latest"] = last
-        out[f"{self.base_name}_latest_ago"] = last_age
+        if self.latest:
+            last, last_age = self._asof(keys, t, None)
+            out[f"{self.base_name}_latest"] = last
+            out[f"{self.base_name}_latest_ago"] = last_age
         for o in self.offsets:
             v, a = self._asof(keys, t, o)
             out[f"{self.base_name}_{o:g}_ago"] = v
@@ -905,6 +919,7 @@ class HistoryEncoder:
             # Pairs go out as lists so the round trip through JSON is the identity;
             # `_clean_windows` takes them back in either shape.
             "windows": [[w, s] for w, s in self.windows],
+            "latest": self.latest,
             "history": self.history_,
             "frozen_at": self.frozen_at_,
         }
@@ -913,8 +928,16 @@ class HistoryEncoder:
     def from_dict(cls, d: dict) -> "HistoryEncoder":
         # `windows` absent is a bundle written before this existed, and it loads as
         # what it was: last-known and offsets, no windows.
+        #
+        # `latest` absent is the same situation and the default must be `True`
+        # rather than the constructor's `None`: every bundle written before 0072
+        # emitted the pair unconditionally, so resolving it from the offsets and
+        # windows here would hand back an encoder that produces *fewer columns
+        # than the model it is loaded for was trained on*. That is a KeyError at
+        # predict time on an artifact that used to work — 0055's failure, and the
+        # reason this line is not `d.get("latest")`.
         enc = cls(d["by"], d["value"], d["order"], d.get("offsets", ()), d["keep"],
-                  d.get("windows", ()))
+                  d.get("windows", ()), latest=d.get("latest", True))
         enc.history_ = {str(k): [list(v[0]), list(v[1])] for k, v in d["history"].items()}
         enc.frozen_at_ = d.get("frozen_at")
         return enc
@@ -1596,9 +1619,9 @@ def _require_ordered_folds(periods: np.ndarray, folds) -> None:
             )
 
 
-def fit_history(df, by, value, order, *, folds, offsets=(), keep=None,
+def fit_history(df, by, value, order, *, folds, keep=None,
                 forecast_horizon: float | None = None, windows=()):
-    """A group's recent past, frozen per fold (the tool entry point).
+    """A group's recent past as trailing windows, frozen per fold (the tool entry point).
 
     Returns ``(train_features, final_encoder)`` on the same contract as
     :func:`fit_encoding` and :func:`fit_group_stats`: the frame is what the model
@@ -1623,27 +1646,42 @@ def fit_history(df, by, value, order, *, folds, offsets=(), keep=None,
     supposed to. The gap between the two numbers is the size of the lie, not the
     size of the loss.
 
-    ``offsets`` are refused unless the task declares ``forecast_horizon`` and
-    every offset is at least that large. Below the declared gap an offset cannot
-    be answered from stored history for every served row, so ``_lag1`` on a block
-    starting seven periods out would carry a seven-period-old number under a name
-    that promises one. Undeclared, the last-known pair is what you get, and it is
-    honest without needing the declaration.
+    **``windows`` is required, and single-row features are not built here** — no
+    lags, no last-known pair (0072). Both are the value of one row, and one row's
+    value carries one row's noise; a trailing average over the same stretch does
+    not. The failure is not hypothetical arithmetic: this encoder's own freeze
+    turns a single stored observation into a per-group **constant** across the
+    whole served horizon, while the same column varies freely in training, and two
+    datasets priced that at 0.014 and 0.002 against the table that would otherwise
+    have shipped.
 
-    ``windows`` are gated on the same declaration and for a sharper reason. A row
-    ``d`` ahead of the freeze has stored history only up to ``row - d``, so a
-    window of ``w`` covers ``[row - w, row - d]`` and is **empty for every served
-    row** when ``w < d``. An offset that short degrades into the last-known value;
-    a window that short is nothing at all. At exactly the horizon it holds a single
-    observation — the freeze point — which is ``_latest`` with extra arithmetic and
-    the boundary anchoring 0050 is about, and the ``_count`` column says so.
+    What a lag was reached for is still expressible, and usually better: put the
+    structure in the **key** and average over the stretch. "Sales on the same
+    weekday a year ago" is ``by=[store, weekday]`` with a 364-length window, which
+    is what the Rossmann winner's own feature set does, rather than an offset of
+    364 that reads one day.
+
+    ``windows`` are gated on ``forecast_horizon``. A row ``d`` ahead of the freeze
+    has stored history only up to ``row - d``, so a window of ``w`` covers
+    ``[row - w, row - d]`` and is **empty for every served row** when ``w < d``. At
+    exactly the horizon it holds the freeze-point observation alone, which is the
+    single draw this function exists to refuse, and the ``_count`` column says so.
 
     Under forward chaining the first block is validated by nothing, so those rows
     keep ``NaN`` — the same gap out-of-fold target encoding leaves, for the same
     reason.
     """
-    offsets = [float(o) for o in offsets]
     windows = _clean_windows(windows)
+    if not windows:
+        raise ValueError(
+            "fit_history needs at least one window, e.g. windows=[(90, 'mean')]. "
+            "The last-known value and true lags are no longer fitted: both are one "
+            "row's value, and this encoder's freeze makes a single stored "
+            "observation a per-group constant for every row you predict while it "
+            "varies across the folds you train on. Ask for a trailing average over "
+            "the stretch instead — and if you wanted a seasonal lag, put the season "
+            "in `by` and take a window over it."
+        )
     if windows:
         if forecast_horizon is None:
             raise ValueError(
@@ -1664,29 +1702,11 @@ def fit_history(df, by, value, order, *, folds, offsets=(), keep=None,
                 f"row. Use lengths longer than {forecast_horizon:g} — comfortably "
                 "longer, or the window holds the freeze-point observation alone."
             )
-    if offsets:
-        if forecast_horizon is None:
-            raise ValueError(
-                f"offsets={offsets} need the task to declare how far ahead it "
-                "forecasts. Set TaskSpec.forecast_horizon to the gap between the end "
-                "of history and the earliest row you are asked to predict, in the "
-                "ordering column's units. Without it, the last-known value and its "
-                "age are what history can answer honestly."
-            )
-        too_short = [o for o in offsets if o < forecast_horizon]
-        if too_short:
-            raise ValueError(
-                f"offsets {too_short} are shorter than the declared forecast horizon "
-                f"of {forecast_horizon:g}. A lag that short is not answerable from "
-                "stored history for every served row, so the column would hold a "
-                "value older than its own name claims. Use offsets of at least "
-                f"{forecast_horizon:g}, or drop them and take the last-known pair."
-            )
 
     periods = to_periods(df[order])
     _require_ordered_folds(periods, folds)
 
-    template = HistoryEncoder(by, value, order, offsets, keep, windows)
+    template = HistoryEncoder(by, value, order, (), keep, windows, latest=False)
     names = template.output_columns
     oof = pd.DataFrame(index=df.index)
     for name in names:
@@ -1696,7 +1716,8 @@ def fit_history(df, by, value, order, *, folds, offsets=(), keep=None,
         # `df.iloc[tr]` is the training *prefix* under forward chaining, which
         # `_require_ordered_folds` has already established. That is the freeze
         # point, and it is the whole mechanism.
-        fold_enc = HistoryEncoder(by, value, order, offsets, keep, windows).fit(df.iloc[tr])
+        fold_enc = HistoryEncoder(by, value, order, (), keep, windows,
+                                   latest=False).fit(df.iloc[tr])
         transformed = fold_enc.transform(df.iloc[va])
         for name in names:
             oof.iloc[va, positions[name]] = transformed[name].to_numpy()

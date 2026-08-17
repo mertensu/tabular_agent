@@ -972,27 +972,37 @@ def fit_history(
     session: RunSession,
     by: list[str],
     value: str,
-    offsets: list[float] | None = None,
     keep: int | None = None,
     table: str | None = None,
     windows: list | None = None,
 ) -> dict:
-    """Store each group's recent past and replay it as last-known value + age.
+    """Store each group's recent past and replay it as trailing averages.
 
-    "What did this store last sell, and how long ago" — the one thing about a
-    group that depends on *when* rather than *how much*, which `fit_group_stats`
-    and `fit_encoding` both average away. Unlike those, this may point at the
-    target: a lag of the target can only ever come from stored history, never from
-    a served frame, because the target is not in one.
+    The level a group has been running at lately — the one thing about a group
+    that depends on *when* as well as *how much*, which `fit_group_stats` and
+    `fit_encoding` both average away. Unlike those, this may point at the target:
+    a summary of the target's own past can only ever come from stored history,
+    never from a served frame, because the target is not in one.
 
-    Two columns per request, always as a pair. The value alone would be a
-    carry-forward that drifts further from the truth the further ahead you predict
-    and says nothing about it; the age is what lets the model discount it.
-
-    `windows` summarise the stored past instead of picking one point out of it:
     `windows=[[90, "mean"]]` adds the mean of every observation in the 90 periods
-    before each row, beside a count of how many that was. One observation is one
-    draw; an average over a stretch of them is a description of the group.
+    before each row, beside a count of how many that was. At least one window is
+    required.
+
+    **Single-row features are not built here** (0072). There is no lag argument and
+    no last-known-value pair, because both are the value of one row, and one row's
+    value carries one row's noise where an average over the stretch does not. The
+    concrete failure is this tool's own freeze: a single stored observation is a
+    per-group **constant** for every row you predict, while the same column varies
+    across the folds you train on — so a model learns a feature it is then served
+    as a constant. Two datasets priced that at 0.014 rmspe and 0.002 rmsle against
+    the table that would otherwise have shipped, and on the first of them the one
+    draw fell on a public holiday when 98% of the groups were shut.
+
+    A seasonal value is not lost, only expressed differently and more stably: put
+    the season in the **key** rather than in a distance. Group by the entity *and*
+    its position in the cycle, then take a window spanning several cycles, so the
+    feature averages the comparable periods instead of reading the single one a
+    fixed step back.
 
     The ordering column is the one the run is split on, and there has to be one.
     History frozen at a training fold scattered through time reports an age that
@@ -1038,7 +1048,7 @@ def fit_history(
     folds = make_folds(df[spec.target], spec.task_type, n_splits=spec.n_splits,
                        seed=spec.seed, order=_fold_order(session, df))
     train_features, encoder = _fit_history(
-        df, by, value, order, folds=folds, offsets=offsets or (), keep=keep,
+        df, by, value, order, folds=folds, keep=keep,
         forecast_horizon=spec.forecast_horizon, windows=windows or (),
     )
 
@@ -1062,7 +1072,6 @@ def fit_history(
         "group_by": by,
         "value_column": value,
         "order_column": order,
-        "offsets": [float(o) for o in (offsets or ())],
         "windows": [[w, s] for w, s in encoder.windows],
         "new_columns": new_columns,
         "n_steps": len(lineage.steps),
@@ -1070,36 +1079,22 @@ def fit_history(
     })
 
     n_missing = int(out[new_columns[0]].isna().sum())
-    # The share of rows each offset could actually answer, which is the number a
-    # caller acts on and the one thing that makes a badly-chosen offset obvious
-    # immediately. An offset shorter than the period being predicted is
-    # answerable for the earliest rows and silently becomes the last-known value
-    # for the rest (0050) — on Rossmann v8 a 7-day offset over a 44-day block was
-    # honoured for 11% of rows, and nothing said so until it was gone looking for.
     periods = _to_periods(df[order])
-    answerable = {}
-    for o in (offsets or ()):
-        col = f"{encoder.base_name}_{float(o):g}_ago_exact"
-        seen = train_features[col].dropna()
-        if len(seen):
-            answerable[f"{float(o):g}"] = round(float(seen.mean()), 3)
     # How wide a block the run is asked to predict, in the ordering column's
     # units. The agent cannot work this out for itself — `inspect_data` reports
     # `n_val` as a *row count*, and nothing anywhere converts that to a span — so
-    # telling it "use an offset longer than the period you predict" was advice it
+    # telling it "use a window longer than the period you predict" was advice it
     # had no way to act on. The tool knows, so the tool says.
     spans = [
         float(np.nanmax(periods[va]) - np.nanmin(periods[va]))
         for _, va in folds if len(va)
     ]
     block_span = round(float(np.median(spans)), 3) if spans else None
-    weak = [k for k, v in answerable.items() if v < 0.5]
 
-    # What a window actually averaged, which is the same question
-    # `offsets_answerable` asks of a lag. A window is a summary only if there was
-    # something in it: two observations under a name that says "90 periods" is
-    # 0050's degraded lag wearing different clothes, and the median across rows is
-    # the number that shows it at a glance.
+    # What a window actually averaged. A window is a summary only if there was
+    # something in it: two observations under a name that says "90 periods" is a
+    # single draw wearing different clothes, and the median across rows is the
+    # number that shows it at a glance.
     window_counts = {}
     for w in encoder.window_lengths:
         seen = train_features[f"{encoder.base_name}_{w:g}_count"].dropna()
@@ -1169,21 +1164,16 @@ def fit_history(
     if block_span is not None:
         note += (
             f" Each block you are scored on spans about {block_span:g} in "
-            f"{order!r}, so an offset shorter than that is answerable only for the "
-            "block's earliest rows and becomes the latest-known value for the rest."
-        )
-    if weak:
-        note += (
-            f" WARNING: offset(s) {weak} were answered exactly for fewer than half "
-            "the rows — see offsets_answerable. Below that, the column is mostly "
-            "the latest-known value wearing a name that promises a fixed lag."
+            f"{order!r}, so a window has to reach well past that before the rows at "
+            "the far edge of the block have anything to average."
         )
     if thin:
         note += (
             f" WARNING: window(s) {thin} held a median of fewer than two "
-            "observations — see window_observations. An average over one point is "
-            "that point, so the column is the latest-known value under a name that "
-            "promises a summary. A window has to reach well past the horizon you "
+            "observations — see window_observations. An average over one point "
+            "is that point: the column has collapsed into a single stored "
+            "observation under a name that promises a summary, which is the whole "
+            "thing 0072 refuses. A window has to reach well past the horizon you "
             "forecast before it contains anything to average."
         )
     if beyond_some:
@@ -1213,8 +1203,6 @@ def fit_history(
         "source_table": session.rel(path),
         **scored,
         "n_rows_without_value": n_missing,
-        # {offset: share of rows where the lag was exactly that far back}.
-        "offsets_answerable": answerable,
         # {window: median number of observations that fell inside it}. Read it
         # beside `shortest_training_prefix`: on its own it sees only the training
         # side, and a window too long to fill reports a healthy-looking count.
