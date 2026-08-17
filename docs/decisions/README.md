@@ -400,6 +400,20 @@ Vocabulary used throughout:
   all failed, and the two-budget panel is **deliberately not built**: ~10x cost on
   every dataset for an effect seen on one. Also records that no model here has ever
   been told a column is categorical)*
+- [0074 — A categorical declaration is a fitted step, not a flag](0074-a-categorical-declaration-is-a-fitted-step-not-a-flag.md)
+  *(**proposed, the design before the code.** Ulf asked to let the agent declare a
+  column categorical and choose native handling — the fourth option the literature
+  treats as first-class for high cardinality, which this project has never had. It
+  cannot be a flag: pandas `category` codes are positions into the observed level
+  set, so a predict batch of 200 levels out of 13,553 remaps them silently — the
+  same defect 0011 caught when `factorize` was tried. So the level set is **fitted
+  state**, stored in the sidecar and replayed, and the capability is an encoder that
+  emits a category dtype instead of a number. That framing also keeps 0035 intact:
+  the agent changes the table's types, the model layer applies one fixed rule, no
+  hyperparameter is exposed. Names the trap in advance — the three families disagree
+  about NaN in categoricals, so a naive rule would fit the blend's members on
+  different representations of the same table. And 0073 warns that the probe will
+  have an opinion about these steps that should not be trusted at one budget)*
 
 ### Keeping the agent's surface small
 

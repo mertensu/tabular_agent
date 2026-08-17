@@ -146,12 +146,30 @@ real 30-day gap, so that refusal either holds or it does not.
    *"is `card1` > 9000?"* of an arbitrary identifier. Dropping is lossy and visible;
    this is wrong and invisible.
 
-   **The prep-side fix is sanctioned, not a workaround.** `CLAUDE.md` names *the
-   typing* as one of `prep_*.py`'s jobs, so casting the 18 to string in
-   `prep_ieee.py` is exactly where that decision belongs. It converts a wrong-and-
-   invisible failure into a lossy-and-visible one, after which the only route to
-   them is an agent encoding — which is the defect 0073 recorded in "what was
-   rejected", now with 49 columns of evidence behind it rather than an argument.
+   **Corrected after checking the literature — the earlier framing here was wrong.**
+   The 18 are not being handled *badly*: an arbitrary integer split as a number is
+   **label encoding**, a legitimate GBDT treatment, and rsakata's encoding
+   comparison reports it is notably **robust** to large `num_leaves` where native
+   categorical handling overfits at high cardinality. So the accidental treatment is
+   the capacity-robust one. **The defect is that nobody chose it and nothing can say
+   otherwise** — `ProductCD` is dropped for being a string, `card1` is label-encoded
+   for being an int, two fates decided by a CSV parser.
+
+   Also corrected: the harness has **three** encodings, not one. `fit_encoding`
+   takes `frequency` (default), `ordinal` and `target`, plus `fit_group_stats`
+   separately. "The only route is target encoding" was overstated.
+
+   **Ulf's call, designed and not built:**
+   [0074](docs/decisions/0074-a-categorical-declaration-is-a-fitted-step-not-a-flag.md)
+   — *"let the agent decide if it chooses native categorial handling and let it
+   declare a column as categorical if it wants to"*. Read it before touching this;
+   the short version is that it **cannot be a flag**, because pandas `category`
+   codes are positions into the observed level set and a predict batch remaps them
+   silently — the same defect 0011 caught when `factorize` was tried. So it is an
+   encoder with a fitted, persisted level set, which also keeps 0035 intact.
+
+   Typing in `prep_ieee.py` remains available and is sanctioned (`CLAUDE.md` names
+   typing as prep's job), but it is now the *fallback* rather than the plan.
 3. **0054's open item 2.** Whether the terminal fit's 200 trees is visibly part of
    why a run lands mid-table, on a board that can actually say so.
 4. **0060 / 0061.** The field decays ~0.030 AUC public -> private (median 0.94127 ->
