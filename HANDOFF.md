@@ -18,9 +18,10 @@
 (what the winners had that we cannot express). Read 0076 first — it is the one that
 names an unexamined decision rather than measuring a known one.
 
-> **`_runs/ieee_v1/submission.csv` is written and NOT uploaded.** Registered
-> predictions 5 and 6 need it. **One submission, then the board is spent** — write
-> that down at the time (0045 is what happens otherwise).
+> **Submitted: private 0.899498, public 0.928187, rank ~4354/6355 (top 69%),
+> 0.011 below the private median. THIS BOARD IS NOW SPENT** — one submission, as
+> planned. All six registered predictions resolved: 1 and 3 refuted, 2/4/5/6
+> confirmed.
 
 ### What was built
 
@@ -33,7 +34,33 @@ the runner's docstring beforehand.
 | work table, same ruler | 0.89604 |
 | best table `t18` | 0.91734 |
 | blend, val / **sealed** | 0.91874 / **0.94176** |
+| **private / public, scored** | **0.899498 / 0.928187** |
 | private board | median 0.91096, top 10% 0.92819, best 0.94588 |
+
+### The seal is a local peak, and half its optimism is not distance
+
+Four windows in time order: val **0.91874**, sealed **0.94176**, then the 30-day
+gap, then public **0.92819**, private **0.89950**. From the seal onward it decays
+monotonically with distance — 0060 on a fourth dataset, 0066's gradient shape. But
+**the sealed block scores above the block before it and above everything after
+it**: it is a local maximum, not a point on the curve.
+
+    val    -> private  +0.01924
+    sealed -> private  +0.04226
+    difference          ~0.023   <- the seal's own easiness, not the horizon
+
+> **Quote +0.019 as this dataset's horizon decay, not the seal's +0.042.** The
+> sealed gap overstates it about twofold. The caution was registered in 0075
+> *before* the upload, and this is the measurement that earns it. The mechanism —
+> why the sealed block is easy — is **still not established**; it carries a 12%
+> higher fraud rate and slightly *worse* entity coverage, and neither explains it.
+
+**0061's pattern holds a third time and is nearly gone**: ours +0.02869 public →
+private against the field median's +0.03031, where Rossmann and Restaurant were
+30-40% smaller than the field. Two reasons not to lean on it — the field's own
+decay grows as score falls (best +0.0223, median +0.0303), so decays are not
+comparable across levels; and a below-median team moving up 153 places is what
+regression to the mean predicts, which 0061 already named as not ruled out.
 
 ### The finding: visibility, not dtype — and it is 49 for 49
 

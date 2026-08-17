@@ -2,8 +2,10 @@
 
 - **Date:** 2026-08-17
 - **Status:** accepted (a measurement — the first run on IEEE-CIS Fraud Detection,
-  at unchanged defaults). **Two of my six registered predictions are refuted and
-  the refutation is the finding.**
+  at unchanged defaults, scored externally). **Two of six registered predictions
+  refuted and the refutation is the finding; the remaining four confirmed.**
+  Private **0.899498**, public **0.928187**, rank ~4354/6355. **This board is now
+  spent** (one submission, per the plan the run was built to).
 - **Related:**
   [0073](0073-the-ruler-is-mispriced-on-one-dataset-and-three-mechanisms-failed-to-say-why.md)
   (which found that no model here is ever told a column is categorical, and warned
@@ -267,21 +269,83 @@ modelling:
   entry would never have been shown to anyone. The dictionary was well-formed and
   the text was correct. 0050's shape in the reporting layer again.
 
-## Predictions 5 and 6 are open, deliberately
+## Predictions 5 and 6: both confirmed, and the board is now spent
 
-**5** predicted a private score between 0.88 and 0.91, below the median 0.91096.
-**6** predicted the sealed AUC would exceed the private one.
+One submission was made. **Private 0.899498, public 0.928187.**
 
-`_runs/ieee_v1/submission.csv` is written — 506,691 rows, `isFraud` from 0.00004 to
-0.99996, mean 0.03494 against the data's own rate of 0.0350 — and **not uploaded**.
-Both predictions need Kaggle and neither may be quietly reinterpreted afterwards.
+**5 — confirmed.** Predicted "private between 0.88 and 0.91, below the median
+0.91096". It landed at 0.899498, inside the interval and **0.01146 below the
+median**, at rank ~4354/6355 (top 69%).
 
-The plan this run was built to is **one submission, and then the board is spent**.
-A finished competition returns a private score on every late submission, so that
-seal is self-imposed discipline and nothing else — which is exactly how 0045
-happened. Whoever uploads it should record the number against predictions 5 and 6
-as written, including if 5 is refuted on the high side, which the sealed 0.94176
-makes a live possibility.
+**6 — confirmed.** Predicted the sealed AUC would come back above the private one.
+Sealed 0.941757 against private 0.899498: **the seal was optimistic by +0.04226.**
+
+**The board is spent from here.** A finished competition returns a private score on
+every late submission, so this seal is self-imposed discipline and nothing else —
+0045 is the record of what happens without it.
+
+## The gradient, and the seal is a local peak rather than a step on it
+
+Four windows in time order, each the harness's own reading of itself:
+
+| window | rows | AUC |
+|---|---|---|
+| val (days 161.9–172.0) | 29,527 | 0.91874 |
+| **sealed (days 172.0–183.0)** | 29,527 | **0.94176** |
+| *30-day gap, no rows released* | | |
+| public (nearer half of the test block) | ~254k | 0.92819 |
+| private (further half) | ~253k | 0.89950 |
+
+0060's law is that each window flatters the next, and from `sealed` onward it holds
+exactly — 0.94176 → 0.92819 → 0.89950, monotone in distance from training, which is
+0066's gradient on a fourth dataset.
+
+**But the sequence is not monotone at its start.** The sealed block scores *above*
+the block immediately before it and above everything after it. It is a local
+maximum, not a point on a decay curve, and that is the anomaly this record flagged
+before the submission and could not explain.
+
+The decomposition is worth writing down, because it says which number is quotable:
+
+| | |
+|---|---|
+| val → private | **+0.01924** |
+| sealed → private | +0.04226 |
+| **difference, i.e. how much the seal's own easiness contributes** | **≈ +0.023** |
+
+> **Roughly half of the seal's 0.042 optimism is the sealed block being unusually
+> easy, not the horizon being far away.** So this dataset's horizon decay is
+> +0.019 (val) or +0.029 (public → private) — **not** the +0.042 the sealed number
+> invites. Quoting the sealed gap as horizon decay would have overstated it about
+> twofold.
+
+The caution registered here before the upload — *"if the seal is anomalously easy
+for a reason nobody has named, that gap is inflated and must not be quoted as this
+dataset's horizon decay"* — is the thing this measurement most clearly earns. The
+mechanism is still not established.
+
+## 0061's pattern holds a third time, and is nearly gone
+
+On Rossmann and Restaurant the field degraded more from public to private than we
+did. Third instance:
+
+| | public → private |
+|---|---|
+| **ours** | **+0.02869** |
+| field median | +0.03031 |
+| field top 10% | +0.02502 |
+| field best | +0.02226 |
+
+Directionally the same and **much weaker**: Rossmann was +0.0147 field against our
++0.0088 and Restaurant +0.0446 against our +0.0310 — decays 30–40% smaller than the
+field's. Here it is 5%. We move from rank ~4507/6355 public (top 71%) to ~4354/6355
+private (top 69%), which is 153 places.
+
+Two things keep this from being evidence for much. The field's own decay **grows as
+score falls** (best +0.0223, top 10% +0.0250, median +0.0303), so a decay figure is
+not comparable across score levels without care. And a below-median team moving
+slightly up is what regression to the mean predicts — which 0061 named as not ruled
+out, and this instance does nothing to rule out.
 
 ## Limits
 

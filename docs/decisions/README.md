@@ -83,7 +83,7 @@ seeing as a list rather than discovering one record at a time:
 - [0074](0074-a-categorical-declaration-is-a-fitted-step-not-a-flag.md) — proposed, with its own build order.
 
 **A note on `Status:`.** The header field is free text and has accumulated about
-twenty distinct spellings across 74 records (`accepted`, `accepted, implemented`,
+twenty distinct spellings across 76 records (`accepted`, `accepted, implemented`,
 `accepted (a measurement)`, `built, measured, and the measurement is negative`,
 …). So the corpus cannot answer "is this a rule I must honour, a measurement, or
 an unbuilt plan" without being read. This table is the workaround; a fixed
@@ -520,7 +520,14 @@ sections above.
   beat every member on both blocks (0044, fifth dataset, first on a
   higher-is-better metric). And a terminal fit — `elasticnet` — was attempted, ran
   at least 45 of the run's 93 minutes, was discarded, and **left no trace anywhere
-  in the journal**)*
+  in the journal**. Scored externally at **private 0.899498 / public 0.928187**,
+  rank ~4354/6355, 0.011 below the private median — predictions 5 and 6 both
+  confirmed. The four windows in time order read 0.91874 val, **0.94176 sealed**,
+  0.92819 public, 0.89950 private: monotone from the seal onward (0060 on a fourth
+  dataset) but **the seal is a local peak, not a point on that curve**, and about
+  half its 0.042 optimism is its own easiness rather than distance — so this
+  dataset's horizon decay is +0.019, and quoting the sealed gap would have
+  overstated it twofold. **The board is now spent**)*
 
 ### What the winners had
 
