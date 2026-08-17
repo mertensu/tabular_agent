@@ -82,22 +82,82 @@ agent-chosen encoding the only route from a categorical to a model, then measure
 that route with a ruler that overpays for it.** Not settled that declaring them
 helps; the probe cannot be the instrument that judges it.
 
-### THE PLAN FOR THE NEXT CONTEXT — one script, and it is already written
+### THE PLAN FOR THE NEXT CONTEXT — a fifth dataset, and Ulf has already downloaded it
 
-**Point `probe_ruler_budget_rank.py` at `restaurant_v1`.** No new machinery,
-~30 min. Rossmann carries ~821 rows per store, Restaurant ~274. If capacity
-substitutes for an encoding only once it has enough rows per group to learn the
-effect by splitting, Restaurant's steps should flip too, **at a budget above
-3000 @ 0.03**. Decisive both ways: flips appear and the mechanism is general and
-nameable without a dataset; nothing moves and the effect is a Rossmann property,
-the panel stays unbuilt, and **0070's architecture answer returns to the front**.
+> Ulf: *"see fraud_detection folder, tackle this in a fresh context"*
 
-Register the prediction first, and **screen flips by magnitude** — the omission
-that cost this session's falsifier.
+**Why a new dataset at all.** Both large boards are spent (Rossmann 0045,
+Restaurant 0066), so the harness currently has **no way to check its own answer** —
+which is a worse position than being 0.008 above a median. A finished competition
+with both leaderboards on disk gives one clean read.
 
-**Still open, unchanged:** step 2, the stability-check hole (tests row-locality,
-not batch-independence; measure what a widened check would newly refuse *before*
-changing it). Model configuration stays blocked behind 0054's open item.
+**`fraud_detection/` — IEEE-CIS Fraud Detection, complete.** Inspected, not yet
+touched. Nothing written for it yet: **`scripts/prep_ieee.py` does not exist.**
+
+| | |
+|---|---|
+| `train_transaction` | **590,540 rows x 394 cols** |
+| `train_identity` | 144,233 rows x 41 cols — **only 24% of transactions**, so LEFT join |
+| `test_transaction` / `test_identity` | 506,691 / 141,907 |
+| target | `isFraud`, **3.50% positive** (20,663) |
+| metric | **AUC — already in `SUPPORTED_METRICS`**, no metric work |
+| ordering | `TransactionDT`, in **seconds** |
+| train span | 182 days | 
+| **gap train end -> test start** | **30.0 days** |
+| test span | 183 days |
+| private board | 6,355 teams, best 0.94588, top 10% 0.92819, **median 0.91096** |
+| public board | best 0.96814, top 10% 0.95321, median 0.94127 |
+
+**The 30-day gap is the point, and it is not a nuisance.** `TaskSpec.forecast_horizon`
+is expressed *in the ordering column's units*, so with `split_on="TransactionDT"` it
+is **2,592,000**, not 30 — 0051 forbids guessing units and this is where that bites.
+It also puts [0064](docs/decisions/0064-month-ahead-is-the-same-idea-and-does-not-get-the-same-tool.md)
+directly under test: 0064 refused a `gap` argument on `fit_history` on the grounds
+that the asymmetry belongs to the **evaluation geometry**. Here the geometry has a
+real 30-day gap, so that refusal either holds or it does not.
+
+**What this dataset is being used to probe** (it is an instrument, not a target —
+`CLAUDE.md`):
+
+1. **0073's mechanism, n=2.** `card1` and friends are thousands of distinct values
+   on 590k rows — the high-cardinality identity structure the mispricing was about.
+   It appeared on Rossmann and on none of the other three datasets.
+2. **Today's categorical finding.** This table is *full* of string categoricals
+   (`ProductCD`, `card4/6`, `P_/R_emaildomain`, `DeviceInfo`, `id_30/31/33/34`) and
+   `_feature_frame` drops every one of them. The only route to them is an agent
+   encoding — the exact defect recorded in 0073's "what was rejected".
+3. **0054's open item 2.** Whether the terminal fit's 200 trees is visibly part of
+   why a run lands mid-table, on a board that can actually say so.
+4. **0060 / 0061.** The field decays ~0.030 AUC public -> private (median 0.94127 ->
+   0.91096). We decayed *less* than the field on both previous datasets; this is the
+   third test of that.
+
+**Build order:**
+
+1. **`scripts/prep_ieee.py`**, modelled on `prep_rossmann.py`: the LEFT join on
+   `TransactionID`, the typing, `ABOUT` / `COLUMN_NOTES`, `METRIC="auc"`,
+   `SPLIT_ON="TransactionDT"`, and `leaderboard(private=True)` /
+   `leaderboard_rank(score, private=True)` reading **both** CSVs from disk — per
+   0061, defaulting to private. Dataset knowledge lives **only** here.
+2. **One run at current defaults.** Register predictions in the runner's docstring
+   *before* it starts.
+3. **One submission. Then the board is spent** — write that down at the time. A
+   finished competition returns a private score on every late submission, so the
+   seal here is self-imposed discipline and nothing else. That is exactly how 0045
+   happened.
+
+**The gotcha that this session paid for:** AUC differences of ~0.002 on a
+3.5%-positive target are **noise**, not findings. Porto Seguro produced 9 of 19
+spurious flips that way and contaminated 0073's headline until they were screened
+out. Screen every comparison on this dataset by magnitude before believing it.
+
+**Deferred, not dropped:** pointing `probe_ruler_budget_rank.py` at `restaurant_v1`
+(Rossmann ~821 rows/store vs Restaurant ~274; if capacity substitutes only once
+there are enough rows per group, Restaurant should flip at a budget above
+3000 @ 0.03). IEEE-CIS answers the same question on fresher evidence, so it goes
+first. Also still open: step 2, the stability-check hole (tests row-locality, not
+batch-independence; measure what a widened check would newly refuse *before*
+changing it).
 
 ### Quiz debt
 

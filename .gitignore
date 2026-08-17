@@ -32,6 +32,13 @@ seguro_driver_prediction/
 # `test_joined.parquet` are built from them by `scripts/prep_restaurant.py` —
 # regenerate them rather than looking for them here.
 restaurant_visitor/
+# `fraud_detection/`: ieee-fraud-detection. 1.3GB — `train_transaction.csv` is
+# 652MB on its own — plus **both** leaderboards, which is what makes 0061's
+# private-by-default rule available here from the start. The identity tables cover
+# only 24% of transactions, so the join is a LEFT join and the NaNs are real.
+# `scripts/prep_ieee.py` will build the joined parquets; regenerate them rather
+# than looking for them here.
+fraud_detection/
 
 # Secrets — API keys live here and must never be committed.
 .secrets/
