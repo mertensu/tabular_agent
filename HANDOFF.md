@@ -8,7 +8,134 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-17 (latest) — START HERE. The ruler is mispriced, on one dataset, and we do not know why
+## 2026-08-17 (latest) — START HERE. The fifth dataset ran, and the index was rebuilt
+
+**Machine:** MacBook Air | **Branch:** master | **no `src/` change** |
+**fresh context starts here.** Two new records:
+[0075](docs/decisions/0075-every-declared-categorical-it-could-see-it-used-and-every-one-it-could-not-it-ignored.md)
+(the run) and
+[0076](docs/decisions/0076-a-fitted-aggregate-loses-coverage-exactly-as-its-key-becomes-worth-having.md)
+(what the winners had that we cannot express). Read 0076 first — it is the one that
+names an unexamined decision rather than measuring a known one.
+
+> **`_runs/ieee_v1/submission.csv` is written and NOT uploaded.** Registered
+> predictions 5 and 6 need it. **One submission, then the board is spent** — write
+> that down at the time (0045 is what happens otherwise).
+
+### What was built
+
+`scripts/prep_ieee.py` and `scripts/run_ieee_v1.py`, both new. The run: 24 tables,
+4 terminal fits, 93.1 min, agent finalized itself, six predictions registered in
+the runner's docstring beforehand.
+
+| | |
+|---|---|
+| work table, same ruler | 0.89604 |
+| best table `t18` | 0.91734 |
+| blend, val / **sealed** | 0.91874 / **0.94176** |
+| private board | median 0.91096, top 10% 0.92819, best 0.94588 |
+
+### The finding: visibility, not dtype — and it is 49 for 49
+
+All 31 declared-categorical **strings** were encoded. The 6 declared **numerics
+inside the first 100 columns** (`card1`, `card2`, `card3`, `card5`, `addr1`,
+`addr2`) were encoded. The 12 declared numerics **past column 100** — `id_13`,
+`id_14`, `id_17`-`id_22`, `id_24`-`id_26`, `id_32` — were touched by nothing.
+
+`MAX_REPORTED_COLUMNS = 100` truncates the profile and column 100 here is `V45`,
+so the identity block falls off. But `non_numeric_columns` is **not** truncated, so
+a bare name in a refusal list — no dtype, no cardinality, no description — was
+enough for the agent to act on. **The 12 it missed are invisible in both channels
+at once.** Predictions 1 and 3 both refuted; 2 and 4 confirmed.
+
+**Do not "fix" the cap before measuring what raising it changes.** Not raising it
+is what produced the clean split.
+
+### 0076, and it is the one worth not re-deriving
+
+The winners' whole solution is one key — `card1_addr1_D1n` — and **a run could
+build it today**; `transform_features` does the arithmetic and the agent already
+built `c1_addr` unprompted. What we cannot do is their next line: aggregate over
+`concat(train, test)`. Measured on our own files:
+
+    card1        98.2% of test rows covered by a train-fitted aggregate
+    card1_addr1  81.7%
+    their uid    21.0%   -> 79% of rows get default_
+
+**Coverage collapses in exactly the direction that makes the key worth having.**
+And the sealed holdout reports that same key at **43.0%** — twice its real reach,
+which is 0060's shape arriving in *coverage* rather than in score.
+
+The argument: **0011 refuses leakage and transduction under one rule, and they are
+not the same thing.** No fix is proposed and none should be read in. The one thing
+recommended without reservation: **`fit_group_stats` should report its coverage.**
+
+### Three other things from the run
+
+- **`elasticnet` vanished without trace.** Attempted, ran ≥45 of the 93 minutes,
+  discarded, and the journal contains no mention of it — the bundle has 3 models,
+  `experiments/` has `e1`-`e4`. The skip is by design; the silence is 0015's
+  subject unreported. Wants its own record and a one-line fix.
+- **The seal came back EASIER than validation**, −0.021 to −0.033 on all four
+  candidates, against 0060. Sealed carries a 12% higher fraud rate and slightly
+  *worse* entity coverage; neither obviously explains it. **Left unexplained on
+  purpose** — 0058 is the record of adopting a mechanism that was really composition.
+- **18 of 20 comparisons `sign_stable: False`, 9 accepted as improvements.** The
+  most extreme yet (Restaurant v1 was 6 of 17). 0073's registered gotcha, on time.
+  Also: the three families disagree by **0.025** on the same table, more than the
+  entire feature chain was worth (0.021).
+
+### The decisions README was rebuilt, and every annotation is intact
+
+50 of 74 records had ended up in one section whose title stopped describing it
+around 0040. Now: a **"Where each thread stands"** routing table above the index
+(one row per live question, naming the record that holds it and the reading order
+behind it), an **"Accepted and not built"** list, and the big section split into
+five. Verified by diffing sorted line sets — the only old line that does not
+survive is the renamed heading.
+
+**Checked while doing it:** 0047/0048 say `not implemented` and that is now half
+stale — `TaskSpec.forecast_horizon` exists and gates window lengths
+(`encoders.py:1686`) and stream leads (`tools.py:1281`). Headers left alone per the
+never-edit rule; the correction lives in the routing table.
+
+**Still open, and it is Ulf's call:** a fixed `Status:` vocabulary for *new*
+records (`decision | measurement | design`, plus built-or-not). The field currently
+has ~20 spellings across 76 records, so nothing can answer "is this a rule I must
+honour" without being read.
+
+### Also on disk, and worth reading before anything else here
+
+`fraud_detection/winner.md` and `fraud_detection/xgb-fraud-with-magic-0-9600.ipynb`
+— the 1st-place writeup and notebook. Beyond 0076, three things in them this
+project has circling records about and no build:
+
+1. **"Time consistency."** Train one model on **one feature**, first month, predict
+   the last month; drop it if either AUC is below 0.5. 19 of their 242 features
+   failed. This is exactly what 0069 said the criterion should be and did not
+   build, and the same object as 0059's interval — but per column, and cheap.
+2. **Never one validation strategy.** Train 4/skip 1/predict 1; 2/2/2; 1/4/1;
+   GroupKFold by month; and the public LB reframed as *"just train 6, skip 1,
+   predict 1 and no less valid than other holdouts."* Five sessions have gone into
+   making our **one** ruler trustworthy. Their answer is not a better ruler.
+3. **D-column normalisation.** `D15n = D15 - TransactionDT/86400` turns a timedelta
+   that grows with time into a fixed point, so it stops drifting between train and
+   test. Expressible today; our agent built `tdt_day` and never made the link.
+
+**Stays out** (`CLAUDE.md`): their V-column PCA, the 19 named drops, the UID formula
+itself.
+
+### Quiz debt
+
+**None asked this session.** Backlog now: this session's run and both records, the
+two passes from the previous session, slice 3, 0041/0042/0044, house-prices
+capacity, the three blocks from 08-16. **No notebook again** — CLAUDE.md is explicit
+that this is the largest outstanding item, and it has now been outstanding for four
+sessions.
+
+---
+
+## 2026-08-17 — The ruler is mispriced, on one dataset, and we do not know why
 
 **Machine:** MacBook Air | **Branch:** master | **no `src/` change** |
 **fresh context starts here.** The plan's measurement is **done**. New record:
