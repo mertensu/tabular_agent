@@ -33,12 +33,43 @@ split, at 0068's budget, and scored on v7's sealed holdout.
 way to decline the `_latest` / `_latest_ago` pair. 0049 and 0050 measured the
 *direction* of this; nobody had measured the **price on a table worth having**.
 
-### THE OBVIOUS NEXT STEP, and deliberately not taken yet
+### THE PLAN FOR THE NEXT CONTEXT — Ulf's call, and the order is part of it
 
-**Do not just add the flag.** n=1, one dataset, one ablation — that is the record
-this project keeps breaking. Restaurant's `t7` is on disk and can carry the same
-ablation in about an hour. Do that first, then the few-line change to `fit_history`,
-then a record.
+> *"ja, mach 1 und 2 — aber erst das notebook und alles aber in frischem Kontext"*
+
+**Step 0 is the notebook, and it comes before any library code.** This is not
+ceremony: nine blocks of notebook/quiz debt are owed, and every wrong turn in the
+last two sessions was caught by a measurement that could have been a plot first.
+Ulf said the same thing about trend extrapolation earlier — *"bislang kann ich mir
+nicht vorstellen wie das umgesetzt wird"* — and the answer both times is to drive it
+by hand before building it.
+
+1. **Notebook: what the `_latest` pair does.** Drive `fit_history` by hand on
+   Rossmann, show the four columns it returns for a one-column request, plot
+   `Store_Sales_latest` against the target for a few stores, and show the ablation
+   (0.14098 → 0.12670) as a before/after. Style of
+   `notebooks/phase3_harness_step1.ipynb`: hand-driven first, ships unexecuted,
+   every cell smoke-tested in order. **Then quiz Ulf on it.**
+2. **Confirm on a second dataset, then fix.** Restaurant's `t7` is on disk and
+   carries the same ablation in about an hour. **Do not skip this** — n=1 is the
+   record this project keeps breaking, and 0069 is the freshest example. Then the
+   few-line change to `fit_history` (make the pair optional), then a record.
+3. **The stability-check hole** (see below). Its own notebook, its own record: it
+   is about `leakage-safe by construction` being false for a whole column class,
+   not about score. Widening the check changes what *every* existing transform may
+   do, so measure what it would newly refuse before changing it.
+
+**Not next, and the reasons are measured, not guessed:** model configuration is
+blocked behind 0054's open item (0068 measured `val` choosing the budget wrongly on
+both datasets, and any config search inherits that ruler); feature selection is
+0069's null; trend extrapolation is not in the winner's main model at all (0070's
+correction).
+
+**And a standing caution.** His ~0.105 is ~0.027 beyond us and no measured lever in
+this project exceeds 0.014. Chasing it means adopting `colsample_bytree=0.3` and
+segment models *because they worked on Rossmann*, which is exactly what 0022 and
+`CLAUDE.md` forbid. **The private median (0.12967) is ~0.002-0.003 away and is a
+legitimate health check; 0.105 is not a goal.**
 
 ### Two findings nobody was looking for
 
