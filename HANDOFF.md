@@ -8,7 +8,140 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-16 (latest) — START HERE. Capacity measured on the table that ships: +0.0068, not +0.06
+## 2026-08-16 (latest) — START HERE. The winner's writeup arrived, and it moved the priorities
+
+**Machine:** MacBook Air | **Branch:** master | **fresh context starts here.**
+Three new records: [0068](docs/decisions/0068-capacity-reaches-the-shipped-blend-at-half-strength-and-validation-picks-the-wrong-budget.md),
+[0069](docs/decisions/0069-feature-selection-pays-on-columns-that-mislead-not-on-columns-that-are-idle.md),
+[0070](docs/decisions/0070-what-the-winner-had-that-we-cannot-express.md).
+**Read 0070 first** — it is the one that changes what to do next.
+
+### THE PLAN FOR THE NEXT CONTEXT — and it changed twice at the end of the session
+
+Ulf's first call was **build per-group trend extrapolation** (0070 item 1, 0058
+item 2): a per-group linear model fitted on a trailing window and **extrapolated
+into the forecast window**, which names no dataset because a GBDT cannot
+extrapolate past the range it trained on. He asked for a fresh context and for the
+**notebook to come second, before the library code**, because he wants to see the
+fitted line against the actual later values before anything is built.
+
+**Then he asked whether it would reach the top 10%, and checking the answer moved
+the plan.** It will not, and his own feature dict says so:
+
+    'linmod_quarterly':[0,0,0,1],'linmod_yearly':[0,0,0,1]
+
+The bits are `[salesmodel, customermodel, MA-models, pmd-variant]`. **The trend
+features are not in his main model at all** — only in the previous-month-date
+variant of the month-ahead models, the branch he calls "almost as good". 0070 had
+ranked this "the largest unbuilt item"; that is corrected in the record, along with
+the reason it happened.
+
+> **So the next step should be a measurement, not a third guess.** Rebuild his
+> **salesmodel** feature set by hand in `scripts/`, fit one model at a real budget,
+> score it on our sealed holdout. Decisive both ways: near his ~0.105 and the gap
+> is vocabulary and we learn which columns carry it; near our ~0.138 and the gap is
+> **not** vocabulary, and every capability list including 0070 is beside the point.
+
+Two rankings were attempted today (feature selection, trend extrapolation) and both
+were wrong, both because a lever was sized from a description instead of measured.
+Every lever this project has actually measured is 0.0037–0.0068; the gap to the
+private top 10% is 0.0204.
+
+**Also from that dict, and it cuts against this project's direction:**
+`'store':[0,0,1,0]` — **his main model has no store identity.** He excluded it
+deliberately, worried that competition distance would proxy for it. 0054 measured
+per-entity identity as the mechanism that makes capacity pay (+0.0004 → +0.0283 on
+restaurant once the model could tell shops apart). Unresolved tension, worth
+holding in mind.
+
+Trend extrapolation stays a real gap and a legitimate build — just not on the
+grounds that it is the biggest one.
+
+### Why the other two threads are closed for now
+
+**Capacity (0068).** Measured on what actually ships — the terminal blend on the
+sealed holdout, not one probe lgbm on validation.
+
+| | single lgbm (probe) | blend (sealed) |
+|---|---|---|
+| Rossmann `t13` | +0.00682 | **+0.00373** |
+| Restaurant `t7` | +0.00186 | **+0.00197** |
+
+So capacity closes ~**44%** of Rossmann's gap, not the 80% the last plan assumed.
+All four controls passed (both 200-tree arms reproduce their source journals to six
+decimals, `elasticnet` unmoved, the probe sweep replayed 0067 digit-for-digit).
+
+> **And the part that outlives the numbers: `val` picks the wrong budget.** On
+> Rossmann `val` ranks `5000@0.03` best while the sealed rows rank `1000@0.10`
+> best; on Restaurant every budget makes `val` worse and sealed better. **Every
+> design for 0054's open item 2 that lets validation choose is refuted before being
+> built.** Early stopping is refuted too, twice (1195 rounds → +0.0028 on `t13`;
+> 1498 rounds → −0.0002 on `t7`). The three families also disagree with each other
+> consistently across both datasets, so one common budget is the wrong shape.
+
+**Feature selection (0069).** Built (`tools.select_features`), tested, measured at
+~zero on three tables, and **deliberately not on the agent's tool surface** —
+`EXPECTED_TOOLS` records the omission as intentional so nobody "fixes" it. Two of
+my designs were wrong and both were caught by measurement:
+
+- a selection block cut as a **fraction** is six months where the run is graded
+  over 45 days → −0.020 on Rossmann (0043/0060, third instance today);
+- ranking subsets **individually** is an argmax whose margin (0.0071) is thinner
+  than the block's own noise (block sd 0.0050) → −0.0026, `sign_stable: False`.
+
+> The finding is why: **a boosted tree loses almost nothing to a useless column, so
+> removing one wins almost nothing back.** Dropping nine pure-noise columns moves
+> the score by 0.0014. The winner's problem was different — *"the spread features
+> made overfitting easy"* — columns that fit the training period and **do not
+> transfer**. If this is picked up again, the criterion is stability across several
+> consecutive blocks (0059 one level down), not a score on one.
+
+### The number from the winner's writeup that reframes everything (0070)
+
+> *"Most of the individual XGBoost models already achieve around **0.105** on the
+> private leaderboard."*
+
+That is rank **~3 of 3,300** for a single un-ensembled model. His whole ensembling
+apparatus — 500 random models, ~125,000 scored pairs, 10+ members — took him from
+0.105 to 0.10021, i.e. **0.005**. We are 0.033 behind his *simplest* model, and this
+project has spent 0044, 0045 and part of 0068 on the blend.
+
+**Four things we cannot express** (0070): per-group trend extrapolation; shape
+statistics beyond mean/std/median (he used skew, kurtosis, harmonic mean, p10);
+forward-looking calendar windows (`holidays_nextweek` — a second input known in
+advance); and feature subset selection. **One thing we can express and throw away:**
+`fit_group_stats` explicitly supports a value column absent at predict time, and
+every Rossmann run drops `Customers` rather than building its per-store aggregate.
+
+**Vindicated:** 0064's refusal of month-ahead models — he reports them "almost as
+good", never better. **Still out:** external weather (0001), the 0.985 multiplier.
+**Do not read his method as licence to loosen 0023** — he selected 125,000 pairs on
+his last six weeks with no sealed split and was surprised it held.
+
+### Gotchas
+
+- `_validation_span` guards a `TypeError`: dates read from a **CSV** are strings,
+  which sort (so the run is ordered) but do not subtract. Unguarded, that crashed
+  `select_features` on a legal configuration. A test pins the fallback.
+- `scripts/probe_capacity_terminal_blend.py` layers the budget **on top of** the
+  params `_terminal_fits` passes. Patching the library default alone would leave
+  the blend's lgbm member at 200 trees, because `PROBE_PARAMS` pins it — an arm
+  that looks like a blend at budget and is not.
+- Two probe scripts here copy the source run's split rather than recutting it, and
+  drive the real `finalize_run`. Keep doing that; it is what made the controls
+  possible.
+
+### Owed, and the debt grew
+
+**Quizzes for every block this session** (capacity-on-blend, the winner audit,
+feature selection) on top of the five already owed, plus slice 3, 0041/0042/0044
+and house-prices capacity. **No notebook was written this session** — 0062 step 6 is
+still open too. CLAUDE.md is explicit that code Ulf has not followed is a failure
+even with green tests, and that is now the largest outstanding item in this file.
+
+---
+
+## 2026-08-16 — Capacity measured on the table that ships: +0.0068, not +0.06
 
 **Machine:** MacBook Air | **Branch:** master | **553 tests pass** | **fresh context starts here.**
 Written up as [0067](docs/decisions/0067-capacity-is-worth-a-tenth-of-that-on-a-table-that-has-features.md).

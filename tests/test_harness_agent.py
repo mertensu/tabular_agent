@@ -36,6 +36,11 @@ EXPECTED_TOOLS = {
     # the column would be built from knowledge no scored row could have.
     "fit_stream_aggregate",
     "transform_features",
+    # NOT here on purpose: `tools.select_features` exists and is tested, and is
+    # deliberately **not** on the agent's surface. It was built, measured on three
+    # tables and bought nothing (0069) — a tool that costs a table from the run's
+    # budget and returns noise is worse than no tool. The library function stays
+    # so the next attempt starts from a measured thing rather than a blank page.
     # Runs agent-written code that *can* see the target, which is only safe
     # because nothing it produces is replayed: it selects work-half rows to fit
     # on, and the validation half never passes through it.

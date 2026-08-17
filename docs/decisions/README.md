@@ -326,6 +326,37 @@ Vocabulary used throughout:
   bounded now and together they do not close the gap.** Also: the inner-tail
   early-stopping arm under-shoots badly here (1195 rounds, +0.0028), which is
   evidence about 0054's open item 2 rather than an answer to it)*
+- [0068 — Capacity reaches the shipped blend at half strength, and validation picks the wrong budget](0068-capacity-reaches-the-shipped-blend-at-half-strength-and-validation-picks-the-wrong-budget.md)
+  *(0067's knob, measured on what actually ships — the terminal blend on the sealed
+  holdout, not one probe lgbm on validation. Rossmann **+0.0037** against the
+  probe's +0.0068; Restaurant nothing. Capacity closes ~44% of Rossmann's gap, not
+  80%. **The finding that outlives the numbers: `val` and the sealed rows disagree
+  about which budget is best on Rossmann and disagree in sign on Restaurant**, so
+  every design for 0054's open item 2 that lets validation choose is refuted before
+  being built. The three GBDT families also disagree with each other, consistently
+  across both datasets, so one common budget is the wrong shape)*
+- [0069 — Feature selection pays on columns that mislead, not on columns that are idle](0069-feature-selection-pays-on-columns-that-mislead-not-on-columns-that-are-idle.md)
+  *(the first tool that makes a table **narrower**, built from the Rossmann
+  winner's report and measured at ~zero on three tables. Two of my designs were
+  wrong and both were caught by measurement: a selection block cut as a *fraction*
+  is six months where the run is graded over 45 days (0043/0060 again), and ranking
+  subsets individually is an argmax whose margin is thinner than the block's own
+  noise (0023 one level down). The finding is why: **a boosted tree loses almost
+  nothing to a useless column, so removing one wins almost nothing back** — the
+  winner's problem was columns that fit the training period and do not transfer.
+  Built, tested, and deliberately **kept off the agent's tool surface**)*
+- [0070 — What the winner had that we cannot express](0070-what-the-winner-had-that-we-cannot-express.md)
+  *(the distillation `HANDOFF.md` had carried as a todo for two weeks, done against
+  the tool vocabulary. **One of his un-ensembled models scores ~0.105 private, rank
+  ~3 of 3,300; his entire ensembling apparatus was worth 0.005.** Four capabilities
+  missing — and the record deliberately **refuses to rank them**, because two
+  attempts to rank a lever from a description failed the same day. His feature dict
+  puts the trend features outside his main model, and puts **no store identity** in
+  it either, which is in tension with 0054. Recommends measuring instead: rebuild
+  his salesmodel by hand in `scripts/` and find out whether the gap is vocabulary at
+  all. Also: we can already express a per-store aggregate of a train-only column and
+  throw it away in every Rossmann run. Vindicates 0064's refusal; leaves 0001 and
+  the 0.985 multiplier out)*
 
 ### Keeping the agent's surface small
 
