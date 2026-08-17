@@ -8,7 +8,116 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-17 (latest) — START HERE. The notebook is written and the pair is confirmed on a second dataset
+## 2026-08-17 (latest) — START HERE. The rule landed: a feature is an average, not a row
+
+**Machine:** MacBook Air | **Branch:** master | **576 tests pass** (was 573) |
+**fresh context starts here.** Steps 0 and 1 of the plan are **done and shipped**;
+step 2 is untouched. New record: [0072](docs/decisions/0072-a-feature-is-an-average-over-a-stretch-not-the-value-of-one-row.md).
+
+> **`fit_history` emits trailing windows and nothing else** — no last-known pair,
+> no lags. `windows` is required.
+
+Ulf, arriving at it from the general direction rather than from the measurement:
+*"features die auf dem wert eines tags (einer row) beruhen sollten nicht
+existieren, wenn sollten es (rolling)averages sein, die sind viel stabiler."*
+
+**The mechanism, which is why this is not merely a variance argument.** The
+per-fold freeze (0048) is *correct* and therefore silent: a single stored
+observation takes 4,041 distinct values across the folds a model **trains** on and
+is one frozen per-group constant for every row it is **served**. The model learns
+a feature and is handed a constant of the same name. On Rossmann the one draw fell
+on 1 May 2015, when 1,095 of 1,115 stores were shut, so 98% of stores were served
+a zero. No guard can fire: 0011 sees batch independence, 0030 sees servability,
+the fold logic sees no future.
+
+| | probe | interval | sealed |
+|---|---|---|---|
+| Rossmann (0071) | +0.01428 | 5/5, `sign_stable: True` | ~ |
+| **Restaurant** (`scripts/probe_restaurant_latest_pair.py`) | **+0.00216** | 4/5, **not stable** | **+0.00349** |
+
+Control passed: the `with_pair` arm reproduces v2's blend val 0.519707 / sealed
+0.505713 to six decimals. **The mechanism transfers, the price is a lottery** —
+Restaurant's freeze is an ordinary Saturday.
+
+### The finding nobody was looking for, and it sharpened the rule
+
+The offset half was measured rather than argued, and it says something better:
+
+| key | point `364_ago` | window 364-median | obs |
+|---|---|---|---|
+| `Store` | 0.8292 | **0.8184** | 337 |
+| `Store × DayOfWeek × Promo` | 0.8292 | **0.9500** | 27 |
+
+> **A window is not automatically better** — on the coarse key it is *worse* than
+> the lag. And the point lag is identical on both keys because 364 days is 52
+> weeks: its strength is borrowed, it smuggles a grouping key in through the
+> distance. So the rule is not "averages beat points"; it is **comparability
+> belongs in the key**, and a lag is a key expressed as a distance.
+
+Honest limit: correlations on served rows, not probe differences with intervals —
+one level weaker than the `_latest` reading. Recorded as such.
+
+### Two other things that contradict what this file believes elsewhere
+
+- **Sealed came back *larger* than probe** on Restaurant (+0.0035 vs +0.0022),
+  against the probe→sealed halving 0068 found for capacity and 0071 assumed.
+- **`val` prefers the pair** while sealed does not (0.51971 → 0.52229 val;
+  0.50571 → 0.50222 sealed). 0068's signature. No default may be read off `val`.
+
+### Does this get Rossmann under the median? No, and the reason matters
+
+**v7 — our best run, 0.13813 private — has zero history steps.** This change
+cannot move it; there is no such column in that chain. It only affects *future*
+runs that build windows. The only number that already carries the rule is the
+hand-built winner rebuild: **blend sealed 0.130242**. Rossmann's own measured
+sealed→private drift is +0.0019 (t13: 0.136181 sealed, 0.13813 private), so that
+extrapolates to ~0.132 against a median of **0.12967** — still ~0.0025 short, from
+a table our agent did not build, at a non-default budget. **And it cannot be
+checked: the private board is spent (0045).**
+
+### Where the rule lives, for whoever touches this next
+
+The refusal is at the **fitting entry points**, not in `HistoryEncoder`. The class
+still computes the pair and lags, and `from_dict` defaults `latest` to `True` when
+the key is absent — because bundles written before today are shaped
+`{... 'offsets': [], 'keep': 92, 'windows': [[91.0, 'median']]}` with no `latest`
+key, and re-deriving it would hand a model **fewer columns than it was trained
+on** (0055). Four tests pin it; mutating that one default fails three with
+`KeyError` at predict time. The refusal itself is pinned as a **signature** —
+neither entry point has `offsets` or `latest` as a parameter (0018's argument).
+
+### Also done, and it is a rule worth keeping
+
+The agent-facing docstrings no longer illustrate with a retail example. Ulf caught
+*"what has this store been selling lately"* in the tool description the agent reads
+on **every** dataset. The line: **dataset names belong in comments (evidence),
+never in docstrings the agent reads as instruction (frame).** `agent.py` is clean;
+`StreamAggregateEncoder`'s "store-day table" illustrations are untouched and open.
+
+### Next: step 2, untouched
+
+**The stability-check hole** — it tests row-locality, not batch-independence, and
+accepts any column that is a function of the set of distinct keys (0071's second
+finding). Own notebook, own record, and **measure what a widened check would newly
+refuse before changing it**, because it changes what every existing transform may
+do.
+
+**Not next, unchanged and for measured reasons:** model configuration is blocked
+behind 0054's open item (0068 measured `val` choosing the budget wrongly on both
+datasets — and this session is a third instance of `val` pointing the wrong way);
+feature selection is 0069's null; trend extrapolation is not in the winner's main
+model (0070's correction).
+
+### Quiz debt
+
+Two asked and answered this session (why the per-fold freeze makes the pair
+*more* dangerous; what Restaurant could show that Rossmann's 5/5 reading cannot
+exclude). Backlog unchanged: slice 3, 0041/0042/0044, house-prices capacity, and
+the three blocks from 08-16.
+
+---
+
+## 2026-08-17 — the notebook, and the pair confirmed on a second dataset
 
 **Machine:** MacBook Air | **Branch:** master | **573 tests pass** (nothing in `src/`
 changed today) | **fresh context starts here.**
