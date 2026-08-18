@@ -116,21 +116,6 @@ def _noise(row: dict) -> float:
     return float(se) if se is not None else 0.0
 
 
-def _panel_agrees(row: dict) -> bool:
-    """Did the other evaluation geometries confirm this table's gain? (0077)
-
-    **Absent means yes.** The panel is an extra instrument, not a permission slip:
-    a run that could not compute one — no ordering column and too few rows to
-    subsample, a table that failed to score, a journal written before this
-    existed — must behave exactly as it did before rather than stalling because a
-    key it never had is missing.
-    """
-    panel = row.get("probe_panel")
-    if not panel:
-        return True
-    return bool(panel.get("agrees", True))
-
-
 def _since_improvement(rows: list[dict], higher_better: bool, min_gain_ratio: float) -> int:
     """How many of ``rows`` have passed since one of them was a real improvement."""
     incumbent = None
@@ -145,15 +130,6 @@ def _since_improvement(rows: list[dict], higher_better: bool, min_gain_ratio: fl
             # The incumbent's own uncertainty is the noise floor. A "gain"
             # underneath it is a coin flip that landed our way.
             progress = gain > min_gain_ratio * max(incumbent_noise, 1e-12)
-            # And it has to survive the other evaluation geometries (0077). The
-            # soft gate: a step the panel disagrees about does not count as
-            # progress, but it is still eligible to win `best_table` — the argmax
-            # is 0035's and this rule does not touch it.
-            #
-            # Defaults to True when absent, so a table with no panel — an
-            # unscorable one, a run too small to cut blocks, every artifact
-            # written before this existed — behaves exactly as it did before.
-            progress = progress and _panel_agrees(r)
 
         better = incumbent is None or (
             score > incumbent if higher_better else score < incumbent

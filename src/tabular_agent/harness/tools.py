@@ -30,13 +30,6 @@ from ..inspect import profile_dataframe, profile_stream
 from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import predict_model, train_cv
-from ..panel import (
-    ordered_schemes,
-    panel_agreement,
-    scheme_scores,
-    subsample_schemes,
-    work_block_edges,
-)
 from ..pipeline import Pipeline, save_bundle
 from ..probe import PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_probe, probe_predict
 from ..blend import apply_blend
@@ -549,76 +542,8 @@ def probe_table(session: RunSession, table_path: str) -> dict:
         "probe_se": None if se is None else round(se, 6),
         "probe_fit_seconds": fit.fit_seconds,
         "probe_target_transform": fit.target_transform,
-        # Computed here, where the frame and the target are already in hand and
-        # the table has just been shown to be scorable at all. Stored per table
-        # rather than recomputed per comparison: a table is the parent of several
-        # others, and refitting its panel once per child would multiply the only
-        # real cost this instrument has.
-        "probe_panel_scores": _panel_scores(session, df, X, y, spec, fit),
     }
 
-
-def _panel_edges(session: RunSession) -> list[float]:
-    """The work half's block boundaries, computed once per run and cached.
-
-    In the journal rather than in memory because a run resumes: an episode that
-    recomputed these would cut its blocks on a different set of rows than the
-    episode before it, and two tables from the same run would then be compared
-    across different periods while appearing to be compared across the same ones.
-    """
-    j = journal.load(session.run_dir)
-    cached = (j.get("panel") or {}).get("edges")
-    if cached is not None:
-        return list(cached)
-    edges: list[float] = []
-    if session.split_on:
-        try:
-            work = load_table(session.data_path)
-            if session.split_on in work.columns:
-                edges = work_block_edges(_to_periods(work[session.split_on]))
-        except Exception:  # noqa: BLE001 - a panel is a nicety; the score is not
-            edges = []
-    journal.set_panel(session.run_dir, {"edges": edges,
-                                        "kind": "horizon" if edges else "subsample"})
-    return edges
-
-
-def _panel_scores(session: RunSession, df, X, y, spec, fit) -> dict | None:
-    """This table's score under each scheme. ``None`` when no panel could run.
-
-    Never raises, for `probe_table`'s reason: the panel is an opinion about a
-    number, and failing to form one must not destroy the number.
-    """
-    try:
-        edges = _panel_edges(session)
-        if edges and session.split_on and session.split_on in df.columns:
-            schemes = ordered_schemes(_to_periods(df[session.split_on]), edges)
-        else:
-            schemes = subsample_schemes(len(df), spec.seed)
-        scored = scheme_scores(
-            X, y, schemes, spec.task_type, spec.metric, fit.target_transform
-        )
-        if not scored:
-            return None
-        sizes = {s.name: s.describe() for s in schemes if s.name in scored}
-        return {"kind": next(iter(sizes.values()))["kind"],
-                "scores": {k: round(v, 6) for k, v in scored.items()},
-                "sizes": {k: [v["n_train"], v["n_eval"]] for k, v in sizes.items()}}
-    except Exception:  # noqa: BLE001 - see the docstring
-        return None
-
-
-#: Keys the journal keeps and the agent never sees. Raw per-scheme scores are
-#: working material for the *next* table's comparison (that is why they are stored
-#: at all); what the agent needs is the verdict, which `probe_panel` already
-#: carries as signed gains. Showing both would spend the payload budget (0018) on
-#: the same fact told twice, in the units that are harder to read.
-_JOURNAL_ONLY_KEYS = ("probe_panel_scores",)
-
-
-def _agent_view(scored: dict) -> dict:
-    """The scored-table fields worth putting in front of the agent."""
-    return {k: v for k, v in scored.items() if k not in _JOURNAL_ONLY_KEYS}
 
 
 def _probe_and_compare(session: RunSession, table_path: str, source_rel: str) -> dict:
@@ -637,52 +562,7 @@ def _probe_and_compare(session: RunSession, table_path: str, source_rel: str) ->
     if before is not None:
         out["probe_vs_source_table"] = _gain(out["probe_score"], before, session.resolved().metric)
         out.update(_difference_interval(session, table_path, source_rel))
-        out.update(_difference_panel(session, out, source_rel))
     return out
-
-
-def _source_panel_scores(session: RunSession, source_rel: str) -> dict | None:
-    """The parent table's per-scheme scores, off the journal.
-
-    The work table keeps its panel on `work_probe`, derived tables on their own
-    row — the same asymmetry `_source_reference` already handles, and for the same
-    reason: nothing produced the work table, so it has no row.
-    """
-    j = journal.load(session.run_dir)
-    if source_rel is None or source_rel == session.rel(session.data_path):
-        holder = j.get("work_probe") or {}
-    else:
-        holder = next(
-            (t for t in (j.get("tables") or []) if t.get("path") == source_rel), None
-        ) or {}
-    return (holder.get("probe_panel_scores") or {}).get("scores")
-
-
-def _difference_panel(session: RunSession, out: dict, source_rel: str) -> dict:
-    """Does this table's gain survive the other evaluation geometries?
-
-    The headline `probe_vs_source_table` is one number from one geometry. This
-    recomputes the same difference under each of the panel's schemes and reports
-    whether they agree about its **sign** — which is the only thing a decision
-    actually consumes, and the thing four separate records say the single ruler
-    got wrong.
-
-    Empty dict rather than nulls when it cannot be computed, matching
-    `_difference_interval`: an absent key reads as "not measured", where a null
-    invites the reader to treat it as "measured, and zero".
-    """
-    mine = (out.get("probe_panel_scores") or {}).get("scores")
-    theirs = _source_panel_scores(session, source_rel)
-    if not mine or not theirs:
-        return {}
-    try:
-        result = panel_agreement(
-            mine, theirs, session.resolved().metric,
-            headline_gain=out.get("probe_vs_source_table"),
-        )
-    except Exception:  # noqa: BLE001 - a panel is a nicety; the score is not
-        return {}
-    return {"probe_panel": result} if result else {}
 
 
 def _difference_interval(session: RunSession, table_path: str, source_rel: str) -> dict:
@@ -944,7 +824,7 @@ def fit_encoding(
         "n_rows": int(len(out)),
         "source_table": row["source_table"],
         "non_numeric_columns": still_dropped,
-        **_agent_view(scored),
+        **scored,
         "note": (
             "This table is scored above; build on it to keep the new columns. "
             + (
@@ -1055,7 +935,7 @@ def fit_group_stats(
         "stat": stat,
         "new_columns": new_columns,
         "n_steps": len(lineage.steps),
-        **_agent_view(scored),
+        **scored,
     })
 
     column = new_columns[0]
@@ -1079,7 +959,7 @@ def fit_group_stats(
         "n_groups": len(encoder.mapping_),
         "n_rows": int(len(out)),
         "source_table": session.rel(path),
-        **_agent_view(scored),
+        **scored,
         # Out-of-fold values are missing wherever a row was in no fold's held-out
         # block, which under an ordered split is the whole first period. Said
         # plainly because the column looks broken otherwise, and the models
@@ -1196,7 +1076,7 @@ def fit_history(
         "windows": [[w, s] for w, s in encoder.windows],
         "new_columns": new_columns,
         "n_steps": len(lineage.steps),
-        **_agent_view(scored),
+        **scored,
     })
 
     n_missing = int(out[new_columns[0]].isna().sum())
@@ -1322,7 +1202,7 @@ def fit_history(
         "n_groups": len(encoder.history_),
         "n_rows": int(len(out)),
         "source_table": session.rel(path),
-        **_agent_view(scored),
+        **scored,
         "n_rows_without_value": n_missing,
         # {window: median number of observations that fell inside it}. Read it
         # beside `shortest_training_prefix`: on its own it sees only the training
@@ -1489,7 +1369,7 @@ def fit_stream_aggregate(
         "stats": stats,
         "new_columns": new_columns,
         "n_steps": len(lineage.steps),
-        **_agent_view(scored),
+        **scored,
     })
 
     # What each lead actually left. This is the readout the whole tool turns on: a
@@ -1573,7 +1453,7 @@ def fit_stream_aggregate(
         "event_grain": encoder.grain_,
         "n_rows": int(len(out)),
         "source_table": session.rel(path),
-        **_agent_view(scored),
+        **scored,
         # Share of *all* rows this lead could put at least one record behind —
         # the number to compare against `matched_rows`.
         "rows_answered": answered_share,
@@ -1671,7 +1551,7 @@ def filter_rows(
         "n_rows": int(summary["n_kept"]),
         "n_dropped": int(summary["n_dropped"]),
         "n_steps": len(lineage.steps),
-        **_agent_view(scored),
+        **scored,
     })
 
     return {
@@ -1682,7 +1562,7 @@ def filter_rows(
         "fraction_dropped": round(summary["n_dropped"] / summary["n_rows"], 4),
         "source_table": session.rel(path),
         "new_columns": [],
-        **_agent_view(scored),
+        **scored,
         "note": (
             "The kept rows are what anything built on this table fits on. The filter "
             "is recorded as train-time-only and does not run at predict time, so "
@@ -1782,7 +1662,7 @@ def transform_features(
         "n_cols": len(out.columns),
         "source_table": row["source_table"],
         "non_numeric_columns": still_dropped,
-        **_agent_view(scored),
+        **scored,
         "note": (
             "This table is scored above; build on it to keep the new columns. The code "
             "is stored in the table's lineage and re-runs at predict time; the target "
