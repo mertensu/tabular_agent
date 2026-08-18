@@ -63,7 +63,7 @@ believed at the time and this table is what is believed now.
 
 | thread | where it stands | rests on |
 |---|---|---|
-| **How a table is ranked** — the ruler | [0073](0073-the-ruler-is-mispriced-on-one-dataset-and-three-mechanisms-failed-to-say-why.md): the probe inflates most feature steps on a high-cardinality dataset, and no fixed budget is neutral because each table has its own optimum | 0022, 0028, 0034, 0035, 0036, 0038, 0039, 0040, 0054, 0056, 0058, 0059 |
+| **How a table is ranked** — the ruler | [0077](0077-several-disagreeing-rulers-rather-than-one-better-one.md): four evaluation geometries rather than one better ruler; agreement decides what counts as *progress*, never what may win. Rests on [0073](0073-the-ruler-is-mispriced-on-one-dataset-and-three-mechanisms-failed-to-say-why.md)'s finding that the probe inflates feature steps and no fixed budget is neutral | 0022, 0028, 0034, 0035, 0036, 0038, 0039, 0040, 0054, 0056, 0058, 0059, 0073 |
 | **Model capacity** | [0068](0068-capacity-reaches-the-shipped-blend-at-half-strength-and-validation-picks-the-wrong-budget.md): capacity reaches the shipped blend at half the probe's strength, and `val` picks the budget wrongly on both datasets | 0054, 0067 |
 | **Where the search happens** | [0035](0035-the-search-is-over-features.md): the search is over features; models are enumerated, not searched | 0014, 0021, 0022 |
 | **Feature credit** | [0017](0017-credit-by-ablation.md): credit is measured by refitting without the columns | 0015, 0016, 0037 |
@@ -259,6 +259,29 @@ refuted mechanisms in it. Live conclusion: **0073**.
   all failed, and the two-budget panel is **deliberately not built**: ~10x cost on
   every dataset for an effect seen on one. Also records that no model here has ever
   been told a column is categorical)*
+
+- [0077 — Several disagreeing rulers, rather than one better one](0077-several-disagreeing-rulers-rather-than-one-better-one.md)
+  *(**overturns 0073's refusal of a panel**, on a cost argument that was measured
+  rather than assumed. The ruler has been wrong four times and 0059's interval —
+  built for it — is gated on nothing: IEEE-CIS came back **18 of 20 unstable with
+  nine accepted anyway**. So the fix is not a better ruler but the IEEE-CIS
+  winners' answer, transcribed: **four train/gap/evaluate geometries** over the
+  work half, refitting on different training periods at different distances across
+  different gaps, where blocking only re-measures the same fit on different rows.
+  The gap is what no other instrument here has — on one real table the same
+  columns score 0.921 with no gap and 0.834 at four blocks' distance, a **0.087
+  spread from geometry alone**. 0073 refused a panel at "~10x"; that priced a
+  *budget* panel, where varying geometry at the same budget trains on fewer rows
+  and measures **2.4x**. Ulf chose the **soft gate**: agreement decides what counts
+  as progress, `best_table` stays 0035's argmax, so a false negative spends
+  patience rather than losing a table — and it would **not** have saved 0066, which
+  is recorded rather than glossed. Agreement is all-or-nothing (a majority rule lets
+  a step through 3-1, which is the failure this exists for) and votes on **sign**
+  only, no threshold, per 0034. Unordered runs get subsample schemes and a
+  different label, because it is a different question. **The limitation it does not
+  escape:** the table's encoders were fitted on the whole work half, so every
+  scheme shares that, which is exactly how 0066's column passed three instruments —
+  a wider net, not a proof)*
 
 ### The seal, and the outside world
 

@@ -100,6 +100,21 @@ def set_streams(run_dir: str, record: dict) -> dict:
     return journal
 
 
+def set_panel(run_dir: str, record: dict) -> dict:
+    """The panel's geometry, written once and never revised.
+
+    Which blocks the schemes are cut on is a property of the run, not of a table,
+    and it has to survive a resumed episode — recomputing it would let two tables
+    from the same run be compared across different periods while looking as though
+    they were compared across the same ones.
+    """
+    journal = load(run_dir)
+    if journal.get("panel") is None:
+        journal["panel"] = record
+        save(run_dir, journal)
+    return journal
+
+
 def set_work_probe(run_dir: str, scored: dict) -> dict:
     """The ruler's score for the data as given, before any table was built.
 

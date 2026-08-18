@@ -8,7 +8,116 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-17 (latest) — START HERE. The fifth dataset ran, and the index was rebuilt
+## 2026-08-18 (latest) — START HERE. The ruler now has four disagreeing schemes
+
+**Machine:** MacBook Air | **Branch:** master | **597 tests pass** (was 576) |
+**fresh context starts here.** New record:
+[0077](docs/decisions/0077-several-disagreeing-rulers-rather-than-one-better-one.md).
+It **overturns 0073's refusal of a panel**, and the reason it may is a measured
+cost, not an argument.
+
+> Ulf: *"i would like you to fix the ruler using multiple disagreeing validation
+> schemes"* — after asking what the IEEE run said about the goal of beating the
+> median, which is the framing the previous entry was missing.
+
+### What landed
+
+`src/tabular_agent/panel.py` (new), wired into `probe_table` and the stop rule.
+Four train/gap/evaluate geometries over the work half — the IEEE-CIS winners' set,
+transcribed:
+
+    train4_gap1_eval1   blocks 1-4 | gap 5   | eval 6
+    train2_gap2_eval2   blocks 1-2 | gap 3-4 | eval 5-6
+    train1_gap4_eval1   block  1   | gap 2-5 | eval 6
+    train5_gap0_eval1   blocks 1-5 |         | eval 6
+
+**The gap is the part no other instrument here has.** Same table, same columns
+(`_runs/ieee_v1/tables/t18.parquet`): 0.921 with no gap, 0.834 at four blocks'
+distance — a **0.087 spread from geometry alone**, four times what that run's whole
+feature chain was worth.
+
+### Why 0073's "~10x" refusal does not bind
+
+0073 priced a panel whose second arm raised the **budget**. This one varies
+geometry at the same budget, so each scheme trains on **fewer** rows. Measured:
+one fit on all 531,486 rows is 8.4s; four schemes total 20.3s. **2.4x, not 10x.**
+The suite went 5 -> 11.2 min for the same reason, which is the honest signal that
+it is not free.
+
+### The soft gate — Ulf's call of three offered
+
+**Agreement decides what counts as *progress*; it never decides what may win.**
+`_since_improvement` now requires `gain > min_gain_ratio * noise` **and**
+`probe_panel.agrees`. `best_table` is untouched — still 0035's argmax. So a false
+negative spends patience rather than losing a table, which is the only reason
+all-or-nothing agreement is affordable.
+
+**It would not have saved 0066.** The leaky table would still ship. The hard gate
+would have caught it and was refused because it can also refuse a real gain and
+record nothing about what was lost. Revisit once the panel has fired on real runs.
+
+### Verified end to end, not just in unit tests
+
+Driven by hand on Rossmann (`scratchpad/e2e_panel.py` pattern, not committed):
+
+- `fit_encoding(Store, frequency)` — headline **-0.000049**, panel **3 of 4**,
+  `agrees: false`. The interval agrees it is unstable. This is the case the
+  instrument exists for.
+- A step that genuinely helps came back **4 of 4**.
+- Agent payload carries `probe_panel`; the journal additionally keeps
+  `probe_panel_scores` (0018 — the agent gets the verdict, not the raw scores).
+- Panel geometry cached once per run in `journal["panel"]`, so a **resumed episode
+  cannot re-cut the blocks**.
+
+### Two bugs the tests found, both silent in a run
+
+- **Interpolated quantiles invent boundaries.** 200 rows each of 1/2/3 gave edges
+  at 1.997 *and* 2.0, with a block between them holding nothing — scored, wild, and
+  voting. Now `method="lower"`, so every edge is an observed value.
+- **An edge equal to the maximum opens an empty block**, so the coarse-column
+  fallback built a scheme evaluating on **zero rows** while looking valid. Blocks
+  are now counted from the ones that hold rows.
+
+Both were caught by tests written from the docstrings rather than the code.
+
+### The limitation, written down before it bites
+
+The table's encoders were fitted on the **whole work half** before the panel sees
+it, so a scheme evaluating on block 6 scores rows whose features knew block 6's
+targets — out-of-fold per row (0032), in-sample for the block. Every scheme shares
+it, and so does the parent. **That is exactly how 0066's leaky column passed three
+instruments.** A panel is a wider net, not a proof.
+
+### Where the goal stands, since this is what prompted the work
+
+Three datasets, three misses, and the same size each time: Rossmann **top 58%**,
+Restaurant **top 64%**, IEEE-CIS **top 69%**. A deficit that survives changing the
+dataset, the metric and the metric's direction is a property of the harness.
+
+What today subtracts: **feature vocabulary is closed** (0071 +0.0012, and 0075
+replicated it — the agent rebuilt four of the winners' families unaided). What is
+left, ranked and unbuilt:
+
+1. **Terminal-fit configuration.** IEEE's three families disagree by **0.025** on
+   the same table at library defaults — twice the gap to the median, and larger
+   than the whole feature chain. 0054's mechanism, 0068's constraint (`val` must
+   not choose).
+2. **0076's transduction boundary** — largest identified gap, rightly refused.
+
+**And the structural problem: all three boards are now spent.** Whatever is built
+next cannot be checked externally. Get a dataset *before* the next capability, not
+after.
+
+### Still open, and both are Ulf's
+
+- The `Status:` vocabulary for new records (~20 spellings across 77).
+- **Quiz + notebook for the panel — owed and not done.** Backlog is now five
+  sessions deep. CLAUDE.md is explicit that this is the largest outstanding item,
+  and 0077 is exactly the kind of machinery it was written about.
+
+---
+
+## 2026-08-17 — The fifth dataset ran, and the index was rebuilt
 
 **Machine:** MacBook Air | **Branch:** master | **no `src/` change** |
 **fresh context starts here.** Two new records:
