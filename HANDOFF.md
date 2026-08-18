@@ -8,112 +8,95 @@
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
 
-## 2026-08-18 (latest) — START HERE. The ruler now has four disagreeing schemes
+## 2026-08-18 (latest) — START HERE. The panel was built, measured, and reverted the same day
 
-**Machine:** MacBook Air | **Branch:** master | **597 tests pass** (was 576) |
-**fresh context starts here.** New record:
-[0077](docs/decisions/0077-several-disagreeing-rulers-rather-than-one-better-one.md).
-It **overturns 0073's refusal of a panel**, and the reason it may is a measured
-cost, not an argument.
+**Machine:** MacBook Air | **Branch:** master | **593 tests pass** | **no net
+`src/` change to the ruler** | **fresh context starts here.** Two records:
+[0077](docs/decisions/0077-several-disagreeing-rulers-rather-than-one-better-one.md)
+(what was built and why) and
+[0078](docs/decisions/0078-the-panel-was-a-stop-rule-and-the-gain-threshold-is-the-real-lever.md)
+(the measurement that killed it, and the three replacements). **Read 0078; it
+carries the plan.**
 
-> Ulf: *"i would like you to fix the ruler using multiple disagreeing validation
-> schemes"* — after asking what the IEEE run said about the goal of beating the
-> median, which is the framing the previous entry was missing.
+> Ulf asked to fix the ruler with multiple disagreeing validation schemes. It was
+> built, gated on the soft setting he chose, then replayed against the run it was
+> built for. **It accepts 1 of 24 steps.** Reverted.
 
-### What landed
+### Why it failed, in one number
 
-`src/tabular_agent/panel.py` (new), wired into `probe_table` and the stop rule.
-Four train/gap/evaluate geometries over the work half — the IEEE-CIS winners' set,
-transcribed:
+Mean per-scheme agreement with the headline gain: **0.396**, where a coin flip is
+0.500. `n_agree` is centred on 2 of 4 (`6/4/9/4/1` across 0..4). The four schemes
+behave close to independent coin flips about a step's sign, so an all-or-nothing
+vote rejects nearly everything whether the step is real or not. With the gate in
+place, patience hits after **8 tables instead of 24** — a stop rule, not a ruler.
 
-    train4_gap1_eval1   blocks 1-4 | gap 5   | eval 6
-    train2_gap2_eval2   blocks 1-2 | gap 3-4 | eval 5-6
-    train1_gap4_eval1   block  1   | gap 2-5 | eval 6
-    train5_gap0_eval1   blocks 1-5 |         | eval 6
+**The porting error was legible before the build.** The winners used **one**
+scheme, trained on **75%** of the data, for feature decisions (notebook cells 12
+and 17); several geometries only to sanity-check the whole approach; and a
+separate **per-column** "time consistency" test that rejected **8% of 242
+features**. Three instruments, three questions. 0077 collapsed them into one and
+aimed it at the hardest. Their 8% against its 96% was the tell.
 
-**The gap is the part no other instrument here has.** Same table, same columns
-(`_runs/ieee_v1/tables/t18.parquet`): 0.921 with no gap, 0.834 at four blocks'
-distance — a **0.087 spread from geometry alone**, four times what that run's whole
-feature chain was worth.
+### What survives, and it is more useful than the panel
 
-### Why 0073's "~10x" refusal does not bind
+`panel.py` and its tests stay **unwired** — the machinery is what the follow-ups
+need. And three of Ulf's ideas were measured against 0073's saved capacity sweeps
+(`_runs/ruler_deflation_across_runs.csv`, **42 steps across four runs**, Porto
+Seguro excluded per 0073's own noise screen):
 
-0073 priced a panel whose second arm raised the **budget**. This one varies
-geometry at the same budget, so each scheme trains on **fewer** rows. Measured:
-one fit on all 531,486 rows is 8.4s; four schemes total 20.3s. **2.4x, not 10x.**
-The suite went 5 -> 11.2 min for the same reason, which is the honest signal that
-it is not free.
+    median |gain| among steps that helped at capacity   0.00704
+    median |gain| among steps that did not              0.00221
+    steps scored > 0.010   ->  91% helped (10 of 11)
+    steps scored 0 - 0.002 ->  40% helped ( 2 of  5)
 
-### The soft gate — Ulf's call of three offered
+| rule | accepts | precision | recall |
+|---|---|---|---|
+| current — `gain > 0` | 30 | 0.73 | 0.92 |
+| **0.25 x best gain so far** | 16 | **0.88** | 0.58 |
+| 0.50 x best gain so far | 12 | 0.92 | 0.46 |
 
-**Agreement decides what counts as *progress*; it never decides what may win.**
-`_since_improvement` now requires `gain > min_gain_ratio * noise` **and**
-`probe_panel.agrees`. `best_table` is untouched — still 0035's argmax. So a false
-negative spends patience rather than losing a table, which is the only reason
-all-or-nothing agreement is affordable.
+**Importance / SHAP is refused** — 0017 already settled it (four columns held 77%
+of the splitting and contributed nothing) and the ablation gain's sign is 73-92%
+accurate, so a descriptive proxy is a step down from a measured baseline.
 
-**It would not have saved 0066.** The leaky table would still ship. The hard gate
-would have caught it and was refused because it can also refuse a real gain and
-record nothing about what was lost. Revisit once the panel has fired on real runs.
+### THE PLAN FOR THE NEXT CONTEXT — Ulf: *"tackle those two ideas in a fresh context"*
 
-### Verified end to end, not just in unit tests
+**1. Report the gain as a fraction of the best so far.** Not a gate. It costs no
+fits, and the reason it must not be enforced is measured: the quarter bar
+**ratchets**, and on `restaurant_v1` it accepts 1 of 16 while 7 steps really
+helped, because one transformative early step raised the bar for the rest of the
+run. Diminishing returns are legitimate. The agent knows it is twelve steps into a
+chain; a constant does not (Ulf's own principle — the harness guides, it does not
+override).
 
-Driven by hand on Rossmann (`scratchpad/e2e_panel.py` pattern, not committed):
+**2. The `_noise` hole, and this one is a defect not an idea.** `stop._noise`
+returns `probe_se` or **0.0**, and `probe_se` is deliberately refused on ordered
+splits (0059). Measured:
 
-- `fit_encoding(Store, frequency)` — headline **-0.000049**, panel **3 of 4**,
-  `agrees: false`. The interval agrees it is unstable. This is the case the
-  instrument exists for.
-- A step that genuinely helps came back **4 of 4**.
-- Agent payload carries `probe_panel`; the journal additionally keeps
-  `probe_panel_scores` (0018 — the agent gets the verdict, not the raw scores).
-- Panel geometry cached once per run in `journal["panel"]`, so a **resumed episode
-  cannot re-cut the blocks**.
+    ieee_v1        probe_se None on 24/24 tables | block_sd present on 24/24
+    restaurant_v2  probe_se None on 13/13 tables | block_sd present on 13/13
 
-### Two bugs the tests found, both silent in a run
+So `min_gain_ratio` multiplies zero and **there has been no bar at all on Rossmann,
+Restaurant or IEEE-CIS** — every positive gain counts as progress. 0028 left "the
+bar it is a quarter of" open; nobody noticed it had evaporated entirely on exactly
+the datasets that matter. `block_sd` is a noise estimate for **the difference**,
+is already computed on all those rows, and gates nothing.
 
-- **Interpolated quantiles invent boundaries.** 200 rows each of 1/2/3 gave edges
-  at 1.997 *and* 2.0, with a block between them holding nothing — scored, wild, and
-  voting. Now `method="lower"`, so every edge is an observed value.
-- **An edge equal to the maximum opens an empty block**, so the coarse-column
-  fallback built a scheme evaluating on **zero rows** while looking valid. Blocks
-  are now counted from the ones that hold rows.
+**Register a prediction before touching either.** That is the mistake 0077 and
+0078 both exist to document, and the honest test for (2) is the same ground truth
+used above: does `gain > k * block_sd` beat `gain > 0` on the 42 steps?
 
-Both were caught by tests written from the docstrings rather than the code.
+**Also still unbuilt and now the best-evidenced idea in the file:** the winners'
+**per-column time consistency** test — one feature, first block, predict last
+block, drop if either AUC is below 0.5. 8% rejection on 242 features, and it is a
+different question from anything the harness measures today. 0069 predicted this
+criterion and did not build it.
 
-### The limitation, written down before it bites
+### Quiz debt
 
-The table's encoders were fitted on the **whole work half** before the panel sees
-it, so a scheme evaluating on block 6 scores rows whose features knew block 6's
-targets — out-of-fold per row (0032), in-sample for the block. Every scheme shares
-it, and so does the parent. **That is exactly how 0066's leaky column passed three
-instruments.** A panel is a wider net, not a proof.
-
-### Where the goal stands, since this is what prompted the work
-
-Three datasets, three misses, and the same size each time: Rossmann **top 58%**,
-Restaurant **top 64%**, IEEE-CIS **top 69%**. A deficit that survives changing the
-dataset, the metric and the metric's direction is a property of the harness.
-
-What today subtracts: **feature vocabulary is closed** (0071 +0.0012, and 0075
-replicated it — the agent rebuilt four of the winners' families unaided). What is
-left, ranked and unbuilt:
-
-1. **Terminal-fit configuration.** IEEE's three families disagree by **0.025** on
-   the same table at library defaults — twice the gap to the median, and larger
-   than the whole feature chain. 0054's mechanism, 0068's constraint (`val` must
-   not choose).
-2. **0076's transduction boundary** — largest identified gap, rightly refused.
-
-**And the structural problem: all three boards are now spent.** Whatever is built
-next cannot be checked externally. Get a dataset *before* the next capability, not
-after.
-
-### Still open, and both are Ulf's
-
-- The `Status:` vocabulary for new records (~20 spellings across 77).
-- **Quiz + notebook for the panel — owed and not done.** Backlog is now five
-  sessions deep. CLAUDE.md is explicit that this is the largest outstanding item,
-  and 0077 is exactly the kind of machinery it was written about.
+**None asked, no notebook, five sessions running.** CLAUDE.md is explicit that
+this is the largest outstanding item. 0077/0078 is exactly the arc worth walking
+through by hand — built, measured, refuted — and it has no notebook.
 
 ---
 

@@ -63,7 +63,7 @@ believed at the time and this table is what is believed now.
 
 | thread | where it stands | rests on |
 |---|---|---|
-| **How a table is ranked** — the ruler | [0077](0077-several-disagreeing-rulers-rather-than-one-better-one.md): four evaluation geometries rather than one better ruler; agreement decides what counts as *progress*, never what may win. Rests on [0073](0073-the-ruler-is-mispriced-on-one-dataset-and-three-mechanisms-failed-to-say-why.md)'s finding that the probe inflates feature steps and no fixed budget is neutral | 0022, 0028, 0034, 0035, 0036, 0038, 0039, 0040, 0054, 0056, 0058, 0059, 0073 |
+| **How a table is ranked** — the ruler | [0078](0078-the-panel-was-a-stop-rule-and-the-gain-threshold-is-the-real-lever.md): 0077's panel is **reverted** — it rejected 96% of steps and its schemes behave like coin flips. What survives the measurement is that **gain size predicts survival**, and that on ordered runs there is currently **no bar at all** | 0017, 0022, 0028, 0034, 0035, 0036, 0054, 0056, 0058, 0059, 0073, 0077 |
 | **Model capacity** | [0068](0068-capacity-reaches-the-shipped-blend-at-half-strength-and-validation-picks-the-wrong-budget.md): capacity reaches the shipped blend at half the probe's strength, and `val` picks the budget wrongly on both datasets | 0054, 0067 |
 | **Where the search happens** | [0035](0035-the-search-is-over-features.md): the search is over features; models are enumerated, not searched | 0014, 0021, 0022 |
 | **Feature credit** | [0017](0017-credit-by-ablation.md): credit is measured by refitting without the columns | 0015, 0016, 0037 |
@@ -282,6 +282,29 @@ refuted mechanisms in it. Live conclusion: **0073**.
   escape:** the table's encoders were fitted on the whole work half, so every
   scheme shares that, which is exactly how 0066's column passed three instruments —
   a wider net, not a proof)*
+
+- [0078 — The panel was a stop rule wearing a ruler's clothes, and the threshold is the real lever](0078-the-panel-was-a-stop-rule-and-the-gain-threshold-is-the-real-lever.md)
+  *(**supersedes 0077's gate, reverted the day it landed.** Replaying all 24
+  IEEE-CIS steps: the panel accepts **1 of 24**, against a registered prediction of
+  60-90% rejection. `n_agree` is centred on 2 of 4 and mean per-scheme agreement is
+  **0.396** where a coin flip is 0.500 — the schemes behave like independent coin
+  flips about a step's sign, so the vote rejected uniformly rather than
+  discriminating, and patience would have been hit after 8 tables instead of 24.
+  The porting error was legible beforehand: the winners used **one** scheme trained
+  on 75% of the data for feature decisions, several geometries only as a sanity
+  check, and a separate **per-column** test that rejected 8% of 242 features. Three
+  instruments, three questions, collapsed into one and aimed at the hardest — the
+  third time this project has ported a lever from a description and lost. Then
+  measures Ulf's three replacements against 0073's saved capacity sweeps (42 steps,
+  four runs): **importance/SHAP refused** on 0017's argument plus a new accuracy
+  baseline; **a gain threshold supported** — steps over 0.010 helped 91% of the
+  time against 40% for 0.000-0.002, and a 0.25x-best bar lifts precision 0.73 ->
+  0.88 for free — but it **ratchets**, killing six real gains on restaurant_v1
+  because diminishing returns are legitimate. And the hole nobody proposed: `_noise`
+  returns 0.0 whenever `probe_se` is absent, which is **24/24 IEEE tables and 13/13
+  Restaurant tables**, so `min_gain_ratio` multiplies zero and there has been **no
+  bar at all** on every ordered run — while `block_sd`, a noise estimate for the
+  difference, is present on all of them and gates nothing)*
 
 ### The seal, and the outside world
 
