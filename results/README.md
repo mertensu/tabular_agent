@@ -13,6 +13,22 @@ These are **readings, not truth**: a CSV records what one run measured on one
 day. The reasoning about what a reading *means* lives in `docs/decisions/`; this
 directory is only the raw table behind a claim.
 
+**These are reductions, and they cannot answer the block-level questions.** Each
+row here is a scalar summary. In particular, none of these files — nor any stored
+run artifact — carries the per-block gains, `block_sd`, the candidate-vs-incumbent
+contrast, or the panel vote matrix. `blockwise_difference()` computes those
+transiently and only its scalar `gain` survives into the journal (and `probe_se`
+is `None` on the ordered runs, so `block_sd` was not even kept for the run's own
+threshold); validation predictions are not persisted, so nothing is recoverable
+offline. So `ruler_deflation_across_runs.csv` supports **budget-deflation** and
+capacity-survival analysis (its `gain_low`/`gain_high` are a table re-ruled at a
+low vs. a high budget) but **cannot** test whether `gain > k·block_sd`
+discriminates better than `gain > 0`. And even the `block_sd` in the code is the
+**candidate-vs-parent** contrast, while the stop rule judges
+**candidate-vs-global-incumbent** — the wrong geometry regardless. Answering that
+needs an *instrumented re-run* that computes `blockwise_difference()` on both
+contrasts and persists both full dicts per step; see `HANDOFF.md`.
+
 | File | What it measures | Produced by |
 |------|------------------|-------------|
 | `capacity_probe.csv` | Score vs. tree budget / learning rate per table, across datasets — the "capacity, not features" probe | `scripts/probe_capacity.py` |

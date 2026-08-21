@@ -22,6 +22,39 @@ findings-CSVs lifted out of the 11 GB gitignored `_runs/` (see
 **What's next:** the exact `kaggle` command used to pull the *private*
 leaderboard CSVs is not confirmed in SETUP.md — fill in if known.
 
+### Next: the `gain > k·block_sd` test needs an instrumented re-run, not more data-lifting
+
+A colleague went to run the planned central test — does `gain > k·block_sd` beat
+the current `gain > 0`? — against the lifted `results/` CSVs and found it can't
+be done, and I confirmed why at the code. **The block-level quantities live in no
+stored artifact:**
+
+- `ruler_deflation_across_runs.csv` measures **budget deflation**, not blocks:
+  `gain_low`/`gain_high` are each table re-ruled at a low vs. a high budget
+  (`probe_ruler_deflation_across_runs.py`). It never calls
+  `blockwise_difference()`. No `block_sd`, no `block_gains`, no vote matrix.
+- The journal keeps only the scalar `gain`: `probe_vs_source_table` is a number,
+  not the `blockwise_difference()` dict. And `probe_se` is `None` on the ordered
+  runs (bug-finding #2), so `block_sd` was not even kept for the run's own
+  threshold.
+- Validation predictions are not persisted (`tables/{id}.parquet` is the feature
+  table, no preds), so nothing is recoverable offline — it needs re-fits.
+
+**Two things the re-run must do**, or it answers the wrong question:
+
+1. Persist the **full** `blockwise_difference()` dict per evaluated step
+   (`block_gains`, `block_sd`, `sign_stable`, `blocks_favouring_a`), not just the
+   scalar gain.
+2. Compute it on **two** contrasts. The existing `block_sd` is
+   candidate-vs-parent (`compare.py:298`), but the stop rule judges
+   candidate-vs-**global-incumbent** — so add a second `blockwise_difference()`
+   on the incumbent contrast. The parent SD is the wrong geometry for the test.
+
+Only then can `gain > k·block_sd` be compared against `gain > 0` on the same
+steps. None of this disturbs the four code bug-findings (they are code-path
+facts); it also does **not** yet show the ruler alone drives the below-median
+result.
+
 ## 2026-08-18 — The panel was built, measured, and reverted the same day
 
 **Machine:** MacBook Air | **Branch:** master | **593 tests pass** | **no net
