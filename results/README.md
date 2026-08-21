@@ -13,21 +13,26 @@ These are **readings, not truth**: a CSV records what one run measured on one
 day. The reasoning about what a reading *means* lives in `docs/decisions/`; this
 directory is only the raw table behind a claim.
 
-**These are reductions, and they cannot answer the block-level questions.** Each
-row here is a scalar summary. In particular, none of these files — nor any stored
-run artifact — carries the per-block gains, `block_sd`, the candidate-vs-incumbent
-contrast, or the panel vote matrix. `blockwise_difference()` computes those
-transiently and only its scalar `gain` survives into the journal (and `probe_se`
-is `None` on the ordered runs, so `block_sd` was not even kept for the run's own
-threshold); validation predictions are not persisted, so nothing is recoverable
-offline. So `ruler_deflation_across_runs.csv` supports **budget-deflation** and
+**These are reductions — the tracked CSVs here cannot answer the block-level
+questions.** Each row is a scalar summary; none carries the per-block gains,
+`block_sd`, the candidate-vs-incumbent contrast, or a panel vote matrix.
+`ruler_deflation_across_runs.csv` supports **budget-deflation** and
 capacity-survival analysis (its `gain_low`/`gain_high` are a table re-ruled at a
 low vs. a high budget) but **cannot** test whether `gain > k·block_sd`
-discriminates better than `gain > 0`. And even the `block_sd` in the code is the
-**candidate-vs-parent** contrast, while the stop rule judges
-**candidate-vs-global-incumbent** — the wrong geometry regardless. Answering that
-needs an *instrumented re-run* that computes `blockwise_difference()` on both
-contrasts and persists both full dicts per step; see `HANDOFF.md`.
+discriminates better than `gain > 0`.
+
+**But the untracked `_runs/` directories often can** — the normal probe writes a
+prediction sidecar (`_runs/<run>/probe_preds/<table>.npy`, see `tools.py:537`)
+next to `data/val.parquet` and `run_journal.json`. Where all three are present,
+the test is reconstructable offline with no refit: pick the global incumbent
+before each step from the journal's `probe_score`s, load candidate and incumbent
+sidecars, and call `blockwise_difference()` on both the candidate-vs-parent and
+the candidate-vs-**incumbent** contrast — the latter being the geometry the stop
+rule actually uses (the `block_sd` in the code is candidate-vs-parent, the wrong
+one on its own). Coverage is per-run and mixed: `restaurant_v2`, `restaurant_v1`,
+`ieee_v1` carry sidecars + journal + val; the runs this CSV was built from
+(`rossmann_v8`, `house_prices_v9`) predate the sidecars (`probe_preds` absent) and
+do need refits. See `HANDOFF.md` for the full recipe and the coverage table.
 
 | File | What it measures | Produced by |
 |------|------------------|-------------|

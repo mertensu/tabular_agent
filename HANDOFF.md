@@ -25,33 +25,44 @@ leaderboard CSVs is not confirmed in SETUP.md — fill in if known.
 ### Next: the `gain > k·block_sd` test needs an instrumented re-run, not more data-lifting
 
 A colleague went to run the planned central test — does `gain > k·block_sd` beat
-the current `gain > 0`? — against the lifted `results/` CSVs and found it can't
-be done, and I confirmed why at the code. **The block-level quantities live in no
-stored artifact:**
+the current `gain > 0`? — against the lifted `results/` CSVs. Two rounds:
 
-- `ruler_deflation_across_runs.csv` measures **budget deflation**, not blocks:
-  `gain_low`/`gain_high` are each table re-ruled at a low vs. a high budget
-  (`probe_ruler_deflation_across_runs.py`). It never calls
-  `blockwise_difference()`. No `block_sd`, no `block_gains`, no vote matrix.
-- The journal keeps only the scalar `gain`: `probe_vs_source_table` is a number,
-  not the `blockwise_difference()` dict. And `probe_se` is `None` on the ordered
-  runs (bug-finding #2), so `block_sd` was not even kept for the run's own
-  threshold.
-- Validation predictions are not persisted (`tables/{id}.parquet` is the feature
-  table, no preds), so nothing is recoverable offline — it needs re-fits.
+**Round 1 (holds):** the tracked `results/*.csv` cannot answer it.
+`ruler_deflation_across_runs.csv` measures **budget deflation**, not blocks
+(`gain_low`/`gain_high` are each table re-ruled at a low vs. a high budget;
+`probe_ruler_deflation_across_runs.py` never calls `blockwise_difference()`), and
+the journal keeps only the scalar `gain` (`probe_vs_source_table` is a number, not
+the dict; `probe_se` is `None` on ordered runs — bug-finding #2).
 
-**Two things the re-run must do**, or it answers the wrong question:
+**Round 2 (correction — an earlier version of this note over-claimed):** it is
+**not** true that no stored artifact can answer it. The normal probe writes a
+prediction sidecar `_runs/<run>/probe_preds/<table>.npy` after scoring
+(`tools.py:537`), beside `data/val.parquet` and `run_journal.json`. Where all
+three exist, the incumbent contrast is reconstructable **offline, no refit**:
 
-1. Persist the **full** `blockwise_difference()` dict per evaluated step
-   (`block_gains`, `block_sd`, `sign_stable`, `blocks_favouring_a`), not just the
-   scalar gain.
-2. Compute it on **two** contrasts. The existing `block_sd` is
-   candidate-vs-parent (`compare.py:298`), but the stop rule judges
-   candidate-vs-**global-incumbent** — so add a second `blockwise_difference()`
-   on the incumbent contrast. The parent SD is the wrong geometry for the test.
+1. per historical step, take the global incumbent-so-far from the journal's
+   `probe_score`s;
+2. load candidate + incumbent sidecars; load `y_val` and the ordering column from
+   `data/val.parquet`;
+3. call `blockwise_difference()` on **both** the candidate-vs-parent contrast (as
+   the run already did, `compare.py:298`) and the candidate-vs-**incumbent**
+   contrast — the incumbent one is the geometry the stop rule uses and the only
+   one the run never computed;
+4. then test `gain > k·block_sd` against capacity-survival.
 
-Only then can `gain > k·block_sd` be compared against `gain > 0` on the same
-steps. None of this disturbs the four code bug-findings (they are code-path
+**Coverage is per-run and mixed** — check `probe_preds/*.npy` + `run_journal.json`
++ `data/val.parquet` before assuming a run is usable:
+
+| Run | sidecars | offline-reconstructable? |
+|-----|----------|--------------------------|
+| `restaurant_v2`, `restaurant_v1`, `ieee_v1` | yes | yes, no refit |
+| `rossmann_v8`, `house_prices_v9` (the deflation-CSV runs) | **none** (predate sidecars) | needs refits |
+| `deflation_*` dirs | yes, but **no journal** | not directly — these are the deflation probe's LOW/HIGH refits, not the incumbent sequence |
+
+So the right first move is the coverage check above, then an **offline recompute**
+for the covered runs (only the incumbent contrast is missing; the parent contrast
+is already in newer journals). A full instrumented re-run is needed only for the
+pre-sidecar runs. None of this disturbs the four code bug-findings (code-path
 facts); it also does **not** yet show the ruler alone drives the below-median
 result.
 
