@@ -57,9 +57,10 @@ the current `gain > 0`? — against the lifted `results/` CSVs. Two rounds:
 **Round 1 (holds):** the tracked `results/*.csv` cannot answer it.
 `ruler_deflation_across_runs.csv` measures **budget deflation**, not blocks
 (`gain_low`/`gain_high` are each table re-ruled at a low vs. a high budget;
-`probe_ruler_deflation_across_runs.py` never calls `blockwise_difference()`), and
-the journal keeps only the scalar `gain` (`probe_vs_source_table` is a number, not
-the dict; `probe_se` is `None` on ordered runs — bug-finding #2).
+`probe_ruler_deflation_across_runs.py` never calls `blockwise_difference()`). The
+reduction keeps only scalar gains. Newer run journals do retain the full
+candidate-vs-parent `probe_vs_source_interval`, but those nested records were not
+copied into `results/`, and old pre-sidecar runs may not have them at all.
 
 **Round 2 (correction — an earlier version of this note over-claimed):** it is
 **not** true that no stored artifact can answer it. The normal probe writes a
