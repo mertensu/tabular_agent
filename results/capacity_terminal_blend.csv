@@ -1,0 +1,29 @@
+dataset,source_run,table,budget,arm,val,sealed,val_gain,sealed_gain
+restaurant,restaurant_v2,t7,current  200 @ lr 0.10,blend,0.519707,0.505713,0.0,0.0
+restaurant,restaurant_v2,t7,1000 @ lr 0.10,blend,0.520881,0.505661,-0.001174,5.199999999994098e-05
+restaurant,restaurant_v2,t7,5000 @ lr 0.03,blend,0.520233,0.503746,-0.0005259999999999,0.0019669999999999
+restaurant,restaurant_v2,t7,per-member,lgbm,,,,
+restaurant,restaurant_v2,t7,per-member,xgb,,,,
+restaurant,restaurant_v2,t7,per-member,catboost,,,,
+restaurant,restaurant_v2,t7,per-member,elasticnet,,,,
+restaurant,restaurant_v2,t7,per-member,blend(lgbm+xgb+catboost+elasticnet),,,,
+restaurant,restaurant_v2,t7,current  200 @ lr 0.10,probe lgbm,0.521351,,0.0,
+restaurant,restaurant_v2,t7,1000 @ lr 0.10,probe lgbm,0.528136,,-0.006785,
+restaurant,restaurant_v2,t7,1000 @ lr 0.03,probe lgbm,0.51949,,0.001861,
+restaurant,restaurant_v2,t7,3000 @ lr 0.03,probe lgbm,0.524232,,-0.002881,
+restaurant,restaurant_v2,t7,5000 @ lr 0.03,probe lgbm,0.530146,,-0.0087949999999999,
+restaurant,restaurant_v2,t7,early stop -> 1498,probe lgbm,0.52157,,-0.0002189999999999,
+rossmann,rossmann_v7,t13,current  200 @ lr 0.10,blend,0.130858,0.136181,0.0,0.0
+rossmann,rossmann_v7,t13,1000 @ lr 0.10,blend,0.12926,0.132446,0.0015979999999999883,0.0037349999999999883
+rossmann,rossmann_v7,t13,5000 @ lr 0.03,blend,0.127793,0.134294,0.003065000000000012,0.0018869999999999998
+rossmann,rossmann_v7,t13,per-member,xgb,,,,
+rossmann,rossmann_v7,t13,per-member,lgbm,,,,
+rossmann,rossmann_v7,t13,per-member,catboost,,,,
+rossmann,rossmann_v7,t13,per-member,elasticnet,,,,
+rossmann,rossmann_v7,t13,per-member,blend(lgbm+xgb+catboost+elasticnet),,,,
+rossmann,rossmann_v7,t13,current  200 @ lr 0.10,probe lgbm,0.132024,,0.0,
+rossmann,rossmann_v7,t13,1000 @ lr 0.10,probe lgbm,0.126318,,0.005705999999999989,
+rossmann,rossmann_v7,t13,1000 @ lr 0.03,probe lgbm,0.130242,,0.0017820000000000058,
+rossmann,rossmann_v7,t13,3000 @ lr 0.03,probe lgbm,0.126248,,0.005776000000000003,
+rossmann,rossmann_v7,t13,5000 @ lr 0.03,probe lgbm,0.125201,,0.006822999999999996,
+rossmann,rossmann_v7,t13,early stop -> 1195,probe lgbm,0.129259,,0.0027649999999999897,

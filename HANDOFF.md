@@ -7,8 +7,22 @@
 > decided.** That lives in `docs/decisions/` — see its README for the index and
 > the project vocabulary. When an entry here records a decision, write the
 > decision record too, or the reasoning is deleted with the entry.
+>
+> **Fresh machine?** Read `docs/SETUP.md` — env, API key, and the (untracked)
+> Kaggle datasets.
 
-## 2026-08-18 (latest) — START HERE. The panel was built, measured, and reverted the same day
+## 2026-08-21 — Onboarding: docs/SETUP.md, config.env.example, results/
+
+**Machine:** MacBook Air | **Branch:** master | **What:** made the repo
+clone-and-run for a second person. New `docs/SETUP.md` (uv env, `config.env`
+key, per-dataset Kaggle download → prep-script → outputs table). New
+`config.env.example` (no key). New tracked `results/` holds the 7 small
+findings-CSVs lifted out of the 11 GB gitignored `_runs/` (see
+`results/README.md`). `_runs/` and the raw Kaggle dirs stay untracked by design.
+**What's next:** the exact `kaggle` command used to pull the *private*
+leaderboard CSVs is not confirmed in SETUP.md — fill in if known.
+
+## 2026-08-18 — The panel was built, measured, and reverted the same day
 
 **Machine:** MacBook Air | **Branch:** master | **593 tests pass** | **no net
 `src/` change to the ruler** | **fresh context starts here.** Two records:

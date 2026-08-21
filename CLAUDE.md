@@ -2,6 +2,9 @@
 
 Leakage-safe tabular-ML core library. See `docs/` for Phase-2 requirements.
 
+**New machine?** `docs/SETUP.md` gets a fresh clone running — env, API key, and
+the Kaggle datasets (all three are deliberately untracked).
+
 ## Decision records
 
 `docs/decisions/` holds one file per design decision — the problem, what was
