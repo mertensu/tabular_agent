@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tabular_agent.harness import journal
 from tabular_agent.harness.session import RunSession
 from tabular_agent.harness.tools import (
     finalize_run,
@@ -78,9 +79,16 @@ def shipped(tmp_path, table_path, stream_file):
         }},
     )
     inspect_data(session)
-    fit_stream_aggregate(
+    stream_table = fit_stream_aggregate(
         session, stream="bookings", by=["store"], value="party", leads=[7],
     )
+    # This fixture tests a bundle whose winning lineage needs a stream, not whether
+    # this synthetic constant-party feature earns that win. Pin its stated
+    # precondition now that the raw work table remains on the terminal ballot.
+    j = journal.load(session.run_dir)
+    row = next(t for t in j["tables"] if t["path"] == stream_table["table"])
+    row["probe_score"] = j["work_probe"]["probe_score"] - 1.0  # rmsle: lower is better
+    journal.save(session.run_dir, j)
     out = finalize_run(session)
     return session, out
 

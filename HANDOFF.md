@@ -11,6 +11,33 @@
 > **Fresh machine?** Read `docs/SETUP.md` — env, API key, and the (untracked)
 > Kaggle datasets.
 
+## 2026-08-21 — The data as given stays on the terminal ballot
+
+**Machine:** Hermes Linux | **Branch:** master | **594 tests pass** | New record:
+[0079](docs/decisions/0079-the-work-table-stays-on-the-terminal-ballot.md).
+
+**Fixed:** `work_probe` lived outside `journal.tables`, and `_terminal_fits`
+ranked only `journal.tables`. Once any derived table existed, finalization had to
+ship one even when every derived score was worse than the data as given. The
+terminal ballot now prepends the scored work table; it also wins an exact tie
+because its lineage is empty.
+
+**TDD:** the new end-to-end test failed with every terminal family fitted on
+`tables/t1.parquet`, then passed with all of them on `data/work.parquet`. The full
+suite exposed two tests whose fixtures silently assumed a built table must win:
+the stream-bundle fixture now pins its stated stream-table winner, and the probe
+identity test now checks the probe fit on whichever table actually won. Final:
+**594 passed, 1650 warnings, 14:12**.
+
+**Notebook:** `notebooks/phase5_work_table_terminal_ballot.ipynb`, three code
+cells smoke-tested in order and committed unexecuted.
+
+**Deliberately not changed:** stop progress still starts from the first derived
+table rather than `work_probe`, and normal table payloads still omit the exact
+candidate-vs-global-incumbent decision. Those are the next signal questions, not
+part of this terminal-selection bug. This machine has no `_runs/`, so the
+sidecar-based historical block analysis remains work for the Mac that holds them.
+
 ## 2026-08-21 — Onboarding: docs/SETUP.md, config.env.example, results/
 
 **Machine:** MacBook Air | **Branch:** master | **What:** made the repo

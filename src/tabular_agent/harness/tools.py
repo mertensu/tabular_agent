@@ -3006,7 +3006,21 @@ def _terminal_fits(session: RunSession) -> list[dict]:
     """
     j = journal.load(session.run_dir)
     metric = (j.get("task") or {}).get("metric") or session.resolved().metric
-    winner = stop.best_table(j.get("tables") or [], metric)
+
+    # The data as given is a candidate too. Its probe score lives separately
+    # because no tool produced it, but building one derived table must not remove
+    # the raw table from the terminal ballot. Put it first so a tie keeps the
+    # shorter, empty lineage for the same reason `best_table` keeps the earlier
+    # derived table on a tie.
+    candidates = list(j.get("tables") or [])
+    work_probe = j.get("work_probe") or {}
+    if work_probe.get("probe_score") is not None:
+        candidates.insert(0, {
+            **work_probe,
+            "id": "work",
+            "path": session.rel(session.data_path),
+        })
+    winner = stop.best_table(candidates, metric)
     table = winner["path"] if winner else None
 
     done = []

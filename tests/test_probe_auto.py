@@ -193,17 +193,18 @@ def test_the_terminal_phase_reproduces_the_probe_exactly(session):
     from tabular_agent.probe import PROBE_MODEL_TYPE
 
     tools.inspect_data(session)
-    t = tools.transform_features(session, "def transform_features(df):\n"
-                                          "    df = df.copy()\n"
-                                          "    df['z'] = df['x1'] * 2\n"
-                                          "    return df")
+    tools.transform_features(session, "def transform_features(df):\n"
+                                      "    df = df.copy()\n"
+                                      "    df['z'] = df['x1'] * 2\n"
+                                      "    return df")
     tools.finalize_run(session)
 
     j = journal.load(session.run_dir)
-    winner = _table_row(session, t["table"])
-    row = next(r for r in j["leaderboard"]
-               if r["model_type"] == PROBE_MODEL_TYPE
-               and r["source_table"] == t["table"])
+    row = next(r for r in j["leaderboard"] if r["model_type"] == PROBE_MODEL_TYPE)
+    if row["source_table"] == session.rel(session.data_path):
+        winner_probe = j["work_probe"]
+    else:
+        winner_probe = _table_row(session, row["source_table"])
     # `probe_score` is rounded to 6 dp on the journal row; the fit itself is
     # bit-identical, so this is the storage precision and not a tolerance.
-    assert row["val_score"] == pytest.approx(winner["probe_score"], abs=5e-7)
+    assert row["val_score"] == pytest.approx(winner_probe["probe_score"], abs=5e-7)

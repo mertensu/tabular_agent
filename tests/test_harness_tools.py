@@ -883,6 +883,30 @@ def test_finalize_on_a_run_that_built_nothing_ships_the_work_table(session):
     assert os.path.exists(os.path.join(session.run_dir, out["bundle_dir"], "pipeline.json"))
 
 
+def test_finalize_ships_the_work_table_when_every_derived_table_is_worse(session):
+    """Building a table must not remove the data as given from the terminal ballot."""
+    from tabular_agent.harness.tools import TERMINAL_MODEL_TYPES
+
+    inspect_data(session)
+    transform_features(session, RATIO_CODE)
+
+    # Pin the comparison rather than relying on a model-specific score: the raw
+    # table is better, so every terminal family must be fitted on it.
+    j = journal.load(session.run_dir)
+    raw_score = j["work_probe"]["probe_score"]
+    j["tables"][0]["probe_score"] = raw_score + 1.0  # logloss: larger is worse
+    journal.save(session.run_dir, j)
+
+    finalize_run(session)
+
+    terminal = [
+        row for row in journal.load(session.run_dir)["leaderboard"]
+        if row["model_type"] in TERMINAL_MODEL_TYPES
+    ]
+    assert terminal
+    assert {row["source_table"] for row in terminal} == {session.rel(session.data_path)}
+
+
 def test_bundle_predicts_on_raw_rows(session):
     inspect_data(session)
     train_tabular_model(session, model_type="lgbm")

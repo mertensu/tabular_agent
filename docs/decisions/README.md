@@ -68,7 +68,7 @@ believed at the time and this table is what is believed now.
 | **Where the search happens** | [0035](0035-the-search-is-over-features.md): the search is over features; models are enumerated, not searched | 0014, 0021, 0022 |
 | **Feature credit** | [0017](0017-credit-by-ablation.md): credit is measured by refitting without the columns | 0015, 0016, 0037 |
 | **The seal, and what an internal score is worth** | [0066](0066-the-collapsed-column-wins-everywhere-except-where-it-is-graded.md): a sealed score is a lower bound on a *difference* too, and can order two candidates backwards when the defect is in the data's provenance | 0019, 0023, 0041, 0043, 0060, 0061, 0065 |
-| **What ships at the end of a run** | [0044](0044-what-ships-is-the-average-not-the-argmax.md): the equal-weight average of the terminal fits, not the argmax — with its cost corrected by [0045](0045-the-cost-of-the-unfiltered-blend-was-underestimated-44x.md) | 0042, 0045 |
+| **What ships at the end of a run** | [0044](0044-what-ships-is-the-average-not-the-argmax.md): the equal-weight average of the terminal fits, not the argmax — with its cost corrected by [0045](0045-the-cost-of-the-unfiltered-blend-was-underestimated-44x.md). [0079](0079-the-work-table-stays-on-the-terminal-ballot.md) fixes the table beneath that ballot: building a derived table no longer removes the data as given from consideration | 0042, 0045, 0079 |
 | **Time-aware features** | [0072](0072-a-feature-is-an-average-over-a-stretch-not-the-value-of-one-row.md): `fit_history` emits trailing windows and nothing else — no last-known pair, no lags | 0047, 0048, 0049, 0050, 0051, 0052, 0053, 0071 |
 | **Second inputs (streams)** | [0063](0063-the-grain-is-measured-from-the-table-not-required-of-the-caller.md): the grain is measured from the table, not required of the caller — and [0064](0064-month-ahead-is-the-same-idea-and-does-not-get-the-same-tool.md) refuses the single-input sibling | 0057, 0062, 0064 |
 | **What the winner had that we do not** | [0070](0070-what-the-winner-had-that-we-cannot-express.md), narrowed by [0071](0071-the-gap-was-not-the-vocabulary-it-was-a-column-nobody-asked-for.md): the distance is **not** the feature vocabulary | 0057, 0070, 0071 |
@@ -114,6 +114,8 @@ vocabulary for *new* records would be the fix, and is not yet decided.
   follows for time-ordered data)*
 - [0030 — A model that could never be served is refused, not scored](0030-a-model-that-cannot-be-served-is-not-trained.md)
   *(the serving schema, and the Rossmann run that argued for it)*
+- [0079 — Building a table does not remove the data as given from the terminal ballot](0079-the-work-table-stays-on-the-terminal-ballot.md)
+  *(bug fix: `work_probe` joins the derived tables on the terminal ballot, and wins a tie because its lineage is empty)*
 
 ### Keeping features honest
 
