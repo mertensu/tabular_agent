@@ -1,0 +1,93 @@
+{
+  "registered_primary_k": 0.25,
+  "high_capacity_labeled_steps": 18,
+  "runs_with_high_capacity_outcomes": [
+    "restaurant_v1",
+    "restaurant_v2"
+  ],
+  "rules": {
+    "0.0": {
+      "accepted": 11,
+      "true_positive": 7,
+      "truth_positive": 7,
+      "precision": 0.6363636363636364,
+      "recall": 1.0
+    },
+    "0.25": {
+      "accepted": 11,
+      "true_positive": 7,
+      "truth_positive": 7,
+      "precision": 0.6363636363636364,
+      "recall": 1.0
+    },
+    "0.5": {
+      "accepted": 7,
+      "true_positive": 6,
+      "truth_positive": 7,
+      "precision": 0.8571428571428571,
+      "recall": 0.8571428571428571
+    },
+    "1.0": {
+      "accepted": 7,
+      "true_positive": 6,
+      "truth_positive": 7,
+      "precision": 0.8571428571428571,
+      "recall": 0.8571428571428571
+    }
+  },
+  "registered_prediction_passed": false,
+  "controls": [
+    {
+      "run": "ieee_v1",
+      "tables": 24,
+      "validation_rows": 29527,
+      "distinct_order_values": 28816,
+      "tied_block_boundaries": 0,
+      "internal_block_boundaries": 4,
+      "parent_intervals_reproduced": 24,
+      "derived_incumbent_contrasts": 23,
+      "work_aware_contrasts": 24
+    },
+    {
+      "run": "restaurant_v1",
+      "tables": 17,
+      "validation_rows": 12659,
+      "distinct_order_values": 18,
+      "tied_block_boundaries": 4,
+      "internal_block_boundaries": 4,
+      "parent_intervals_reproduced": 17,
+      "derived_incumbent_contrasts": 16,
+      "work_aware_contrasts": 17
+    },
+    {
+      "run": "restaurant_v2",
+      "tables": 13,
+      "validation_rows": 12659,
+      "distinct_order_values": 18,
+      "tied_block_boundaries": 4,
+      "internal_block_boundaries": 4,
+      "parent_intervals_reproduced": 13,
+      "derived_incumbent_contrasts": 12,
+      "work_aware_contrasts": 13
+    },
+    {
+      "run": "restaurant_v2",
+      "capacity_edges": 2,
+      "capacity_utilities_resolved": 3,
+      "capacity_incumbent_labels": 2,
+      "incumbent_identity_differs_across_budgets": 0
+    },
+    {
+      "run": "restaurant_v1",
+      "capacity_edges": 16,
+      "capacity_utilities_resolved": 17,
+      "capacity_incumbent_labels": 16,
+      "incumbent_identity_differs_across_budgets": 6
+    }
+  ],
+  "limits": [
+    "Two runs from one dataset family; steps are adaptive and dependent.",
+    "IEEE contrasts are descriptive because no high-capacity reruling is available.",
+    "Historical row-count blocks may split tied ordering values."
+  ]
+}
