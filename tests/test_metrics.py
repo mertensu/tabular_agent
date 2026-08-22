@@ -38,6 +38,22 @@ def test_multiclass_accuracy_from_proba_matrix():
     assert compute_metric("accuracy", y, p) == pytest.approx(1.0)
 
 
+def test_accuracy_maps_probabilities_back_to_real_class_labels():
+    binary_y = np.array(["no", "yes", "yes"])
+    binary_p = np.array([0.2, 0.9, 0.4])
+    assert compute_metric(
+        "accuracy", binary_y, binary_p, labels=["no", "yes"]
+    ) == pytest.approx(2 / 3)
+
+    multiclass_y = np.array([10, 20, 30])
+    multiclass_p = np.array([
+        [0.7, 0.2, 0.1], [0.1, 0.8, 0.1], [0.2, 0.2, 0.6]
+    ])
+    assert compute_metric(
+        "accuracy", multiclass_y, multiclass_p, labels=[10, 20, 30]
+    ) == pytest.approx(1.0)
+
+
 def test_greater_is_better_directions():
     assert greater_is_better("auc") is True
     assert greater_is_better("accuracy") is True

@@ -1,0 +1,228 @@
+# ---------------------------------------------------------- explore_experiment
+
+
+@pytest.fixture
+def regression_session(tmp_path):
+    """A regression run whose error is concentrated in one segment of a string
+    column the model cannot use — the shape `explore_experiment` exists to find."""
+    rng = np.random.default_rng(7)
+    n = 300
+    x1 = rng.normal(size=n)
+    segment = rng.choice(["easy", "hard"], size=n)
+    # `hard` rows carry noise the features cannot explain, so the model's error
+    # lives there and nowhere else.
+    noise = np.where(segment == "hard", rng.normal(scale=5.0, size=n), 0.0)
+    df = pd.DataFrame({"x1": x1, "segment": segment, "y": 3 * x1 + noise})
+    data_path = str(tmp_path / "reg.csv")
+    df.to_csv(data_path, index=False)
+    return RunSession(str(tmp_path / "run"), data_path, TaskSpec(target="y", n_splits=3))
+
+
+def _explore(session, exp_id, body):
+    return explore_experiment(session, exp_id, f"def explore(df):\n{body}")
+
+
+def test_the_frame_carries_the_error_and_the_columns_the_model_could_not_use(
+    regression_session,
+):
+    """The string column is the point. A model cannot train on `segment`, which is
+    exactly why grouping residuals by it is how the agent learns to encode it."""
+    inspect_data(regression_session)
+    exp = train_tabular_model(regression_session, model_type="lgbm")
+
+    out = _explore(regression_session, exp["experiment_id"],
+                   "    return sorted(df.columns)")
+    columns = out["result"]
+    assert {"x1", "segment", "y", "oof_pred", "residual", "fold"} <= set(columns)
+
+    out = _explore(
+        regression_session, exp["experiment_id"],
+        "    return df.groupby('segment')['residual'].apply(lambda s: float(s.abs().mean())).to_dict()",
+    )
+    errors = out["result"]
+    assert errors["hard"] > 3 * errors["easy"]
+
+
+def test_rows_line_up_with_the_folds_they_were_held_out_in(session):
+    """The strongest available check that the join is not scrambled: recomputing
+    the metric per fold from the frame must reproduce the fold scores the
+    experiment recorded. Alignment here is positional, so a silent off-by-one
+    would be invisible in every other assertion."""
+    from tabular_agent.metrics import compute_metric
+
+    inspect_data(session)
+    exp = train_tabular_model(session, model_type="lgbm")
+    with open(os.path.join(session.run_dir, exp["artifact_path"], "meta.json")) as f:
+        meta = json.load(f)
+
+    out = _explore(
+        session, exp["experiment_id"],
+        "    return {int(k): [list(v['y']), list(v['oof_pred'])]\n"
+        "            for k, v in df.groupby('fold')[['y', 'oof_pred']].agg(list).to_dict('index').items()}",
+    )
+    recomputed = [
+        compute_metric(meta["metric"], np.array(y), np.array(p))
+        for _, (y, p) in sorted(out["result"].items())
+    ]
+    assert recomputed == pytest.approx(meta["fold_metrics"], abs=1e-9)
+
+
+def test_it_sees_the_work_half_only(session):
+    """200 rows in, 160 in the work half. The validation rows have no route here:
+    the frame is built from the experiment's own source table."""
+    inspect_data(session)
+    exp = train_tabular_model(session, model_type="lgbm")
+
+    out = _explore(session, exp["experiment_id"], "    return len(df)")
+    assert out["result"] == 160
+
+
+def test_printed_output_comes_back(session):
+    inspect_data(session)
+    exp = train_tabular_model(session, model_type="lgbm")
+
+    out = _explore(session, exp["experiment_id"],
+                   "    print('fold sizes:', df['fold'].value_counts().to_dict())\n"
+                   "    return 'ok'")
+    assert out["result"] == "ok"
+    assert "fold sizes:" in out["stdout"]
+
+
+def test_a_quiet_call_carries_no_empty_stdout_field(session):
+    """0018: a field that reads the same on every call is not payload."""
+    inspect_data(session)
+    exp = train_tabular_model(session, model_type="lgbm")
+
+    assert "stdout" not in _explore(session, exp["experiment_id"], "    return 1")
+
+
+def test_unknown_experiment_names_the_real_ones(session):
+    inspect_data(session)
+    train_tabular_model(session, model_type="lgbm")
+
+    with pytest.raises(ValueError, match="no such experiment") as exc:
+        _explore(session, "e99", "    return 1")
+    assert "'e1'" in str(exc.value)
+
+
+def test_it_costs_nothing_and_records_nothing(session):
+    """Free like `explain_table`: it produces no model to ship, so charging it
+    against the experiment budget would price looking at a failure like causing
+    one."""
+    inspect_data(session)
+    exp = train_tabular_model(session, model_type="lgbm")
+    before = journal.load(session.run_dir)
+
+    for _ in range(5):
+        _explore(session, exp["experiment_id"], "    return float(df['residual'].std())")
+
+    after = journal.load(session.run_dir)
+    assert after["leaderboard"] == before["leaderboard"]
+    assert after["stop"] == before["stop"]
+
+
+def test_it_still_works_once_the_run_has_stopped(session):
+    """The moment the agent most needs to ask what went wrong is after being
+    told to stop, so a refusal must not take the diagnostic with it."""
+    inspect_data(session)
+    exp = train_tabular_model(session, model_type="lgbm")
+    finalize_run(session)
+
+    assert _explore(session, exp["experiment_id"], "    return len(df)")["result"] == 160
+
+
+def test_nothing_survives_between_calls(session):
+    """There is no kernel. State is `run_dir`; a name bound in one call is gone
+    in the next, which is what keeps a resumed run identical to a fresh one."""
+    inspect_data(session)
+    exp = train_tabular_model(session, model_type="lgbm")
+
+    _explore(session, exp["experiment_id"], "    global stash\n    stash = 1\n    return 1")
+    with pytest.raises(SandboxError):
+        _explore(session, exp["experiment_id"], "    return stash")
+
+
+def test_exploration_cannot_train_a_model(session):
+    inspect_data(session)
+    exp = train_tabular_model(session, model_type="lgbm")
+
+    with pytest.raises(SandboxError, match="train_tabular_model"):
+        _explore(session, exp["experiment_id"], "    import lightgbm\n    return 1")
+
+
+# ------------------------------------------------------------ target transforms
+
+
+@pytest.fixture
+def priced_session(tmp_path):
+    """A strictly positive, right-skewed target — the shape where fitting on the
+    log scale is the point, and the only shape log1p/sqrt are defined on."""
+    rng = np.random.default_rng(5)
+    n = 300
+    area = rng.uniform(30, 160, n)
+    grade = rng.choice(["low", "mid", "high"], n)
+    level = {"low": 700, "mid": 1400, "high": 2400}
+    price = area * np.array([level[g] for g in grade]) * rng.lognormal(0, 0.25, n)
+    df = pd.DataFrame({"area": area, "grade": grade, "y": price})
+    path = str(tmp_path / "priced.csv")
+    df.to_csv(path, index=False)
+    return RunSession(str(tmp_path / "run"), path, TaskSpec(target="y", n_splits=3))
+
+
+def test_the_transform_is_recorded_and_the_scores_stay_comparable(priced_session):
+    """Two experiments differing only by target scale must land on one leaderboard
+    with scores that mean the same thing, or the run cannot choose between them."""
+    inspect_data(priced_session)
+    raw = train_tabular_model(priced_session, model_type="lgbm", target_transform="none")
+    log = train_tabular_model(priced_session, model_type="lgbm", target_transform="log1p")
+
+    rows = journal.load(priced_session.run_dir)["leaderboard"]
+    assert [r["target_transform"] for r in rows] == ["none", "log1p"]
+    # Same metric, same rows, same units — within a factor of a few of each other
+    # rather than the ~10x gap a log-scale score would show.
+    assert 0.2 < raw["val_score"] / log["val_score"] < 5
+
+
+def test_an_impossible_transform_is_a_correction_not_a_dead_run(session):
+    """`session`'s target is a 0/1 class label. The message has to name the fix,
+    because it arrives as a ModelRetry and is all the agent gets."""
+    inspect_data(session)
+    with pytest.raises(ValueError, match="regression only"):
+        train_tabular_model(session, model_type="lgbm", target_transform="log1p")
+
+
+def test_vs_source_table_does_not_compare_across_target_scales(priced_session):
+    """0017's rule: a comparison must differ by exactly one thing. A log fit on a
+    child table measured against a raw fit on its source would credit the
+    transform to the columns.
+
+    Since 0035 the scale is a property of the run rather than of an experiment,
+    so this can no longer happen by accident — but the guard stays, because the
+    terminal fit and the baseline still pass one explicitly.
+    """
+    inspect_data(priced_session)
+    enc = fit_encoding(priced_session, ["grade"], "frequency")
+    train_tabular_model(priced_session, model_type="lgbm", target_transform="none")
+    child = train_tabular_model(
+        priced_session, table=enc["table"], model_type="lgbm", target_transform="log1p"
+    )
+    assert child["vs_source_table"] is None
+    assert "not with this exact fit" in child["vs_source_basis"]
+
+
+def test_the_bundle_predicts_in_the_original_units(priced_session):
+    """The silent failure: a bundle that forgets the inverse returns log-dollars,
+    and every value still looks like a plausible number."""
+    from tabular_agent.pipeline import load_bundle, predict_bundle
+
+    inspect_data(priced_session)
+    train_tabular_model(priced_session, model_type="lgbm", target_transform="log1p")
+    out = finalize_run(priced_session)
+
+    raw_rows = load_table(priced_session.source_path).drop(columns=["y"])
+    preds = predict_bundle(
+        load_bundle(os.path.join(priced_session.run_dir, out["bundle_dir"])), raw_rows
+    )
+    truth = load_table(priced_session.source_path)["y"]
+    assert preds.mean() > 0.3 * truth.mean()
+    assert np.corrcoef(preds, truth)[0, 1] > 0.5

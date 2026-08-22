@@ -278,7 +278,7 @@ Enthält den ausdrücklichen Hinweis, dass Modelltraining **nur** über `train_t
 
 ## 17. Nachtrag (2026-07-22): Anforderungen aus dem Phase-1-Review — für Phase 2 (v1)
 
-Beim Durcharbeiten der Core-Lib (`notebooks/phase1_core_walkthrough.ipynb`) identifiziert; beide gehören in den Phase-2-Plan, nicht in „nach v1":
+Beim Durcharbeiten der Core-Lib (`research/archive/notebooks/phase1_core_walkthrough.ipynb`) identifiziert; beide gehören in den Phase-2-Plan, nicht in „nach v1":
 
 1. **`inspect_data`: Profil um Verteilungsinformation erweitern.** Das aktuelle `profile_dataframe` liefert nur Struktur (dtype, Missing, Unique) — für gute Modellierungsentscheidungen des Agenten fehlt Verteilung:
    - Numerische Spalten: `mean`, `std`, `min`, `max`, Quantile, **Skewness**. Direkt entscheidungsrelevant: stark rechtsschiefes nicht-negatives Target → `rmsle` (die `default_metric`-Heuristik prüft bisher nur Nicht-Negativität); schiefe Features → `log1p`-Kandidat für `transform_features`.
@@ -298,7 +298,7 @@ Statt (1) das Profil um Verteilungs-Statistiken (Skewness, Quantile) zu erweiter
   - read-only (`explore(df) → summary`): Ergebnis wird dem Agenten **gezeigt und verworfen**. Kein Persistenz-Pfad → kann strukturell nicht zum Feature werden.
 - **Der Leakage-Backdoor aus Punkt 2 bleibt geschlossen** — nicht mehr per Tool-Description-Konvention, sondern *strukturell*: Da das read-only-Ergebnis nirgends persistiert wird und zusätzlich größenbegrenzt ist, lässt sich eine per-Kategorie-Target-Statistik nicht als handgebaute (leakage-behaftete) Spalte zurückschmuggeln. `fit_encoding` (OOF, per Fold) bleibt der einzige sanktionierte Weg von Kategorie→Target-Signal zum Feature.
 
-Umsetzung Phase 2 (Stand 2026-07-24): `sandbox.py` (Default-Tier aus §6) + `explore.py` (`explore_dataframe`) implementiert und getestet; Lehr-Notebook `notebooks/phase2_sandbox_and_exploration.ipynb`. `profile_dataframe` bleibt struktur-only. `transform_features` (gleiche Sandbox, `df→df`, persistiert) ist der nächste Chunk.
+Umsetzung Phase 2 (Stand 2026-07-24): `sandbox.py` (Default-Tier aus §6) + `explore.py` (`explore_dataframe`) implementiert und getestet; historisches Lehr-Notebook `research/archive/notebooks/phase2_sandbox_and_exploration.ipynb`. `profile_dataframe` bleibt struktur-only. `transform_features` (gleiche Sandbox, `df→df`, persistiert) ist der nächste Chunk.
 
 ---
 

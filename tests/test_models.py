@@ -228,7 +228,7 @@ def test_fitting_on_the_log_scale_helps_when_the_metric_is_rmsle():
 
 
 def test_oof_is_stored_on_the_original_scale():
-    """`explore_experiment` computes `residual = y - oof_pred`. Out-of-fold values
+    """`explore_table` computes `residual = y - oof_pred`. Out-of-fold values
     in log-dollars would silently redefine what a residual means."""
     from tabular_agent.cv import make_folds
 

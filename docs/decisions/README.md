@@ -617,5 +617,5 @@ Longer-form notes that are not decisions:
   decision.
 - `docs/superpowers/specs/2026-07-21-tabular-agent-mcp-design.md` — the original
   design spec. Its title is stale (see 0001); revisions are dated in place.
-- `notebooks/` — hands-on walkthroughs, one per slice of the system, each
+- `research/archive/notebooks/` — historical hands-on walkthroughs, each
   driving the machinery by hand before letting an LLM near it.

@@ -1,6 +1,6 @@
 # Target encoding: who gets lied to?
 
-Companion note to `notebooks/target_encoding_step_by_step.ipynb` (sections 9–12).
+Companion note to `research/archive/notebooks/target_encoding_step_by_step.ipynb` (sections 9–12).
 
 ## The core mechanism (scheme B — "fit encoder on the 4 training folds")
 

@@ -9,8 +9,9 @@ three things are deliberately **not** in git and have to be supplied locally:
 3. the Kaggle competition data.
 
 None of the ~11 GB of agent output in `_runs/` is needed — it is reproducible
-from `scripts/` and its findings are summarised in `results/` and the decision
-records. See [`results/README.md`](../results/README.md).
+from the archived research runners and its findings are preserved under
+`research/archive/readings/` and the decision records. See
+[`research/archive/readings/README.md`](../research/archive/readings/README.md).
 
 ---
 
@@ -22,7 +23,7 @@ Python 3.11+.
 ```bash
 uv sync                 # runtime deps
 uv sync --extra dev     # + pytest
-uv run pytest           # sanity check — should pass (~590 tests)
+uv run pytest           # sanity check — the active product/compatibility suite
 ```
 
 ## 2. API key
@@ -58,7 +59,7 @@ below — the prep scripts and runners look there by hardcoded path.
 | Rossmann | `rossmann-store-sales` | `rossmann_store_sales/` | `uv run python scripts/prep_rossmann.py` → `train_joined.parquet`, `test_joined.parquet` |
 | Restaurant | `recruit-restaurant-visitor-forecasting` | `restaurant_visitor/` | `uv run python scripts/prep_restaurant.py` → `train_joined.parquet`, `test_joined.parquet`, `air_reserve_stream.parquet`, `hpg_reserve_stream.parquet` |
 | IEEE fraud | `ieee-fraud-detection` | `fraud_detection/` | `uv run python scripts/prep_ieee.py` → `train_joined.parquet`, `test_joined.parquet` |
-| Porto Seguro | `porto-seguro-safe-driver-prediction` | `seguro_driver_prediction/` | none yet — no prep script or runner (waiting to be used) |
+| Porto Seguro | `porto-seguro-safe-driver-prediction` | `seguro_driver_prediction/` | no active prep/runner; historical runners are archived under `research/archive/runs/seguro/` |
 
 Example, for Rossmann:
 

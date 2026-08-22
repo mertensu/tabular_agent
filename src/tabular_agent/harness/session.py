@@ -11,6 +11,7 @@ optionally with a third, **sealed** slice no tool can reach, scored once at
 stays movable (0003).
 """
 
+import json
 import os
 import re
 
@@ -66,17 +67,44 @@ class RunSession:
         serving_columns: list[str] | None = None,
         fit_time_budget_s: float | None = None,
         streams: dict[str, dict] | None = None,
+        profile: str = "full",
     ):
+        if profile not in {"full", "minimal"}:
+            raise ValueError(f"unknown run profile {profile!r}; use 'full' or 'minimal'")
+        if profile == "minimal" and holdout_fraction is not None:
+            raise ValueError(
+                "the minimal profile has one train/evaluation split; an internal "
+                "holdout belongs to an offline audit, not the product run"
+            )
+        if profile == "minimal" and streams:
+            raise ValueError(
+                "the minimal profile accepts one table; declared streams require "
+                "the full research profile"
+            )
         self.ctx = RunContext(run_dir)
+        journal_path = os.path.join(self.ctx.run_dir, "run_journal.json")
+        if os.path.exists(journal_path):
+            with open(journal_path) as handle:
+                existing = json.load(handle)
+            recorded = ((existing.get("split") or {}).get("profile") or "full")
+            if recorded != profile:
+                raise ValueError(
+                    f"this run was created with profile {recorded!r}; refusing to "
+                    f"resume it as {profile!r} because the tool and evaluation "
+                    "contracts would change"
+                )
         # The file the user handed us. Never trained on directly — `data_path`
         # below is the work half — but kept so the split can be re-derived and
         # so task detection does not depend on which rows landed where.
         self.source_path = os.path.abspath(data_path)
         self.spec = spec
+        self.profile = profile
         # How long this run is allowed to keep going without getting better
         # (§19.3). On the session rather than as a module constant because it is
         # a property of *this* run's budget, not of the library.
-        self.stop_policy = stop_policy or StopPolicy()
+        self.stop_policy = stop_policy or (
+            StopPolicy(min_gain_ratio=0.0) if profile == "minimal" else StopPolicy()
+        )
         self.val_fraction = val_fraction
         # The sealed third slice (0023). `None` — off — is the default, and the
         # default is deliberate rather than lazy: turning it on takes rows out of
@@ -106,7 +134,9 @@ class RunSession:
         # nothing in a run can tell — the validation half is drawn from the same
         # file and has the column too, so it *confirms* the leak instead of
         # catching it.
-        self.serving_columns = list(serving_columns) if serving_columns else None
+        self.serving_columns = (
+            None if serving_columns is None else list(serving_columns)
+        )
         # Wall-clock ceiling on one cross-validated fit. `None` means no ceiling,
         # which is right for a library that cannot know how big the data is or what
         # machine it is on — and why this sits beside `stop_policy` rather than
@@ -415,6 +445,7 @@ class RunSession:
         n_holdout = len(load_table(holdout)) if holdout else 0
         return {
             "source_path": self.source_path,
+            "profile": self.profile,
             "mode": "ordered" if self.split_on else "random",
             "split_on": self.split_on,
             "seed": self.spec.seed,
@@ -446,6 +477,18 @@ class RunSession:
             df = load_table(self.source_path)
             self._require_target(df)
             self._resolved = resolve_taskspec(self.spec, df[self.spec.target])
+            if (
+                self.profile == "minimal"
+                and self._resolved.task_type == "binary"
+                and self._resolved.positive_class is not None
+            ):
+                labels = sorted(df[self.spec.target].dropna().unique())
+                if labels and self._resolved.positive_class != labels[-1]:
+                    raise ValueError(
+                        f"positive_class={self._resolved.positive_class!r} is not "
+                        f"supported by the minimal profile; use {labels[-1]!r}, the "
+                        "model's positive probability class, or omit positive_class"
+                    )
         return self._resolved
 
     def resolve_table(self, table: str | None) -> str:

@@ -12,8 +12,11 @@ they are unit-testable, and a human can drive the whole pipeline by hand before
 handing the keys to a model. ``agent.py`` only wraps them.
 """
 
+import contextlib
+import fcntl
 import json
 import os
+import shutil
 
 import joblib
 import numpy as np
@@ -29,7 +32,7 @@ from ..encoders import to_periods as _to_periods
 from ..inspect import profile_dataframe, profile_stream
 from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
-from ..models import predict_model, train_cv
+from ..models import _make_model, predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..probe import PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_probe, probe_predict
 from ..blend import apply_blend
@@ -395,7 +398,7 @@ def _score_on_held_out(
     # does not claim to measure something it cannot see.
     se = (
         None
-        if session.split_on
+        if session.profile == "minimal" or session.split_on
         else _bootstrap_se(spec.metric, y_val, preds, classes, spec.seed)
     )
     return score, se, None, np.asarray(preds)
@@ -436,6 +439,25 @@ def _probe_preds_path(session: RunSession, table_path: str) -> str:
     """
     stem = os.path.splitext(os.path.basename(table_path))[0]
     return session.ctx.path("probe_preds", f"{stem}.npy")
+
+
+def _agent_score_fields(session: RunSession, scored: dict) -> dict:
+    """Public score vocabulary for the selected product profile."""
+    if session.profile != "minimal":
+        return scored
+    out = dict(scored)
+    if "probe_score" in out:
+        out["evaluation_score"] = out.pop("probe_score")
+    if "probe_vs_source_table" in out:
+        out["gain_vs_parent"] = out.pop("probe_vs_source_table")
+    if "probe_unavailable" in out:
+        out["evaluation_unavailable"] = out.pop("probe_unavailable")
+    for key in (
+        "probe_se", "probe_fit_seconds", "probe_target_transform",
+        "probe_vs_source_interval",
+    ):
+        out.pop(key, None)
+    return out
 
 
 def _load_probe_preds(session: RunSession, table_path: str) -> np.ndarray | None:
@@ -528,7 +550,7 @@ def probe_table(session: RunSession, table_path: str) -> dict:
 
     if score is None:
         return {"probe_score": None, "probe_unavailable": why_not}
-    if preds is not None:
+    if preds is not None and session.profile != "minimal":
         # Written after the score, so a table with a number always has its
         # predictions and never the reverse. Failing to persist them costs an
         # interval on a later comparison, never the score itself, so it is not
@@ -537,12 +559,14 @@ def probe_table(session: RunSession, table_path: str) -> dict:
             np.save(_probe_preds_path(session, table_path), np.asarray(preds, dtype=float))
         except Exception:  # noqa: BLE001 - see the docstring: this cannot fail loudly
             pass
-    return {
+    out = {
         "probe_score": round(score, 6),
-        "probe_se": None if se is None else round(se, 6),
         "probe_fit_seconds": fit.fit_seconds,
         "probe_target_transform": fit.target_transform,
     }
+    if session.profile != "minimal":
+        out["probe_se"] = None if se is None else round(se, 6)
+    return out
 
 
 
@@ -561,7 +585,8 @@ def _probe_and_compare(session: RunSession, table_path: str, source_rel: str) ->
     before = _source_reference(session, source_rel)
     if before is not None:
         out["probe_vs_source_table"] = _gain(out["probe_score"], before, session.resolved().metric)
-        out.update(_difference_interval(session, table_path, source_rel))
+        if session.profile != "minimal":
+            out.update(_difference_interval(session, table_path, source_rel))
     return out
 
 
@@ -657,7 +682,7 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
     truncated = len(columns) > MAX_REPORTED_COLUMNS
     shown = dict(list(columns.items())[:MAX_REPORTED_COLUMNS])
 
-    return {
+    out = {
         "table": session.rel(path),
         "n_rows": prof["n_rows"],
         "n_cols": prof["n_cols"],
@@ -712,6 +737,9 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
             else "All feature columns are numeric and usable as-is."
         ),
     }
+    if session.profile == "minimal":
+        out.pop("n_splits", None)
+    return out
 
 
 def fit_encoding(
@@ -824,7 +852,7 @@ def fit_encoding(
         "n_rows": int(len(out)),
         "source_table": row["source_table"],
         "non_numeric_columns": still_dropped,
-        **scored,
+        **_agent_score_fields(session, scored),
         "note": (
             "This table is scored above; build on it to keep the new columns. "
             + (
@@ -959,7 +987,7 @@ def fit_group_stats(
         "n_groups": len(encoder.mapping_),
         "n_rows": int(len(out)),
         "source_table": session.rel(path),
-        **scored,
+        **_agent_score_fields(session, scored),
         # Out-of-fold values are missing wherever a row was in no fold's held-out
         # block, which under an ordered split is the whole first period. Said
         # plainly because the column looks broken otherwise, and the models
@@ -1202,7 +1230,7 @@ def fit_history(
         "n_groups": len(encoder.history_),
         "n_rows": int(len(out)),
         "source_table": session.rel(path),
-        **scored,
+        **_agent_score_fields(session, scored),
         "n_rows_without_value": n_missing,
         # {window: median number of observations that fell inside it}. Read it
         # beside `shortest_training_prefix`: on its own it sees only the training
@@ -1453,7 +1481,7 @@ def fit_stream_aggregate(
         "event_grain": encoder.grain_,
         "n_rows": int(len(out)),
         "source_table": session.rel(path),
-        **scored,
+        **_agent_score_fields(session, scored),
         # Share of *all* rows this lead could put at least one record behind —
         # the number to compare against `matched_rows`.
         "rows_answered": answered_share,
@@ -1562,7 +1590,7 @@ def filter_rows(
         "fraction_dropped": round(summary["n_dropped"] / summary["n_rows"], 4),
         "source_table": session.rel(path),
         "new_columns": [],
-        **scored,
+        **_agent_score_fields(session, scored),
         "note": (
             "The kept rows are what anything built on this table fits on. The filter "
             "is recorded as train-time-only and does not run at predict time, so "
@@ -1662,7 +1690,7 @@ def transform_features(
         "n_cols": len(out.columns),
         "source_table": row["source_table"],
         "non_numeric_columns": still_dropped,
-        **scored,
+        **_agent_score_fields(session, scored),
         "note": (
             "This table is scored above; build on it to keep the new columns. The code "
             "is stored in the table's lineage and re-runs at predict time; the target "
@@ -1671,411 +1699,7 @@ def transform_features(
     }
 
 
-#: How much of the table is held back to rank candidate subsets, **when there is
-#: no ordering column to match a span against**. See `_selection_split`: on an
-#: ordered run this fraction is not used, because a fraction is the wrong unit.
-#:
-#: This block is the whole leakage argument for feature selection, so it is worth
-#: being explicit about what it is not. It is **cut from the table itself** —
-#: i.e. from the work half — and never from the validation half that ranks tables
-#: or the sealed holdout that scores the ballot (0023, 0041). A subset search is
-#: an argmax over hundreds of candidates, and 0023 measured what an argmax over
-#: *24* does to the rows it is taken on: optimism went from +0.00206 to +0.00944.
-#: Pointing that argmax at `val` would destroy the only honest ruler the run has.
-SELECTION_BLOCK = 0.2
 
-#: The selection block is never allowed past this much of the table, however wide
-#: the validation block is. A run configured with a very large `val_fraction`
-#: would otherwise leave too few rows to fit a candidate on at all.
-SELECTION_BLOCK_MAX = 0.4
-
-
-def _validation_span(session: RunSession) -> float | None:
-    """The width of the validation block in ordering-column units, or `None`.
-
-    Returns a plain number for numeric orderings and a `timedelta64` for dates;
-    both subtract from the ordering column correctly, which is all the caller
-    needs. `None` whenever the answer cannot be trusted — no ordering column, no
-    validation rows on disk, or a degenerate zero-width block.
-    """
-    order = session.split_on
-    if order is None:
-        return None
-    try:
-        val = load_table(session.val_path)
-    except Exception:  # noqa: BLE001 - a missing val half is a fallback, not an error
-        return None
-    if order not in val.columns or val.empty:
-        return None
-    values = val[order].to_numpy()
-    try:
-        span = values.max() - values.min()
-        # `span * 0` is the zero of whatever type the subtraction produced — a
-        # number, or a `timedelta64` for dates — which avoids naming the type.
-        if not span > span * 0:
-            return None
-    except TypeError:
-        # An ordering column that sorts but does not subtract: dates read from a
-        # CSV arrive as strings, and `RunSession` is happy to order on them. There
-        # is no span to match, so the caller falls back to the fraction rather
-        # than the tool failing on a configuration that is otherwise legal.
-        return None
-    return span
-
-#: Subsets drawn per call, and the hard cap.
-#:
-#: Each candidate is a fit, so this is a wall-clock budget, and it is the one
-#: place this tool is unambiguously weaker than the practice it comes from: the
-#: Rossmann winner ran over 500 random-feature models and then scored all
-#: ~125,000 pairs of them. An agent working inside `fit_time_budget_s` does not
-#: have that, so the default is small and the agent may raise it when a table is
-#: wide enough to be worth the minutes.
-SELECT_CANDIDATES_DEFAULT = 48
-SELECT_CANDIDATES_MAX = 200
-
-#: Probability that a column survives into a candidate subset. Half, so the draws
-#: are spread across subset sizes rather than clustered near "almost everything",
-#: which is where a search learns nothing.
-SELECT_KEEP_PROB = 0.5
-
-#: How many of the best **pairs** are combined into the union candidate. Pairs,
-#: not subsets — see the pair block in `select_features` for why that distinction
-#: is the difference between measuring something and measuring noise. The winner's
-#: report is the source of this step and of the number being small:
-#: *"I got the idea to take the features from all of the selected models together
-#: and combine them into one model: this turned out to work very well."*
-SELECT_TOP_K = 5
-
-
-def _selection_split(df: pd.DataFrame, session: RunSession) -> tuple[np.ndarray, np.ndarray]:
-    """Row positions to fit candidate subsets on, and to rank them on.
-
-    Ordered runs get the **tail** of the table, so a subset is ranked on rows
-    later than the ones it was fitted on — the shape of the task, and the same
-    geometry `RunSession` uses to cut validation off the end (0043).
-
-    **The tail is measured as a span, not as a fraction, and that is the whole
-    design.** The first version of this took a fixed fifth of the table, and on
-    Rossmann's `t13` a fifth of the work half is about six months while the run is
-    ranked on forty-five days. So every candidate was fitted on data ending six
-    months before the rows that judged it, and the search answered a question
-    nobody asked: which columns survive a six-month-ahead forecast. It dropped
-    `DayOfWeek` and `Promo`, won its own block by 0.019, and lost the validation
-    half by **0.020**. 0043 and 0060 both say why in advance — a block far from
-    the horizon you are graded at measures a different task — and a fraction is
-    simply the wrong unit in which to say "close to the horizon".
-
-    So the block is cut to **the same width as the validation block**, in the
-    ordering column's own units. The search then ranks subsets over the same
-    distance the run will be ranked over, one block earlier in time.
-
-    Unordered runs fall back to `SELECTION_BLOCK` of the rows as they sit, which
-    is already a random block because the split shuffled, and where "span" has no
-    meaning to match anyway.
-
-    Deliberately not `make_folds`: k folds would cost k fits per candidate, and
-    the point of drawing many subsets is that each one has to be cheap.
-    """
-    n = len(df)
-    order = session.split_on
-    if order is None or order not in df.columns:
-        return np.arange(n)[: int(n * (1 - SELECTION_BLOCK))], np.arange(n)[int(n * (1 - SELECTION_BLOCK)):]
-
-    pos = np.argsort(df[order].to_numpy(), kind="stable")
-    values = df[order].to_numpy()[pos]
-    span = _validation_span(session)
-
-    cut = int(n * (1 - SELECTION_BLOCK))
-    if span is not None:
-        # `side="left"`: rows exactly `span` before the end belong to the block,
-        # matching how `RunSession` puts a boundary value on the later side.
-        cut = int(np.searchsorted(values, values[-1] - span, side="left"))
-    # Clamped from both ends: a span that swallows the table leaves nothing to fit
-    # on, and a span narrower than a handful of rows ranks hundreds of candidates
-    # on noise. Both are configuration accidents rather than data properties.
-    cut = min(max(cut, int(n * (1 - SELECTION_BLOCK_MAX))), n - 1)
-    return pos[:cut], pos[cut:]
-
-
-def select_features(
-    session: RunSession,
-    table: str | None = None,
-    n_candidates: int = SELECT_CANDIDATES_DEFAULT,
-    keep_prob: float = SELECT_KEEP_PROB,
-    top_k: int = SELECT_TOP_K,
-    seed: int = 0,
-) -> dict:
-    """Search over *subsets* of a table's columns and keep the one that wins.
-
-    Every other tool here makes a table **wider**. This is the only one that makes
-    it narrower, and it exists because "more columns" and "a better table" stop
-    being the same thing well before an agent runs out of ideas for columns. The
-    Rossmann winner put it plainly: *"With all features together, the model easily
-    overfit the train set, resulting in suboptimal performance on the test set.
-    Therefore, I needed a way to reduce the feature set."*
-
-    **Random subsets, not a ranking by importance.** Importance is measured on the
-    model that already has every column, so a column that is redundant *given the
-    others* scores low whether or not it would carry the table alone, and two
-    columns that substitute for each other split their credit and both look
-    droppable. Drawing subsets asks the question that is actually being decided —
-    how does the table do *without* this handful of columns — and it is what the
-    practice this comes from settled on after trying the alternative: *"The
-    handpicking cost me a lot of time and I realized that it was biased by my
-    ideas. Therefore I decided to create some models on random selections."*
-
-    **Subsets are ranked in pairs, not on their own.** Every drawn subset is
-    fitted once and its predictions kept; then every *pair* of them is averaged
-    and scored, and the columns that go forward are the ones appearing in the
-    members of the best pairs. This is the winner's procedure and the reason it is
-    followed exactly is measured: ranking subsets by their individual scores
-    produced a null on two datasets, because an argmax over a hundred candidates
-    whose spread is barely wider than the block's own noise selects noise. A
-    subset earns a place in a good pair only by adding something to another
-    subset, which is far harder to do by luck — the same argument 0044 records one
-    level up, where an equal-weight average beat an argmax for this exact reason.
-
-    Four candidates are compared:
-
-    1. **every column** — the incumbent, so the tool can decline to do anything;
-    2. **the single best subset** drawn, kept as the reading that shows what the
-       naive criterion would have chosen;
-    3. **the union of the members of the best ``top_k`` pairs**, which is the step
-       the winner reports as the one that "turned out to work very well";
-    4. **the majority of those members**, which is the version that still narrows
-       anything when ``keep_prob`` is high enough that the union is nearly
-       everything.
-
-    If (1) wins, **no table is written** and the call says so. A tool that always
-    produces a table would let a run accumulate narrowings that nothing asked for.
-
-    ## Where the ranking rows come from, and why not validation
-
-    From the tail of this table — the work half — never from `val` and never from
-    the sealed holdout. See `SELECTION_BLOCK`. The consequence worth stating: the
-    subset was chosen on rows the run's own ruler never sees, so the resulting
-    table's `probe_score` and its comparison against its parent are still honest
-    in the way every other table's are.
-
-    ## What this cannot do
-
-    It cannot find a leak. A column that is systematically different at serving
-    time than in training (0065's collapsed reservation columns) looks *good* on
-    the selection block for exactly the reason it looks good everywhere inside the
-    run — the block shares the defect. Dropping such a column is a judgement about
-    provenance, which is the agent's (0066), and this tool will happily keep it.
-
-    **It scales badly in the number of columns that have to be removed together.**
-    A random subset excludes all of `k` bad columns with probability
-    ``keep_prob ** k``, so at the default 0.5 there is one clean draw in 64 when
-    `k` is 6 — and `n_candidates` draws simply may not contain one. Measured: a
-    table with six such columns and 40 draws produced a subset that dropped the
-    stable signal along with them and scored **0.489 worse** than its parent. When
-    several columns are suspected, either lower `keep_prob` or raise
-    `n_candidates` a long way; the report this method comes from used 500 models.
-    This is the honest reason a random search is not a substitute for the agent
-    naming a column it distrusts and dropping it with `transform_features`.
-
-    Columns that are not numeric never reach the model (`_feature_frame`), so they
-    are never candidates and are never dropped: narrowing them would change what
-    later tools can build on without changing what any model saw.
-    """
-    refusal = _refuse_if_finished(session)
-    if refusal is not None:
-        return refusal
-
-    if not 0 < keep_prob < 1:
-        raise ValueError(f"keep_prob must be between 0 and 1 exclusive, got {keep_prob}")
-    if top_k < 1:
-        raise ValueError(f"top_k must be at least 1, got {top_k}")
-    if n_candidates < 2 or n_candidates > SELECT_CANDIDATES_MAX:
-        raise ValueError(
-            f"n_candidates must be between 2 and {SELECT_CANDIDATES_MAX}, got "
-            f"{n_candidates}. Each candidate is a model fit, so this is a wall-clock "
-            "budget rather than a statistical limit."
-        )
-
-    path = session.resolve_table(table)
-    spec = session.resolved()
-    df = load_table(path)
-    X, non_numeric = _feature_frame(df, spec.target)
-
-    # The ordering column is never a candidate. Dropping it would leave a table
-    # that cannot be split, blocked or compared the way every other table is, and
-    # a search is not the place to decide that.
-    pinned = [c for c in X.columns if c == session.split_on]
-    candidates = [c for c in X.columns if c not in pinned]
-    if len(candidates) < 4:
-        raise ValueError(
-            f"this table has {len(candidates)} selectable columns, which is too few to "
-            "search over — build more features before pruning them"
-        )
-
-    fit_pos, rank_pos = _selection_split(df, session)
-    if len(fit_pos) < 50 or len(rank_pos) < 20:
-        raise ValueError(
-            f"only {len(df)} rows, which cannot be cut into a block to fit candidate "
-            f"subsets on and a block to rank them on"
-        )
-
-    y = df[spec.target]
-    y_fit, y_rank = y.iloc[fit_pos], y.iloc[rank_pos]
-    transform = spec.target_transform or None
-    higher_is_better = greater_is_better(spec.metric)
-
-    y_rank_np = y_rank.to_numpy()
-
-    def fit_and_predict(cols: list[str]) -> np.ndarray | None:
-        """One subset's predictions on the ranking block, or `None` if unfittable.
-
-        Predictions rather than a score, because the pair step below needs them
-        and refitting to get them back would make the search quadratic in fits
-        instead of quadratic in cheap array arithmetic. Same reason `compare.py`
-        keeps prediction vectors around.
-        """
-        use = pinned + cols
-        try:
-            fit = fit_probe(
-                X.iloc[fit_pos][use], y_fit, spec.task_type, spec.metric,
-                target_transform=transform,
-            )
-            return probe_predict(fit, X.iloc[rank_pos][use], spec.task_type)
-        except Exception:  # noqa: BLE001 - one bad subset must not end the search
-            return None
-
-    def metric_of(preds: np.ndarray) -> float:
-        return float(compute_metric(spec.metric, y_rank_np, preds))
-
-    def score(cols: list[str]) -> float | None:
-        preds = fit_and_predict(cols)
-        return None if preds is None else metric_of(preds)
-
-    reference = score(candidates)
-    if reference is None:
-        raise ValueError(
-            "the probe could not be fitted on this table's own columns, so there is "
-            "nothing to search against"
-        )
-
-    rng = np.random.default_rng(seed)
-    drawn: list[tuple[float, list[str], np.ndarray]] = []
-    for _ in range(n_candidates):
-        mask = rng.random(len(candidates)) < keep_prob
-        cols = [c for c, keep in zip(candidates, mask) if keep]
-        if not cols:
-            continue
-        preds = fit_and_predict(cols)
-        if preds is not None:
-            drawn.append((metric_of(preds), cols, preds))
-    if not drawn:
-        raise ValueError("no candidate subset could be scored")
-
-    drawn.sort(key=lambda t: -t[0] if higher_is_better else t[0])
-    best_score, best_cols = drawn[0][0], drawn[0][1]
-
-    # ------------------------------------------------------------------
-    # Pairs, which is the step this tool got wrong the first time.
-    #
-    # The winner's procedure does **not** rank subsets by their own scores:
-    #
-    #   "I ran over 500 random models and systematically calculated the
-    #    validation error on each pair-ensemble of models. From the best model
-    #    pairs I built a larger ensemble... Then I got the idea to take the
-    #    features from all of the selected models together and combine them into
-    #    one model: this turned out to work very well."
-    #
-    # The criterion is the error of the *pair averaged together*, which selects
-    # for **complementarity** rather than for individual quality. That difference
-    # is not cosmetic and it is the whole reason the first version measured a
-    # null: an argmax over ~100 individually-scored subsets, whose margin (0.0071
-    # on Rossmann) is barely larger than the block's own noise (block sd 0.0050),
-    # is selecting on noise. A subset only wins a pair if it adds something to
-    # another one, which is a much harder thing to do by luck — and it is the same
-    # argument 0044 already records one level up, where an equal-weight average
-    # was chosen over an argmax precisely because the argmax buys selection luck.
-    #
-    # Cheap, because the predictions are already in hand: every pair is one array
-    # mean and one metric call, so 96 fits give 4,560 pairs for free.
-    order_sign = -1.0 if higher_is_better else 1.0
-    pairs: list[tuple[float, int, int]] = []
-    for i in range(len(drawn)):
-        for j in range(i + 1, len(drawn)):
-            pairs.append((metric_of((drawn[i][2] + drawn[j][2]) / 2.0), i, j))
-    pairs.sort(key=lambda t: order_sign * t[0])
-
-    # The members of the best pairs, and how often each column appears among
-    # them. `top_k` pairs rather than `top_k` subsets, so a column has to earn its
-    # place in models that were kept for working *with* another model.
-    top_pairs = pairs[: min(top_k, len(pairs))]
-    members = {i for _, i, j in top_pairs} | {j for _, i, j in top_pairs}
-    member_cols = [drawn[i][1] for i in sorted(members)]
-    appearances = {c: sum(c in cols for cols in member_cols) for c in candidates}
-    union = [c for c in candidates if appearances[c] > 0]
-    majority = [c for c in candidates if appearances[c] * 2 > len(member_cols)]
-
-    options = [("all columns", reference, candidates)]
-    options.append((f"best of {len(drawn)} subsets", best_score, best_cols))
-    # Both readings of "take the features of the selected models together" are
-    # offered and the selection block decides between them, because which one
-    # narrows anything depends on `keep_prob`: at the default 0.5 a column is
-    # missing from all members of five pairs only rarely, so the union can be
-    # very nearly the whole table while the majority still asks a question.
-    for name, cols in ((f"union of top {len(top_pairs)} pairs", union),
-                       (f"majority of top {len(top_pairs)} pairs", majority)):
-        if not cols or len(cols) == len(candidates):
-            continue
-        s = score(cols)
-        if s is not None:
-            options.append((name, s, cols))
-    winner = (max if higher_is_better else min)(options, key=lambda o: o[1])
-    label, chosen_score, chosen = winner
-
-    ranked = [
-        {"choice": name, "selection_score": round(s, 6), "n_columns": len(cols) + len(pinned)}
-        for name, s, cols in options
-    ]
-
-    if chosen is candidates:
-        return {
-            "table": session.rel(path),
-            "selected": False,
-            "n_columns_considered": len(candidates),
-            "candidates": ranked,
-            "selection_block_rows": len(rank_pos),
-            "note": (
-                "No subset beat the full table on the selection block, so no table was "
-                "written and nothing changed. That is a result, not a failure: it says "
-                "this table is not carrying columns that cost it anything. Draw more "
-                "candidates with a higher n_candidates if you want a harder search."
-            ),
-        }
-
-    dropped = [c for c in candidates if c not in set(chosen)]
-    # Expressed as a drop rather than a select, so every column this search never
-    # considered — the ordering column, the non-numeric ones — survives untouched
-    # instead of depending on the generated list being complete.
-    code = (
-        "def transform_features(df):\n"
-        f"    return df.drop(columns={dropped!r}, errors='ignore')\n"
-    )
-    out = transform_features(session, code, table=table)
-    out.update({
-        "selected": True,
-        "chosen": label,
-        "dropped_columns": dropped,
-        "n_dropped": len(dropped),
-        "n_columns_considered": len(candidates),
-        "candidates": ranked,
-        "selection_block_rows": len(rank_pos),
-        "note": (
-            f"Dropped {len(dropped)} of {len(candidates)} columns ({label} won on a "
-            f"selection block of {len(rank_pos)} rows held out of this table, not the "
-            "validation half). The probe score above is the usual one, measured the "
-            "usual way, so it is comparable to every other table. Non-numeric columns "
-            "were never candidates: they do not reach the model."
-        ),
-    })
-    return out
 
 
 def _columns_by_table(
@@ -2682,7 +2306,7 @@ def _journal_frames(session: RunSession) -> dict:
     Deliberately **no data**. Every value here was either produced by a tool the
     agent called or written by the agent itself, so there is nothing to gate: no
     rows, no target values, and no per-column statistic conditioned on the
-    target. That is what makes this the cheap sibling of `explore_experiment` —
+    target. That is what makes this the cheap sibling of `explore_table` —
     it needs no leakage argument at all, because it never touches the table.
 
     ``params`` is a JSON *string* rather than a dict. A dict cell is unhashable,
@@ -2765,7 +2389,7 @@ def explore_journal(session: RunSession, code: str, timeout: float = 10.0) -> di
     impression. ``lb.groupby("method")["val_score"].mean()`` answers it exactly,
     and the nineteen experiments not currently being thought about stay on disk.
 
-    Needs no leakage argument, unlike `explore_experiment`: it never sees a row.
+    Needs no leakage argument, unlike `explore_table`: it never sees a row.
     Everything in these frames was produced by a tool the agent called or written
     by the agent itself.
 
@@ -2842,56 +2466,7 @@ def _residual_frame(df: pd.DataFrame, oof: pd.DataFrame, y: pd.Series, task_type
     return out
 
 
-def explore_experiment(
-    session: RunSession,
-    exp_id: str,
-    code: str,
-    timeout: float = 10.0,
-) -> dict:
-    """Read-only code over one experiment's rows and its out-of-fold errors.
 
-    This closes the one arc of the loop that was missing. The agent could
-    inspect, build, train and score, but the step from a score back to the next
-    hypothesis had nothing to work with: it saw a single number per experiment
-    and had to guess which feature to try next from column names alone. Here it
-    can ask *where* the model is wrong — which fold, which segment, which end of
-    which distribution — and let the answer pick the next feature.
-
-    The frame is the **whole source table**, not just the numeric columns the
-    model trained on. Deliberate: the string columns a model cannot consume are
-    exactly the ones worth grouping residuals by, and "the error is concentrated
-    in one city" is how the agent discovers that a column is worth encoding at
-    all. They cost nothing here because nothing here becomes a feature.
-
-    Nothing it computes can be persisted. That is the whole guard, and it is the
-    same one :mod:`~tabular_agent.explore` documents: the result is shown and
-    discarded, so a per-segment target mean read here has no route back into the
-    model except `fit_encoding`, which fits per fold. The target and the residual
-    are both in the frame and the row cap does not pretend otherwise — the
-    protection is the absence of a persistence path, not the absence of the
-    number.
-
-    Free, like `explain_table`: no leaderboard row, no budget, and allowed on an
-    experiment whose table the stop rule has already declined. Understanding why
-    a table failed is most valuable exactly then.
-    """
-    row = _experiment_row(session.run_dir, exp_id)
-    spec = session.resolved()
-    path = session.resolve_table(row["source_table"])
-    df = load_table(path)
-    oof = pd.read_parquet(os.path.join(session.run_dir, row["artifact_path"], "oof.parquet"))
-    frame = _residual_frame(
-        df, oof, df[spec.target], spec.task_type, spec.n_splits, spec.seed,
-        order=_fold_order(session, df),
-    )
-
-    out = run_readonly({"df": frame}, code, func_name="explore", timeout=timeout)
-    result = {"experiment_id": exp_id, "result": out["result"]}
-    if out["stdout"]:
-        # Only when there is something to say. An empty field on every call is
-        # the kind of constant caption 0018 spent a prompt rewrite removing.
-        result["stdout"] = out["stdout"]
-    return result
 
 
 def explore_table(
@@ -2991,6 +2566,21 @@ def explore_table(
 TERMINAL_MODEL_TYPES = (PROBE_MODEL_TYPE, "xgb", "catboost", "elasticnet")
 
 
+def _best_table_path(session: RunSession, run_journal: dict) -> str:
+    """The raw or derived table with the best fixed evaluation score."""
+    metric = (run_journal.get("task") or {}).get("metric") or session.resolved().metric
+    candidates = list(run_journal.get("tables") or [])
+    work_probe = run_journal.get("work_probe") or {}
+    if work_probe.get("probe_score") is not None:
+        candidates.insert(0, {
+            **work_probe,
+            "id": "work",
+            "path": session.rel(session.data_path),
+        })
+    winner = stop.best_table(candidates, metric)
+    return winner["path"] if winner else session.rel(session.data_path)
+
+
 def _terminal_fits(session: RunSession) -> list[dict]:
     """Fit the enumerated set on the best table, and leave them all on the board.
 
@@ -3005,23 +2595,7 @@ def _terminal_fits(session: RunSession) -> list[dict]:
     averages whatever survived.
     """
     j = journal.load(session.run_dir)
-    metric = (j.get("task") or {}).get("metric") or session.resolved().metric
-
-    # The data as given is a candidate too. Its probe score lives separately
-    # because no tool produced it, but building one derived table must not remove
-    # the raw table from the terminal ballot. Put it first so a tie keeps the
-    # shorter, empty lineage for the same reason `best_table` keeps the earlier
-    # derived table on a tie.
-    candidates = list(j.get("tables") or [])
-    work_probe = j.get("work_probe") or {}
-    if work_probe.get("probe_score") is not None:
-        candidates.insert(0, {
-            **work_probe,
-            "id": "work",
-            "path": session.rel(session.data_path),
-        })
-    winner = stop.best_table(candidates, metric)
-    table = winner["path"] if winner else None
+    table = _best_table_path(session, j)
 
     done = []
     for model_type in TERMINAL_MODEL_TYPES:
@@ -3216,6 +2790,178 @@ def _score_on_holdout(
     return {"n_rows": len(load_table(holdout_path)), "scores": scored}
 
 
+@contextlib.contextmanager
+def _minimal_finalize_lock(session: RunSession):
+    """Serialize minimal finalization across processes without stale lock state."""
+    path = os.path.join(session.run_dir, ".minimal-finalize.lock")
+    os.makedirs(session.run_dir, exist_ok=True)
+    with open(path, "w") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValueError("this run is already finalizing") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _finalize_minimal_run(session: RunSession) -> dict:
+    roots = [
+        os.path.join(session.run_dir, "experiments"),
+        os.path.join(session.run_dir, "bundle"),
+    ]
+    before = {
+        root: set(os.listdir(root)) if os.path.isdir(root) else set()
+        for root in roots
+    }
+    report = os.path.join(session.run_dir, "run_report.md")
+    report_existed = os.path.exists(report)
+    with _minimal_finalize_lock(session):
+        try:
+            return _finalize_minimal_run_unlocked(session)
+        except Exception:
+            for root in roots:
+                if not os.path.isdir(root):
+                    continue
+                for name in set(os.listdir(root)) - before[root]:
+                    path = os.path.join(root, name)
+                    shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
+            if not report_existed and os.path.exists(report):
+                os.remove(report)
+            raise
+
+
+def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
+    """One selected table, one fixed model, one evaluation score."""
+    if journal.stop_state(session.run_dir).get("finalized"):
+        raise ValueError("this run has already been finalized")
+
+    j = journal.load(session.run_dir)
+    if not j.get("task"):
+        inspect_data(session)
+        j = journal.load(session.run_dir)
+    if not (j.get("work_probe") or {}).get("probe_score"):
+        journal.set_work_probe(session.run_dir, probe_table(session, session.data_path))
+        j = journal.load(session.run_dir)
+
+    spec = session.resolved()
+    table_rel = _best_table_path(session, j)
+    path = session.resolve_table(table_rel)
+    df = load_table(path)
+    X, _ = _feature_frame(df, spec.target)
+    if X.empty or not len(X.columns):
+        raise ValueError("nothing to finalize: no numeric feature columns")
+    refusal = _refuse_if_unservable(session, path, df, list(X.columns))
+    if refusal is not None:
+        raise ValueError(refusal["reason"])
+    y = df[spec.target]
+
+    fit = fit_probe(X, y, spec.task_type, spec.metric, spec.target_transform)
+    evaluation_score, _, unavailable, _ = _score_on_val(
+        session, path, [fit.model], fit.feature_names, spec, y,
+        target_transform=fit.target_transform,
+    )
+    if evaluation_score is None:
+        raise ValueError(f"nothing to finalize: {unavailable}")
+    evaluation_score = round(float(evaluation_score), 6)
+
+    baseline_model = _make_model("baseline", spec.task_type, {}, spec.seed, spec.metric)
+    baseline_model.fit(X, y)
+    baseline_score, _, baseline_unavailable, _ = _score_on_val(
+        session, path, [baseline_model], list(X.columns), spec, y,
+        target_transform="none",
+    )
+    if baseline_score is None:
+        raise ValueError(f"baseline could not be evaluated: {baseline_unavailable}")
+    baseline_score = round(float(baseline_score), 6)
+
+    baseline_row = {
+        "id": "baseline",
+        "model_type": "baseline",
+        "metric": spec.metric,
+        "source_table": table_rel,
+        "val_score": baseline_score,
+        "evaluation_score": baseline_score,
+        "artifact_path": "",
+    }
+
+    exp_id = journal.next_experiment_id(session.run_dir)
+    exp_dir = os.path.dirname(session.ctx.path("experiments", exp_id, "_"))
+    joblib.dump(fit.model, os.path.join(exp_dir, "final_model.joblib"))
+    meta = {
+        "id": exp_id,
+        "model_type": PROBE_MODEL_TYPE,
+        "params": dict(PROBE_PARAMS),
+        "target_transform": fit.target_transform,
+        "task_type": spec.task_type,
+        "metric": spec.metric,
+        "evaluation_score": evaluation_score,
+        "fit_seconds": fit.fit_seconds,
+        "feature_names": list(fit.feature_names),
+        "target": spec.target,
+        "source_table": table_rel,
+    }
+    with open(os.path.join(exp_dir, "meta.json"), "w") as handle:
+        json.dump(meta, handle, indent=2)
+    model_row = {
+        "id": exp_id,
+        "model_type": PROBE_MODEL_TYPE,
+        "params": dict(PROBE_PARAMS),
+        "target_transform": fit.target_transform,
+        "features": list(fit.feature_names),
+        "source_table": table_rel,
+        "metric": spec.metric,
+        # Internal compatibility for old journal readers; the minimal public
+        # vocabulary is `evaluation_score`.
+        "val_score": evaluation_score,
+        "evaluation_score": evaluation_score,
+        "fit_seconds": fit.fit_seconds,
+        "artifact_path": session.rel(exp_dir),
+    }
+
+    pipeline = _load_lineage(path, spec.task_type)
+    bundle_dir = save_bundle(
+        session.ctx, pipeline, [fit.model], np.array([1.0]), fit.feature_names,
+        spec.task_type, fit.target_transform,
+    )
+    j = journal.load(session.run_dir)
+    credit = journal.attribution(j, table_rel)
+    split = j.get("split") or {}
+    text = "\n".join([
+        "# Run report",
+        "",
+        f"- **Task:** {spec.task_type}",
+        f"- **Metric:** {spec.metric}",
+        f"- **Evaluation score:** {evaluation_score:.6g}",
+        f"- **Baseline score:** {baseline_score:.6g}",
+        f"- **Model:** {PROBE_MODEL_TYPE}",
+        f"- **Selected table:** `{table_rel}`",
+        f"- **Features:** {', '.join(fit.feature_names)}",
+        f"- **Split:** {split.get('mode', 'unknown')}",
+        "",
+        "The evaluation rows were used repeatedly to rank candidate tables. This is",
+        "an internal search score, not an independent estimate for a future population.",
+        "The bundle replays the selected table's fitted lineage from raw rows.",
+    ])
+    report_path = write_report(session.ctx, text)
+    journal.append_experiments(session.run_dir, [baseline_row, model_row])
+    journal.mark_finalized(session.run_dir)
+    return {
+        "best_experiment_id": exp_id,
+        "model_type": PROBE_MODEL_TYPE,
+        "metric": spec.metric,
+        "evaluation_score": evaluation_score,
+        "baseline_score": baseline_score,
+        "n_experiments": len(j["leaderboard"]),
+        "bundle_dir": session.rel(bundle_dir),
+        "report_path": session.rel(report_path),
+        **({"required_streams": pipeline.required_streams()}
+           if pipeline.required_streams() else {}),
+        "unmeasured_tables": [item["table"] for item in credit if not item["measured"]],
+    }
+
+
 def finalize_run(session: RunSession) -> dict:
     """Package the best experiment: deployable bundle + human-readable report.
 
@@ -3223,6 +2969,9 @@ def finalize_run(session: RunSession) -> dict:
     rather than re-deriving anything, and auto-trains the trivial baseline if the
     run never did, so the report can always answer "did this beat doing nothing".
     """
+    if session.profile == "minimal":
+        return _finalize_minimal_run(session)
+
     j = journal.load(session.run_dir)
     if journal.stop_state(session.run_dir).get("finalized"):
         raise ValueError(

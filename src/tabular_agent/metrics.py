@@ -103,6 +103,14 @@ def compute_metric(name: str, y_true, y_pred, labels: list | None = None) -> flo
     if name == "auc":
         return float(roc_auc_score(y_true, y_pred))
     if name == "accuracy":
-        labels = np.argmax(y_pred, axis=1) if y_pred.ndim == 2 else (y_pred >= 0.5).astype(int)
-        return float(accuracy_score(y_true, labels))
+        class_labels = None if labels is None else np.asarray(labels)
+        if y_pred.ndim == 2:
+            positions = np.argmax(y_pred, axis=1)
+            predicted = positions if class_labels is None else class_labels[positions]
+        else:
+            positive = y_pred >= 0.5
+            predicted = positive.astype(int) if class_labels is None else np.where(
+                positive, class_labels[-1], class_labels[0]
+            )
+        return float(accuracy_score(y_true, predicted))
     raise ValueError(f"unknown metric: {name}")

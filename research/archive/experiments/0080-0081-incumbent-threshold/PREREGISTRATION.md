@@ -7,7 +7,7 @@
   (the zero threshold on ordered runs), [0059](../../../../docs/decisions/0059-the-interval-belongs-to-the-difference-not-the-score.md)
   (the block instrument), [0079](../../../../docs/decisions/0079-the-work-table-stays-on-the-terminal-ballot.md)
   (why raw and derived incumbents are different questions),
-  [`results/ruler_deflation_across_runs.csv`](../../../../results/ruler_deflation_across_runs.csv).
+  [`ruler_deflation_across_runs.csv`](../../readings/ruler_deflation_across_runs.csv).
 
 ## The question
 
@@ -21,7 +21,7 @@ The supplied archive makes the exact low-budget incumbent contrast recoverable
 without refits for `restaurant_v1`, `restaurant_v2`, and `ieee_v1`: journal order,
 validation targets/order, and one prediction sidecar per table all survive.
 Capacity outcomes survive only for 18 Restaurant steps in
-`results/ruler_deflation_across_runs.csv`. IEEE is therefore descriptive and
+`../../readings/ruler_deflation_across_runs.csv`. IEEE is therefore descriptive and
 cannot decide the threshold.
 
 ## Geometry fixed before looking

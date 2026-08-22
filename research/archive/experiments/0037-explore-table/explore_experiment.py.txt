@@ -1,0 +1,54 @@
+Historical excerpt: superseded explore_experiment wrapper (Decision 0037).
+Archived during v0.2 simplification; explore_table remains active.
+Runnable full context: tag research-reference-2026-08-21.
+
+def explore_experiment(
+    session: RunSession,
+    exp_id: str,
+    code: str,
+    timeout: float = 10.0,
+) -> dict:
+    """Read-only code over one experiment's rows and its out-of-fold errors.
+
+    This closes the one arc of the loop that was missing. The agent could
+    inspect, build, train and score, but the step from a score back to the next
+    hypothesis had nothing to work with: it saw a single number per experiment
+    and had to guess which feature to try next from column names alone. Here it
+    can ask *where* the model is wrong — which fold, which segment, which end of
+    which distribution — and let the answer pick the next feature.
+
+    The frame is the **whole source table**, not just the numeric columns the
+    model trained on. Deliberate: the string columns a model cannot consume are
+    exactly the ones worth grouping residuals by, and "the error is concentrated
+    in one city" is how the agent discovers that a column is worth encoding at
+    all. They cost nothing here because nothing here becomes a feature.
+
+    Nothing it computes can be persisted. That is the whole guard, and it is the
+    same one :mod:`~tabular_agent.explore` documents: the result is shown and
+    discarded, so a per-segment target mean read here has no route back into the
+    model except `fit_encoding`, which fits per fold. The target and the residual
+    are both in the frame and the row cap does not pretend otherwise — the
+    protection is the absence of a persistence path, not the absence of the
+    number.
+
+    Free, like `explain_table`: no leaderboard row, no budget, and allowed on an
+    experiment whose table the stop rule has already declined. Understanding why
+    a table failed is most valuable exactly then.
+    """
+    row = _experiment_row(session.run_dir, exp_id)
+    spec = session.resolved()
+    path = session.resolve_table(row["source_table"])
+    df = load_table(path)
+    oof = pd.read_parquet(os.path.join(session.run_dir, row["artifact_path"], "oof.parquet"))
+    frame = _residual_frame(
+        df, oof, df[spec.target], spec.task_type, spec.n_splits, spec.seed,
+        order=_fold_order(session, df),
+    )
+
+    out = run_readonly({"df": frame}, code, func_name="explore", timeout=timeout)
+    result = {"experiment_id": exp_id, "result": out["result"]}
+    if out["stdout"]:
+        # Only when there is something to say. An empty field on every call is
+        # the kind of constant caption 0018 spent a prompt rewrite removing.
+        result["stdout"] = out["stdout"]
+    return result

@@ -13,7 +13,7 @@ argument instead of rebuilding it. Nothing here is built.
 
 **Read first, in this order:** `docs/decisions/0047`, `0048`, `0049`, `0050`, then
 `src/tabular_agent/encoders.py` (`HistoryEncoder`, `fit_history`) and
-`notebooks/phase5_history_and_the_horizon.ipynb`. `docs/time_aware_features.md` is
+`research/archive/notebooks/phase5_history_and_the_horizon.ipynb`. `docs/time_aware_features.md` is
 the original three-slice plan; slices 1 and 2 are done.
 
 ---
@@ -119,8 +119,8 @@ it keeps its own units. Not built, and it needs its own record.
 ## 5. How to know whether it worked
 
 **Do not tune against Rossmann's score.** 0022 and `CLAUDE.md`. The instrument is
-`scripts/probe_rossmann_history.py`, which drives the tools by hand so the number
-moves for one reason; `scripts/run_rossmann_v8_history.py` is the agent-run
+`research/archive/scripts/probes/probe_rossmann_history.py`, which drives the tools by hand so the number
+moves for one reason; `research/archive/runs/rossmann/run_rossmann_v8_history.py` is the agent-run
 version, and it takes ~11 minutes.
 
 The comparison worth making is **window versus long offset on the same table** —

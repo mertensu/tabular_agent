@@ -401,7 +401,7 @@ def main() -> None:
     parser.add_argument("--runs-root", type=Path, default=Path("_runs"))
     parser.add_argument(
         "--capacity-csv", type=Path,
-        default=REPO / "results/ruler_deflation_across_runs.csv",
+        default=REPO / "research/archive/readings/ruler_deflation_across_runs.csv",
     )
     parser.add_argument(
         "--out-csv", type=Path,

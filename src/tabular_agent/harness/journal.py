@@ -222,50 +222,48 @@ def next_experiment_id(run_dir: str) -> str:
         return f"e{n}"
 
 
+def _derive_leaderboard_pointers(run_journal: dict) -> None:
+    """Recompute baseline and best from the complete scored leaderboard."""
+    metric = (run_journal.get("task") or {}).get("metric") or next(
+        (row.get("metric") for row in run_journal["leaderboard"] if row.get("metric")),
+        None,
+    )
+    if metric is None:
+        return
+    scored = [r for r in run_journal["leaderboard"] if r.get("val_score") is not None]
+    baselines = [r for r in scored if r.get("model_type") == "baseline"]
+    candidates = [r for r in scored if r.get("model_type") != "baseline"]
+    pick = max if greater_is_better(metric) else min
+    if baselines:
+        baseline = pick(baselines, key=lambda r: r["val_score"])
+        run_journal["baseline"] = {
+            "experiment_id": baseline["id"],
+            "val_score": baseline["val_score"],
+            "cv_score": baseline.get("cv_score"),
+        }
+    pool = candidates or baselines
+    if pool:
+        top = pick(pool, key=lambda r: r["val_score"])
+        run_journal["best"] = {
+            "experiment_id": top["id"],
+            "val_score": top["val_score"],
+            "cv_score": top.get("cv_score"),
+            "artifact_path": top["artifact_path"],
+        }
+
+
+def append_experiments(run_dir: str, rows: list[dict]) -> dict:
+    """Append a related experiment set in one atomic journal write."""
+    run_journal = load(run_dir)
+    run_journal["leaderboard"].extend(rows)
+    _derive_leaderboard_pointers(run_journal)
+    save(run_dir, run_journal)
+    return run_journal
+
+
 def append_experiment(run_dir: str, row: dict) -> dict:
-    """Append one leaderboard row and re-derive ``baseline`` and ``best``.
-
-    ``best`` is recomputed from the whole leaderboard rather than compared
-    against the previous best, so it stays correct even if a row is edited or
-    the journal is rebuilt.
-
-    Ranked by ``val_score`` — the held-out half — not by ``cv_score``. Both are
-    on the row, and they disagree: cross-validation is what the search optimises
-    against, so it is the number the search can inflate. A row whose validation
-    score is missing cannot be ranked and so cannot be ``best``; it stays on the
-    leaderboard with its reason, because a missing score is a fact about the run.
-    """
-    journal = load(run_dir)
-    journal["leaderboard"].append(row)
-
-    metric = (journal.get("task") or {}).get("metric") or row.get("metric")
-    if metric is not None:
-        scored = [r for r in journal["leaderboard"] if r.get("val_score") is not None]
-        baselines = [r for r in scored if r.get("model_type") == "baseline"]
-        candidates = [r for r in scored if r.get("model_type") != "baseline"]
-
-        pick = max if greater_is_better(metric) else min
-        if baselines:
-            b = pick(baselines, key=lambda r: r["val_score"])
-            journal["baseline"] = {
-                "experiment_id": b["id"],
-                "val_score": b["val_score"],
-                "cv_score": b.get("cv_score"),
-            }
-        # A run whose only experiment is the baseline still needs a `best` for
-        # finalize_run to have something to package.
-        pool = candidates or baselines
-        if pool:
-            top = pick(pool, key=lambda r: r["val_score"])
-            journal["best"] = {
-                "experiment_id": top["id"],
-                "val_score": top["val_score"],
-                "cv_score": top.get("cv_score"),
-                "artifact_path": top["artifact_path"],
-            }
-
-    save(run_dir, journal)
-    return journal
+    """Append one leaderboard row and re-derive ``baseline`` and ``best``."""
+    return append_experiments(run_dir, [row])
 
 
 def update_experiment(run_dir: str, exp_id: str, fields: dict) -> dict:

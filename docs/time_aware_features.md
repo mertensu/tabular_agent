@@ -27,7 +27,7 @@ argument rather than rebuild it.
   decision.
 - **Slice 2 is built** — `HistoryEncoder`, `fit_history`, the `history` lineage
   step, `TaskSpec.forecast_horizon`, and the `fit_history` tool. Gap B's core is
-  closed; notebook is `notebooks/phase5_history_and_the_horizon.ipynb`. **Slice 3
+  closed; the historical notebook is `research/archive/notebooks/phase5_history_and_the_horizon.ipynb`. **Slice 3
   (rolling/expanding windows) is the remaining one**, and `keep` already carries
   the `L + W` bound §3.1 asks for.
 

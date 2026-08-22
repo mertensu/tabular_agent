@@ -138,13 +138,83 @@ def _retryable(call):
         raise ModelRetry(str(e)) from e
 
 
-def build_agent(model=DEFAULT_MODEL):
+def _build_minimal_agent(model):
+    """Register only the six operations in the v0.2 product contract."""
+    from pydantic_ai import Agent, RunContext
+
+    agent = Agent(
+        model,
+        deps_type=Deps,
+        system_prompt=SYSTEM_PROMPT,
+        defer_model_check=True,
+        retries=TOOL_RETRIES,
+    )
+
+    @agent.system_prompt(dynamic=True)
+    def run_state(ctx: RunContext[Deps]) -> str:
+        return render_brief(ctx.deps.session) or ""
+
+    @agent.tool
+    def inspect_data(ctx: RunContext[Deps], table: str | None = None) -> dict:
+        """Inspect schema, target, metric and prediction-time availability."""
+        return _retryable(lambda: tools.inspect_data(ctx.deps.session, table))
+
+    @agent.tool
+    def fit_encoding(
+        ctx: RunContext[Deps], columns: list[str], method: str = "frequency",
+        table: str | None = None, categories: dict[str, list] | None = None,
+        smoothing: float = 10.0, stats: list[str] | None = None,
+    ) -> dict:
+        """Fit a replayable frequency, ordinal, or cross-fitted target encoding."""
+        return _retryable(lambda: tools.fit_encoding(
+            ctx.deps.session, columns=columns, method=method, table=table,
+            categories=categories, smoothing=smoothing, stats=stats,
+        ))
+
+    @agent.tool
+    def fit_group_stats(
+        ctx: RunContext[Deps], by: list[str], value: str, stat: str = "mean",
+        table: str | None = None,
+    ) -> dict:
+        """Fit and replay one non-target statistic per group."""
+        return _retryable(lambda: tools.fit_group_stats(
+            ctx.deps.session, by=by, value=value, stat=stat, table=table,
+        ))
+
+    @agent.tool
+    def filter_rows(
+        ctx: RunContext[Deps], code: str, table: str | None = None,
+    ) -> dict:
+        """Select training rows only; the filter never runs when serving."""
+        return _retryable(lambda: tools.filter_rows(ctx.deps.session, code, table=table))
+
+    @agent.tool
+    def transform_features(
+        ctx: RunContext[Deps], code: str, table: str | None = None,
+    ) -> dict:
+        """Run target-hidden, row-local feature code and persist its lineage."""
+        return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table))
+
+    @agent.tool
+    def finalize_run(ctx: RunContext[Deps]) -> dict:
+        """Fit one fixed model on the best table and write the bundle and report."""
+        return _retryable(lambda: tools.finalize_run(ctx.deps.session))
+
+    return agent
+
+
+def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
     """An agent whose *entire* tool surface is the ten functions below.
 
     ``model`` is either a PydanticAI model string (``"anthropic:..."``,
     ``"openai:..."``) or a ``Model`` object — e.g. from :func:`gateway_model`,
     for a provider reached through an OpenAI-compatible gateway.
     """
+    if profile not in {"full", "minimal"}:
+        raise ValueError(f"unknown agent profile {profile!r}; use 'full' or 'minimal'")
+    if profile == "minimal":
+        return _build_minimal_agent(model)
+
     from pydantic_ai import Agent, RunContext
 
     agent = Agent(
@@ -614,4 +684,4 @@ def build_agent(model=DEFAULT_MODEL):
 
 def run(session: RunSession, prompt: str, model=DEFAULT_MODEL):
     """Drive one agent run against ``session``. Returns the PydanticAI result."""
-    return build_agent(model).run_sync(prompt, deps=Deps(session=session))
+    return build_agent(model, profile=session.profile).run_sync(prompt, deps=Deps(session=session))

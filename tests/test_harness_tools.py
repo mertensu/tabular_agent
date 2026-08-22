@@ -13,7 +13,6 @@ from tabular_agent.io import load_table
 from tabular_agent.sandbox import SandboxError
 from tabular_agent.harness.tools import (
     explain_table,
-    explore_experiment,
     finalize_run,
     fit_encoding,
     inspect_data,
@@ -1098,156 +1097,7 @@ def test_a_validation_score_rides_on_every_training_result(session):
     assert "val_unavailable" not in out
 
 
-# ---------------------------------------------------------- explore_experiment
 
-
-@pytest.fixture
-def regression_session(tmp_path):
-    """A regression run whose error is concentrated in one segment of a string
-    column the model cannot use — the shape `explore_experiment` exists to find."""
-    rng = np.random.default_rng(7)
-    n = 300
-    x1 = rng.normal(size=n)
-    segment = rng.choice(["easy", "hard"], size=n)
-    # `hard` rows carry noise the features cannot explain, so the model's error
-    # lives there and nowhere else.
-    noise = np.where(segment == "hard", rng.normal(scale=5.0, size=n), 0.0)
-    df = pd.DataFrame({"x1": x1, "segment": segment, "y": 3 * x1 + noise})
-    data_path = str(tmp_path / "reg.csv")
-    df.to_csv(data_path, index=False)
-    return RunSession(str(tmp_path / "run"), data_path, TaskSpec(target="y", n_splits=3))
-
-
-def _explore(session, exp_id, body):
-    return explore_experiment(session, exp_id, f"def explore(df):\n{body}")
-
-
-def test_the_frame_carries_the_error_and_the_columns_the_model_could_not_use(
-    regression_session,
-):
-    """The string column is the point. A model cannot train on `segment`, which is
-    exactly why grouping residuals by it is how the agent learns to encode it."""
-    inspect_data(regression_session)
-    exp = train_tabular_model(regression_session, model_type="lgbm")
-
-    out = _explore(regression_session, exp["experiment_id"],
-                   "    return sorted(df.columns)")
-    columns = out["result"]
-    assert {"x1", "segment", "y", "oof_pred", "residual", "fold"} <= set(columns)
-
-    out = _explore(
-        regression_session, exp["experiment_id"],
-        "    return df.groupby('segment')['residual'].apply(lambda s: float(s.abs().mean())).to_dict()",
-    )
-    errors = out["result"]
-    assert errors["hard"] > 3 * errors["easy"]
-
-
-def test_rows_line_up_with_the_folds_they_were_held_out_in(session):
-    """The strongest available check that the join is not scrambled: recomputing
-    the metric per fold from the frame must reproduce the fold scores the
-    experiment recorded. Alignment here is positional, so a silent off-by-one
-    would be invisible in every other assertion."""
-    from tabular_agent.metrics import compute_metric
-
-    inspect_data(session)
-    exp = train_tabular_model(session, model_type="lgbm")
-    with open(os.path.join(session.run_dir, exp["artifact_path"], "meta.json")) as f:
-        meta = json.load(f)
-
-    out = _explore(
-        session, exp["experiment_id"],
-        "    return {int(k): [list(v['y']), list(v['oof_pred'])]\n"
-        "            for k, v in df.groupby('fold')[['y', 'oof_pred']].agg(list).to_dict('index').items()}",
-    )
-    recomputed = [
-        compute_metric(meta["metric"], np.array(y), np.array(p))
-        for _, (y, p) in sorted(out["result"].items())
-    ]
-    assert recomputed == pytest.approx(meta["fold_metrics"], abs=1e-9)
-
-
-def test_it_sees_the_work_half_only(session):
-    """200 rows in, 160 in the work half. The validation rows have no route here:
-    the frame is built from the experiment's own source table."""
-    inspect_data(session)
-    exp = train_tabular_model(session, model_type="lgbm")
-
-    out = _explore(session, exp["experiment_id"], "    return len(df)")
-    assert out["result"] == 160
-
-
-def test_printed_output_comes_back(session):
-    inspect_data(session)
-    exp = train_tabular_model(session, model_type="lgbm")
-
-    out = _explore(session, exp["experiment_id"],
-                   "    print('fold sizes:', df['fold'].value_counts().to_dict())\n"
-                   "    return 'ok'")
-    assert out["result"] == "ok"
-    assert "fold sizes:" in out["stdout"]
-
-
-def test_a_quiet_call_carries_no_empty_stdout_field(session):
-    """0018: a field that reads the same on every call is not payload."""
-    inspect_data(session)
-    exp = train_tabular_model(session, model_type="lgbm")
-
-    assert "stdout" not in _explore(session, exp["experiment_id"], "    return 1")
-
-
-def test_unknown_experiment_names_the_real_ones(session):
-    inspect_data(session)
-    train_tabular_model(session, model_type="lgbm")
-
-    with pytest.raises(ValueError, match="no such experiment") as exc:
-        _explore(session, "e99", "    return 1")
-    assert "'e1'" in str(exc.value)
-
-
-def test_it_costs_nothing_and_records_nothing(session):
-    """Free like `explain_table`: it produces no model to ship, so charging it
-    against the experiment budget would price looking at a failure like causing
-    one."""
-    inspect_data(session)
-    exp = train_tabular_model(session, model_type="lgbm")
-    before = journal.load(session.run_dir)
-
-    for _ in range(5):
-        _explore(session, exp["experiment_id"], "    return float(df['residual'].std())")
-
-    after = journal.load(session.run_dir)
-    assert after["leaderboard"] == before["leaderboard"]
-    assert after["stop"] == before["stop"]
-
-
-def test_it_still_works_once_the_run_has_stopped(session):
-    """The moment the agent most needs to ask what went wrong is after being
-    told to stop, so a refusal must not take the diagnostic with it."""
-    inspect_data(session)
-    exp = train_tabular_model(session, model_type="lgbm")
-    finalize_run(session)
-
-    assert _explore(session, exp["experiment_id"], "    return len(df)")["result"] == 160
-
-
-def test_nothing_survives_between_calls(session):
-    """There is no kernel. State is `run_dir`; a name bound in one call is gone
-    in the next, which is what keeps a resumed run identical to a fresh one."""
-    inspect_data(session)
-    exp = train_tabular_model(session, model_type="lgbm")
-
-    _explore(session, exp["experiment_id"], "    global stash\n    stash = 1\n    return 1")
-    with pytest.raises(SandboxError):
-        _explore(session, exp["experiment_id"], "    return stash")
-
-
-def test_exploration_cannot_train_a_model(session):
-    inspect_data(session)
-    exp = train_tabular_model(session, model_type="lgbm")
-
-    with pytest.raises(SandboxError, match="train_tabular_model"):
-        _explore(session, exp["experiment_id"], "    import lightgbm\n    return 1")
 
 
 # ------------------------------------------------------------ target transforms
@@ -1326,7 +1176,6 @@ def test_the_bundle_predicts_in_the_original_units(priced_session):
     truth = load_table(priced_session.source_path)["y"]
     assert preds.mean() > 0.3 * truth.mean()
     assert np.corrcoef(preds, truth)[0, 1] > 0.5
-
 
 # -------------------------------------------------------------- explore_journal
 

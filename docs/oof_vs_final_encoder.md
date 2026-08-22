@@ -1,7 +1,7 @@
 # Two encoders, two jobs: OOF `city_te` vs. `final_enc`
 
 Companion note to `fit_encoding` (`src/tabular_agent/encoders.py`) and
-`notebooks/phase2_transforms_and_encoding.ipynb` (§4–5). Answers the question:
+`research/archive/notebooks/phase2_transforms_and_encoding.ipynb` (§4–5). Answers the question:
 *"`final_enc` is target-encoding fit on all training rows — why isn't that leakage?"*
 
 ## The setup
