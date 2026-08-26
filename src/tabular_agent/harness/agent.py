@@ -111,7 +111,7 @@ class Deps:
     session: RunSession
 
 
-def _retryable(call):
+def _retryable(call, ctx=None):
     """Turn a rejected argument into a message the model can act on.
 
     Every tool here validates its inputs and raises ``ValueError`` — an
@@ -127,6 +127,17 @@ def _retryable(call):
     just happens to be a program in the last case, and those messages are written
     to teach. Anything else is a bug in the pipeline and should stop the run
     loudly rather than be handed to the model to guess at.
+
+    ``ctx`` is the tool's ``RunContext``. Given it, the *last* allowed correction
+    lands softly instead of off a cliff: PydanticAI counts retries per tool name
+    and, once ``retries >= max_retries``, converts the next ``ModelRetry`` into an
+    ``UnexpectedModelBehavior`` that ends the whole run — discarding every
+    experiment already completed and denying the model the chance to finalize. A
+    model looping on the same rejected ``transform_features`` code hit exactly
+    that in the Rossmann RCs. So on the attempt that would trip the ceiling we
+    return a normal tool result rather than raising: the loop lives, and the model
+    can take a different approach or call ``finalize_run`` on the best table it
+    already has. The earlier corrections (attempts within budget) are unchanged.
     """
     from pydantic_ai import ModelRetry
 
@@ -135,6 +146,20 @@ def _retryable(call):
     try:
         return call()
     except (ValueError, FileNotFoundError, SandboxError) as e:
+        if ctx is not None and ctx.max_retries and ctx.retry >= ctx.max_retries:
+            return {
+                "rejected": True,
+                "attempts": ctx.retry + 1,
+                "reason": str(e),
+                "message": (
+                    f"This call to {ctx.tool_name!r} was rejected {ctx.retry + 1} "
+                    "times for the same kind of reason and produced no table. Stop "
+                    "retrying this approach: repeating it will not help. Either take "
+                    "a substantially different approach — a different tool, or "
+                    "clearly different code — or call finalize_run to finish with "
+                    "the best table you already have."
+                ),
+            }
         raise ModelRetry(str(e)) from e
 
 
@@ -157,7 +182,7 @@ def _build_minimal_agent(model):
     @agent.tool
     def inspect_data(ctx: RunContext[Deps], table: str | None = None) -> dict:
         """Inspect schema, target, metric and prediction-time availability."""
-        return _retryable(lambda: tools.inspect_data(ctx.deps.session, table))
+        return _retryable(lambda: tools.inspect_data(ctx.deps.session, table), ctx)
 
     @agent.tool
     def fit_encoding(
@@ -169,7 +194,7 @@ def _build_minimal_agent(model):
         return _retryable(lambda: tools.fit_encoding(
             ctx.deps.session, columns=columns, method=method, table=table,
             categories=categories, smoothing=smoothing, stats=stats,
-        ))
+        ), ctx)
 
     @agent.tool
     def fit_group_stats(
@@ -179,26 +204,26 @@ def _build_minimal_agent(model):
         """Fit and replay one non-target statistic per group."""
         return _retryable(lambda: tools.fit_group_stats(
             ctx.deps.session, by=by, value=value, stat=stat, table=table,
-        ))
+        ), ctx)
 
     @agent.tool
     def filter_rows(
         ctx: RunContext[Deps], code: str, table: str | None = None,
     ) -> dict:
         """Select training rows only; the filter never runs when serving."""
-        return _retryable(lambda: tools.filter_rows(ctx.deps.session, code, table=table))
+        return _retryable(lambda: tools.filter_rows(ctx.deps.session, code, table=table), ctx)
 
     @agent.tool
     def transform_features(
         ctx: RunContext[Deps], code: str, table: str | None = None,
     ) -> dict:
         """Run target-hidden, row-local feature code and persist its lineage."""
-        return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table))
+        return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table), ctx)
 
     @agent.tool
     def finalize_run(ctx: RunContext[Deps]) -> dict:
         """Fit one fixed model on the best table and write the bundle and report."""
-        return _retryable(lambda: tools.finalize_run(ctx.deps.session))
+        return _retryable(lambda: tools.finalize_run(ctx.deps.session), ctx)
 
     return agent
 
@@ -274,7 +299,7 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
         Args:
             table: Path to the table. Omit to use the run's work table.
         """
-        return _retryable(lambda: tools.inspect_data(ctx.deps.session, table))
+        return _retryable(lambda: tools.inspect_data(ctx.deps.session, table), ctx)
 
     @agent.tool
     def fit_encoding(
@@ -317,7 +342,8 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
                 categories=categories,
                 smoothing=smoothing,
                 stats=stats,
-            )
+            ),
+            ctx,
         )
 
     @agent.tool
@@ -357,7 +383,8 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
         return _retryable(
             lambda: tools.fit_group_stats(
                 ctx.deps.session, by=by, value=value, stat=stat, table=table
-            )
+            ),
+            ctx,
         )
 
     @agent.tool
@@ -431,7 +458,8 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
             lambda: tools.fit_history(
                 ctx.deps.session, by=by, value=value,
                 keep=keep, table=table, windows=windows,
-            )
+            ),
+            ctx,
         )
 
     @agent.tool
@@ -487,7 +515,8 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
             lambda: tools.fit_stream_aggregate(
                 ctx.deps.session, stream=stream, by=by, value=value, leads=leads,
                 stats=stats, table=table,
-            )
+            ),
+            ctx,
         )
 
     @agent.tool
@@ -520,7 +549,7 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
 
             table: Path to the source table. Omit to use the run's work table.
         """
-        return _retryable(lambda: tools.filter_rows(ctx.deps.session, code, table=table))
+        return _retryable(lambda: tools.filter_rows(ctx.deps.session, code, table=table), ctx)
 
     @agent.tool
     def transform_features(
@@ -553,7 +582,7 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
             table: Path to the source table. Omit to use the run's raw input
                 table; pass a table from an earlier call to stack on top of it.
         """
-        return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table))
+        return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table), ctx)
 
     @agent.tool
     def explain_table(
@@ -593,7 +622,8 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
                 model_type=model_type,
                 params=params,
                 target_transform=target_transform,
-            )
+            ),
+            ctx,
         )
 
     @agent.tool
@@ -633,7 +663,7 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
                         return by_city.round(3).to_dict("index")
         """
         return _retryable(
-            lambda: tools.explore_table(ctx.deps.session, table=table, code=code)
+            lambda: tools.explore_table(ctx.deps.session, table=table, code=code), ctx
         )
 
     @agent.tool
@@ -669,7 +699,7 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
                         return m.groupby("method")["val_score"].agg(
                             ["mean", "min", "size"]).round(4).to_dict("index")
         """
-        return _retryable(lambda: tools.explore_journal(ctx.deps.session, code))
+        return _retryable(lambda: tools.explore_journal(ctx.deps.session, code), ctx)
 
     @agent.tool
     def finalize_run(ctx: RunContext[Deps]) -> dict:
@@ -677,7 +707,7 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
 
         Call this exactly once, when you are done experimenting.
         """
-        return _retryable(lambda: tools.finalize_run(ctx.deps.session))
+        return _retryable(lambda: tools.finalize_run(ctx.deps.session), ctx)
 
     return agent
 
