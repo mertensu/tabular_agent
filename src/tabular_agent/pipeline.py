@@ -11,7 +11,7 @@ import pandas as pd
 from .blend import apply_blend
 from .encoders import ENCODER_CLASSES
 from .models import predict_model
-from .target import invert_target
+from .target import invert_reference_target, invert_target, normalize_reference_target
 
 
 class Pipeline:
@@ -124,7 +124,7 @@ class Pipeline:
 
 
 def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_names, task_type,
-                target_transform: str = "none") -> str:
+                target_transform: str = "none", reference_target=None) -> str:
     bundle_dir = run_ctx.path("bundle", "_")
     bundle_dir = os.path.dirname(bundle_dir)
     model_paths = []
@@ -138,9 +138,9 @@ def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_name
         "weights": np.asarray(weights, dtype=float).tolist(),
         "feature_names": list(feature_names),
         "task_type": task_type,
-        # The models were fitted on f(y); without this the bundle would predict
-        # in log-dollars and look plausible doing it.
+        # Fit used reference-forward and then f(y); prediction must reverse both.
         "target_transform": target_transform,
+        "reference_target": normalize_reference_target(reference_target),
     }
     # Derived from the steps, never passed in. A bundle that needs a second input
     # has to say so where somebody will read it — the alternative is a file that
@@ -164,9 +164,9 @@ def load_bundle(bundle_dir: str) -> dict:
         "weights": np.asarray(manifest["weights"], dtype=float),
         "feature_names": manifest["feature_names"],
         "task_type": manifest["task_type"],
-        # Bundles written before target transforms existed have no such key and
-        # must keep predicting exactly as they did.
+        # Missing fields are the direct-target defaults for old bundles.
         "target_transform": manifest.get("target_transform", "none"),
+        "reference_target": manifest.get("reference_target"),
         # {name: the columns that file must carry}. Absent on every bundle
         # written before streams existed, which is what "needs nothing extra"
         # looks like.
@@ -222,10 +222,12 @@ def predict_bundle(bundle: dict, raw_df: pd.DataFrame,
     X = features[bundle["feature_names"]]
     task_type = bundle["task_type"]
     transform = bundle.get("target_transform", "none")
+    reference_target = bundle.get("reference_target")
     preds = []
     for m in bundle["models"]:
         p = predict_model(m, X, task_type)
         if transform != "none":
             p = invert_target(transform, p)
+        p = invert_reference_target(p, features, reference_target)
         preds.append(p)
     return apply_blend(preds, bundle["weights"])

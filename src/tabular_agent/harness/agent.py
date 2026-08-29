@@ -585,12 +585,52 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
         return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table), ctx)
 
     @agent.tool
+    def fit_reference_target(
+        ctx: RunContext[Deps],
+        table: str | None = None,
+        baseline_column: str | None = None,
+        scale_column: str | None = None,
+    ) -> dict:
+        """Measure a residual, ratio, or scaled-residual target with the fixed probe.
+
+        This changes what the model learns, not the feature rows it receives:
+        it fits on ``(target - baseline_column) / scale_column``, with either
+        column optional, and automatically returns predictions to original target
+        units before every score. The model, parameters, folds and target_transform
+        stay fixed, so the result isolates the target definition.
+
+        Both columns must already be numeric and serving-available on ``table``.
+        A revealed-target lag is legal only when it was produced by
+        ``fit_target_history``; this tool consumes that guarded column
+        but never reads hidden targets itself. A scale containing zero, missing or
+        non-finite values is refused because the inverse would be undefined.
+
+        Args:
+            table: Feature table to fit. Omit for the work table.
+            baseline_column: Optional serving-known reference to subtract, such
+                as a revealed target lag.
+            scale_column: Optional serving-known non-zero scale to divide by,
+                such as installed capacity.
+        """
+        return _retryable(
+            lambda: tools.fit_reference_target(
+                ctx.deps.session,
+                table=table,
+                baseline_column=baseline_column,
+                scale_column=scale_column,
+            ),
+            ctx,
+        )
+
+    @agent.tool
     def explain_table(
         ctx: RunContext[Deps],
         table: str | None = None,
         model_type: str = "lgbm",
         params: dict | None = None,
         target_transform: str = "none",
+        baseline_column: str | None = None,
+        scale_column: str | None = None,
     ) -> dict:
         """Measure what each tool call's columns contributed, by refitting without each.
 
@@ -622,6 +662,14 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
                 model_type=model_type,
                 params=params,
                 target_transform=target_transform,
+                reference_target={
+                    key: value
+                    for key, value in {
+                        "baseline_column": baseline_column,
+                        "scale_column": scale_column,
+                    }.items()
+                    if value is not None
+                } or None,
             ),
             ctx,
         )

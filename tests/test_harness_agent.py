@@ -40,9 +40,12 @@ EXPECTED_TOOLS = {
     # because nothing it produces is replayed: it selects work-half rows to fit
     # on, and the validation half never passes through it.
     "filter_rows",
-    # No model tool: since 0035 the agent builds tables and the harness fits the
-    # enumerated set once, at finalize. There is nothing here that chooses a
-    # model, which is the point rather than an omission.
+    # The fixed probe may measure a different, exactly invertible target
+    # definition. It exposes only serving-known column names, never target code,
+    # and does not choose a model.
+    "fit_reference_target",
+    # No model-selection tool: since 0035 the harness fixes the probe and
+    # enumerates model families at finalize.
     # Refits on columns the agent already has, and returns scores. It cannot
     # reach anything building a table cannot.
     "explain_table",
