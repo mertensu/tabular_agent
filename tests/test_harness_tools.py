@@ -1177,6 +1177,80 @@ def test_the_bundle_predicts_in_the_original_units(priced_session):
     assert preds.mean() > 0.3 * truth.mean()
     assert np.corrcoef(preds, truth)[0, 1] > 0.5
 
+# ------------------------------------------------------ reference target specs
+
+
+def _reference_session(tmp_path, *, serving_columns=None):
+    n = 180
+    baseline = np.linspace(10.0, 30.0, n)
+    scale = np.linspace(1.0, 4.0, n)
+    df = pd.DataFrame({
+        "x": np.arange(n, dtype=float),
+        "baseline": baseline,
+        "scale": scale,
+        "y": baseline + 2.5 * scale,
+    })
+    path = str(tmp_path / "reference.csv")
+    df.to_csv(path, index=False)
+    return RunSession(
+        str(tmp_path / "run"), path,
+        TaskSpec(target="y", metric="rmse", n_splits=3),
+        serving_columns=serving_columns,
+    )
+
+
+def test_fit_reference_target_records_the_exact_fit_contract(tmp_path):
+    run = _reference_session(tmp_path)
+    inspect_data(run)
+    out = tools.fit_reference_target(
+        run, baseline_column="baseline", scale_column="scale"
+    )
+
+    assert out["trained"] is True
+    row = journal.load(run.run_dir)["leaderboard"][-1]
+    expected = {"baseline_column": "baseline", "scale_column": "scale"}
+    assert row["reference_target"] == expected
+    with open(os.path.join(run.run_dir, row["artifact_path"], "meta.json")) as handle:
+        assert json.load(handle)["reference_target"] == expected
+
+
+def test_reference_target_must_be_replayable_at_serving(tmp_path):
+    run = _reference_session(tmp_path, serving_columns=["x", "scale"])
+    inspect_data(run)
+    out = tools.fit_reference_target(run, baseline_column="baseline")
+
+    assert out["trained"] is False
+    assert out["unservable"] is True
+    assert "baseline" in out["reason"]
+
+
+def test_finalize_ships_the_selected_reference_target(tmp_path, monkeypatch):
+    from tabular_agent.pipeline import load_bundle, predict_bundle
+
+    run = _reference_session(tmp_path)
+    inspect_data(run)
+    tools.fit_reference_target(
+        run, baseline_column="baseline", scale_column="scale"
+    )
+    monkeypatch.setattr(tools, "TERMINAL_MODEL_TYPES", ("baseline",))
+    out = finalize_run(run)
+
+    bundle = load_bundle(os.path.join(run.run_dir, out["bundle_dir"]))
+    assert bundle["reference_target"] == {
+        "baseline_column": "baseline",
+        "scale_column": "scale",
+    }
+    raw = load_table(run.source_path).drop(columns=["y"])
+    truth = load_table(run.source_path)["y"]
+    assert np.allclose(predict_bundle(bundle, raw), truth)
+
+
+def test_reference_target_is_not_exposed_in_minimal_profile():
+    from tabular_agent.harness.agent import build_agent
+
+    assert "fit_reference_target" not in build_agent(profile="minimal")._function_toolset.tools
+
+
 # -------------------------------------------------------------- explore_journal
 
 

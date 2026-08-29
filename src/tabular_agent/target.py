@@ -28,9 +28,121 @@ the leaderboard would be ranking numbers measured in different units, which is a
 worse failure than not having the feature at all.
 """
 
+from collections.abc import Mapping
+
 import numpy as np
 
-__all__ = ["TARGET_TRANSFORMS", "apply_target", "invert_target", "check_target_domain"]
+__all__ = [
+    "TARGET_TRANSFORMS", "apply_target", "invert_target", "check_target_domain",
+    "normalize_reference_target", "reference_target_columns",
+    "apply_reference_target", "invert_reference_target",
+]
+
+
+REFERENCE_TARGET_KEYS = {"baseline_column", "scale_column"}
+
+
+def normalize_reference_target(spec, columns=None) -> dict | None:
+    """Validate and canonicalise the fixed, per-experiment recipe (0081)."""
+    if spec is None:
+        return None
+    if not isinstance(spec, Mapping):
+        raise ValueError(
+            "reference_target must be an object with baseline_column and/or "
+            "scale_column"
+        )
+    unknown = sorted(set(spec) - REFERENCE_TARGET_KEYS)
+    if unknown:
+        raise ValueError(
+            f"unknown reference_target fields {unknown}; use only "
+            "baseline_column and/or scale_column"
+        )
+    out = {
+        key: spec.get(key)
+        for key in ("baseline_column", "scale_column")
+        if spec.get(key) is not None
+    }
+    if not out:
+        raise ValueError(
+            "reference_target must name baseline_column, scale_column, or both; "
+            "use None for the direct target"
+        )
+    for key, value in out.items():
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"reference_target {key} must be a non-empty column name")
+    if columns is not None:
+        missing = [col for col in out.values() if col not in columns]
+        if missing:
+            raise ValueError(
+                f"reference_target columns are absent from the feature table: {missing}"
+            )
+    return out
+
+
+def reference_target_columns(spec) -> list[str]:
+    canonical = normalize_reference_target(spec)
+    return [] if canonical is None else list(dict.fromkeys(canonical.values()))
+
+
+def _reference_values(frame, column: str, *, scale: bool) -> np.ndarray:
+    try:
+        raw = frame[column]
+    except (KeyError, TypeError):
+        raise ValueError(f"reference_target column {column!r} is unavailable") from None
+    try:
+        values = np.asarray(raw, dtype=float)
+    except (TypeError, ValueError):
+        raise ValueError(f"reference_target column {column!r} must be numeric") from None
+    if values.ndim != 1:
+        raise ValueError(f"reference_target column {column!r} must be one-dimensional")
+    invalid = ~np.isfinite(values)
+    if invalid.any():
+        raise ValueError(
+            f"reference_target column {column!r} has {int(invalid.sum())} missing or "
+            "non-finite values; reference targets must invert every prediction"
+        )
+    if scale and (values == 0).any():
+        raise ValueError(
+            f"reference_target scale_column {column!r} has "
+            f"{int((values == 0).sum())} zero values; division would not be invertible"
+        )
+    return values
+
+
+def apply_reference_target(y, frame, spec):
+    """Return ``(y - baseline) / scale`` under the fixed 0081 contract."""
+    canonical = normalize_reference_target(spec, getattr(frame, "columns", None))
+    out = np.asarray(y, dtype=float)
+    if canonical is None:
+        return out
+    if len(out) != len(frame):
+        raise ValueError("reference_target rows must align one-for-one with the target")
+    baseline = canonical.get("baseline_column")
+    scale = canonical.get("scale_column")
+    if baseline is not None:
+        out = out - _reference_values(frame, baseline, scale=False)
+    if scale is not None:
+        out = out / _reference_values(frame, scale, scale=True)
+    if not np.isfinite(out).all():
+        raise ValueError("reference_target produced missing or non-finite fit values")
+    return out
+
+
+def invert_reference_target(preds, frame, spec):
+    """Invert 0081 back to original target units for scoring and serving."""
+    canonical = normalize_reference_target(spec, getattr(frame, "columns", None))
+    out = np.asarray(preds, dtype=float)
+    if canonical is None:
+        return out
+    if len(out) != len(frame):
+        raise ValueError("reference_target rows must align one-for-one with predictions")
+    scale = canonical.get("scale_column")
+    baseline = canonical.get("baseline_column")
+    if scale is not None:
+        out = out * _reference_values(frame, scale, scale=True)
+    if baseline is not None:
+        out = out + _reference_values(frame, baseline, scale=False)
+    return out
 
 
 def _identity(y):

@@ -24,7 +24,14 @@ import pandas as pd
 from sklearn.base import BaseEstimator
 
 from .metrics import compute_metric
-from .target import apply_target, check_target_domain, invert_target
+from .target import (
+    apply_reference_target,
+    apply_target,
+    check_target_domain,
+    invert_reference_target,
+    invert_target,
+    normalize_reference_target,
+)
 
 
 class _Baseline:
@@ -481,6 +488,7 @@ class TrainResult:
     feature_names: list[str]
     model_type: str
     target_transform: str = "none"
+    reference_target: dict | None = None
     #: Wall-clock seconds spent fitting — every fold plus the final model. Recorded
     #: because nothing else in a run measures it, and the one time it mattered we
     #: had to reconstruct it from file timestamps after the fact (Rossmann v6: two
@@ -489,7 +497,8 @@ class TrainResult:
 
 
 def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, seed=42,
-             target_transform="none", time_budget_s=None) -> TrainResult:
+             target_transform="none", reference_target=None,
+             time_budget_s=None) -> TrainResult:
     """Cross-validated fit. ``target_transform`` changes what the model is fitted
     on; it never changes what is *reported*.
 
@@ -510,12 +519,23 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
     what was asked for, and a rule about parameters would have caught the wrong
     thing. Wall clock does not care why.
     """
-    check_target_domain(target_transform, y, task_type)
     X = X.reset_index(drop=True)
     y = pd.Series(np.asarray(y)).reset_index(drop=True)
-    # What the models are fitted on. Stateless, so a fold's transform carries no
-    # information about the rows held out of it.
-    y_fit = pd.Series(apply_target(target_transform, y)) if target_transform != "none" else y
+    reference_target = normalize_reference_target(reference_target, X.columns)
+    if reference_target is not None and task_type != "regression":
+        raise ValueError(
+            "reference_target applies to regression only; classification targets "
+            "are class labels, not quantities relative to a row-wise reference"
+        )
+    # Reference-forward is row-wise and fixed; the optional stateless transform
+    # wraps it.  Prediction reverses those operations in the opposite order.
+    y_reference = pd.Series(apply_reference_target(y, X, reference_target))
+    check_target_domain(target_transform, y_reference, task_type)
+    y_fit = (
+        pd.Series(apply_target(target_transform, y_reference))
+        if target_transform != "none"
+        else y_reference
+    )
     n = len(X)
     classes = None
     if task_type in ("binary", "multiclass"):
@@ -541,6 +561,7 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
         preds = predict_model(model, X.iloc[va], task_type, classes=classes)
         if target_transform != "none":
             preds = invert_target(target_transform, preds)
+        preds = invert_reference_target(preds, X.iloc[va], reference_target)
         oof[va] = preds
         # `labels` is only consumed by the logloss branch of compute_metric; it's a harmless no-op for other metrics.
         metric_kwargs = {"labels": list(classes)} if classes is not None else {}
@@ -563,5 +584,7 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
 
     final = _make_model(model_type, task_type, params, seed, metric)
     final.fit(X, y_fit)
-    return TrainResult(oof, fold_metrics, models, final, list(X.columns), model_type,
-                       target_transform, round(time.monotonic() - started, 1))
+    return TrainResult(
+        oof, fold_metrics, models, final, list(X.columns), model_type,
+        target_transform, reference_target, round(time.monotonic() - started, 1),
+    )

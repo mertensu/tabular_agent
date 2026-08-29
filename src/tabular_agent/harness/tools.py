@@ -39,7 +39,13 @@ from ..blend import apply_blend
 from ..report import build_report, shipped_holdout, write_report
 from ..rows import select_rows
 from ..sandbox import SandboxError, run_readonly
-from ..target import TARGET_TRANSFORMS, invert_target
+from ..target import (
+    TARGET_TRANSFORMS,
+    invert_reference_target,
+    invert_target,
+    normalize_reference_target,
+    reference_target_columns,
+)
 from ..transform import transform_features as _transform_features
 from . import journal, stop
 from .session import RunSession
@@ -316,6 +322,7 @@ def _score_on_held_out(
     spec,
     y_work: pd.Series,
     target_transform: str = "none",
+    reference_target=None,
 ) -> tuple[float | None, float | None, str | None, np.ndarray | None]:
     """Score just-fitted models on held-out rows. ``(score, se, why_not, preds)``.
 
@@ -381,6 +388,7 @@ def _score_on_held_out(
         # why this inversion is tested rather than trusted.
         if target_transform != "none":
             p = invert_target(target_transform, p)
+        p = invert_reference_target(p, features, reference_target)
         each.append(p)
     preds = each[0] if len(each) == 1 else apply_blend(each, np.full(len(each), 1.0 / len(each)))
     score = float(compute_metric(spec.metric, y_val, preds, labels=classes))
@@ -412,6 +420,7 @@ def _score_on_val(
     spec,
     y_work: pd.Series,
     target_transform: str = "none",
+    reference_target=None,
 ) -> tuple[float | None, float | None, str | None, np.ndarray | None]:
     """`_score_on_held_out` against the validation half — the leaderboard's exam.
 
@@ -420,7 +429,7 @@ def _score_on_val(
     """
     return _score_on_held_out(
         session, session.val_path, source_path, models, feature_names, spec, y_work,
-        target_transform=target_transform,
+        target_transform=target_transform, reference_target=reference_target,
     )
 
 
@@ -1753,7 +1762,7 @@ def _gain(cv_score: float, reference: float, metric: str) -> float:
 
 
 def _fit_signature(model_type: str, params: dict | None,
-                   target_transform: str = "none") -> str:
+                   target_transform: str = "none", reference_target=None) -> str:
     """Identity of *how* a model was fitted, for deciding what compares to what.
 
     The target scale belongs in here for the same reason the params do: two
@@ -1761,7 +1770,10 @@ def _fit_signature(model_type: str, params: dict | None,
     rule is that a comparison must differ by exactly one thing or it is not
     evidence about that thing.
     """
-    return json.dumps([model_type, params or {}, target_transform], sort_keys=True)
+    return json.dumps(
+        [model_type, params or {}, target_transform, normalize_reference_target(reference_target)],
+        sort_keys=True,
+    )
 
 
 def _table_label(session: RunSession, rel_path: str) -> str:
@@ -1785,6 +1797,7 @@ def _vs_source_table(
     model_type: str,
     params: dict | None,
     target_transform: str = "none",
+    reference_target=None,
 ) -> tuple[float | None, str]:
     """Gain over the same model, same params, same target scale, on the source table.
 
@@ -1811,7 +1824,7 @@ def _vs_source_table(
         return None, f"{_table_label(session, source_table)} was not derived from another table"
 
     label = _table_label(session, source)
-    signature = _fit_signature(model_type, params, target_transform)
+    signature = _fit_signature(model_type, params, target_transform, reference_target)
     on_source = [
         r
         for r in j.get("leaderboard") or []
@@ -1821,7 +1834,8 @@ def _vs_source_table(
         r
         for r in on_source
         if _fit_signature(
-            r.get("model_type"), r.get("params"), r.get("target_transform", "none")
+            r.get("model_type"), r.get("params"), r.get("target_transform", "none"),
+            r.get("reference_target"),
         )
         == signature
     ]
@@ -1914,6 +1928,7 @@ def train_tabular_model(
     model_type: str = "lgbm",
     params: dict | None = None,
     target_transform: str | None = None,
+    reference_target: dict | None = None,
     enforce_stop: bool = True,
     seed: int | None = None,
 ) -> dict:
@@ -1957,6 +1972,7 @@ def train_tabular_model(
     df = load_table(path)
 
     X, dropped = _feature_frame(df, spec.target)
+    reference_target = normalize_reference_target(reference_target, X.columns)
     if X.shape[1] == 0:
         raise ValueError(
             "no numeric feature columns available to train on; use transform_features "
@@ -1964,7 +1980,7 @@ def train_tabular_model(
         )
     # Before the fit, not after: a refusal that arrives once the model is trained
     # has already spent the experiment it was meant to save.
-    if enforce_stop:
+    if enforce_stop or reference_target is not None:
         refusal = _refuse_if_unservable(session, path, df, list(X.columns))
         if refusal is not None:
             return refusal
@@ -1983,6 +1999,7 @@ def train_tabular_model(
         params=params,
         seed=model_seed,
         target_transform=target_transform,
+        reference_target=reference_target,
         # `None` unless this run set one. Raises `TrainingTooSlow` (a ValueError,
         # so the agent gets a correction rather than the run ending) and records
         # nothing — an abandoned fit has no score to put on the leaderboard.
@@ -1992,7 +2009,8 @@ def train_tabular_model(
     cv_score = float(np.mean(result.fold_metrics))
     fold_spread = float(np.std(result.fold_metrics))
     val_score, val_se, val_unavailable, _ = _score_on_val(
-        session, path, [result.final_model], result.feature_names, spec, y, target_transform
+        session, path, [result.final_model], result.feature_names, spec, y,
+        target_transform, reference_target,
     )
 
     exp_id = journal.next_experiment_id(session.run_dir)
@@ -2007,6 +2025,7 @@ def train_tabular_model(
         "model_type": model_type,
         "params": params or {},
         "target_transform": target_transform,
+        "reference_target": reference_target,
         "task_type": spec.task_type,
         "metric": spec.metric,
         "cv_score": cv_score,
@@ -2034,6 +2053,7 @@ def train_tabular_model(
         # differ by, so `vs_source_table`'s "differ by exactly one thing" rule
         # (0017) has to be able to see it.
         "target_transform": target_transform,
+        "reference_target": reference_target,
         "features": list(result.feature_names),
         # Which feature table this was trained on, so a resuming agent can read
         # the leaderboard alone and know what to reuse or beat — without opening
@@ -2068,7 +2088,7 @@ def train_tabular_model(
     ]
     vs_source, vs_source_basis = _vs_source_table(
         session, j_after, row["source_table"], val_score, spec.metric, model_type, params,
-        target_transform,
+        target_transform, reference_target,
     )
     # All three are derived from the journal *after* this row lands, so they
     # cannot be part of the append. Persist them anyway: they are the record of
@@ -2140,12 +2160,40 @@ def train_tabular_model(
     return out
 
 
+def fit_reference_target(
+    session: RunSession,
+    table: str | None = None,
+    baseline_column: str | None = None,
+    scale_column: str | None = None,
+) -> dict:
+    """Measure one reference-relative target with the fixed probe model (0081)."""
+    reference_target = {
+        key: value
+        for key, value in {
+            "baseline_column": baseline_column,
+            "scale_column": scale_column,
+        }.items()
+        if value is not None
+    }
+    return train_tabular_model(
+        session,
+        table=table,
+        model_type=PROBE_MODEL_TYPE,
+        params=dict(PROBE_PARAMS),
+        target_transform=None,
+        reference_target=reference_target,
+        enforce_stop=False,
+        seed=PROBE_SEED,
+    )
+
+
 def explain_table(
     session: RunSession,
     table: str | None = None,
     model_type: str = "lgbm",
     params: dict | None = None,
     target_transform: str = "none",
+    reference_target: dict | None = None,
 ) -> dict:
     """Which table's columns earned the score, by refitting without each in turn.
 
@@ -2192,6 +2240,7 @@ def explain_table(
     df = load_table(path)
 
     X, dropped = _feature_frame(df, spec.target)
+    reference_target = normalize_reference_target(reference_target, X.columns)
     if X.shape[1] == 0:
         raise ValueError(
             "no numeric feature columns to explain; use transform_features or "
@@ -2212,6 +2261,7 @@ def explain_table(
             params=params,
             seed=spec.seed,
             target_transform=target_transform,
+            reference_target=reference_target,
         )
         return float(np.mean(result.fold_metrics))
 
@@ -2231,7 +2281,16 @@ def explain_table(
             "method": row["method"],
             "n_columns": len(row["columns"]),
         }
-        if not remaining:
+        removed_references = sorted(
+            set(row["columns"]) & set(reference_target_columns(reference_target))
+        )
+        if removed_references:
+            entry["contribution"] = None
+            entry["reason"] = (
+                f"cannot withhold reference_target columns {removed_references}; "
+                "that would change the fit target as well as the features"
+            )
+        elif not remaining:
             # Nothing else contributed columns. "Without them" is not a model, and
             # a contribution of "everything" would be true but useless — that is
             # what vs_baseline already says.
@@ -2260,7 +2319,8 @@ def explain_table(
 #: agent's first call on a fresh run fails for a reason that has nothing to do
 #: with what it asked.
 _LB_COLUMNS = [
-    "id", "model_type", "params", "target_transform", "source_table", "metric",
+    "id", "model_type", "params", "target_transform", "reference_target",
+    "source_table", "metric",
     "val_score", "val_se", "cv_score", "fold_spread", "vs_baseline", "vs_source_table",
     "n_features", "fit_seconds",
 ]
@@ -2322,6 +2382,7 @@ def _journal_frames(session: RunSession) -> dict:
             "model_type": r.get("model_type"),
             "params": json.dumps(r.get("params") or {}, sort_keys=True),
             "target_transform": r.get("target_transform", "none"),
+            "reference_target": json.dumps(r.get("reference_target"), sort_keys=True),
             "source_table": r.get("source_table"),
             "metric": r.get("metric"),
             "val_score": r.get("val_score"),
@@ -2596,6 +2657,19 @@ def _terminal_fits(session: RunSession) -> list[dict]:
     """
     j = journal.load(session.run_dir)
     table = _best_table_path(session, j)
+    metric = (j.get("task") or {}).get("metric") or session.resolved().metric
+    candidates = [
+        row for row in (j.get("leaderboard") or [])
+        if row.get("source_table") == table and row.get("val_score") is not None
+    ]
+    if candidates:
+        pick = max if greater_is_better(metric) else min
+        chosen_contract = pick(candidates, key=lambda row: row["val_score"])
+        target_transform = chosen_contract.get("target_transform", "none")
+        reference_target = chosen_contract.get("reference_target")
+    else:
+        target_transform = session.resolved().target_transform
+        reference_target = None
 
     done = []
     for model_type in TERMINAL_MODEL_TYPES:
@@ -2611,6 +2685,8 @@ def _terminal_fits(session: RunSession) -> list[dict]:
                 session, table=table, model_type=model_type, enforce_stop=False,
                 params=dict(PROBE_PARAMS) if probe_fit else None,
                 seed=PROBE_SEED if probe_fit else None,
+                target_transform=target_transform,
+                reference_target=reference_target,
             )
         except Exception as e:  # noqa: BLE001 - one bad family must not end the run
             done.append({"model_type": model_type, "trained": False, "error": str(e)})
@@ -2658,7 +2734,7 @@ def _blend_members(session: RunSession, terminal: list[dict]) -> list[dict]:
     if not members:
         return []
     head = members[0]["meta"]
-    key = ("source_table", "target_transform")
+    key = ("source_table", "target_transform", "reference_target")
     return [
         m for m in members
         if all(m["meta"].get(k) == head.get(k) for k in key)
@@ -2736,6 +2812,7 @@ def _score_on_holdout(
             score, se, why_not, _ = _score_on_held_out(
                 session, holdout_path, source_path, [model], meta["feature_names"], spec,
                 y_work, target_transform=meta.get("target_transform", "none"),
+                reference_target=meta.get("reference_target"),
             )
         except Exception as e:  # noqa: BLE001 - a run must still finalize
             score, se, why_not = None, None, f"{type(e).__name__}: {e}"
@@ -2773,6 +2850,7 @@ def _score_on_holdout(
                 session, holdout_path, source_path, blend["models"],
                 head["feature_names"], spec, y_work,
                 target_transform=head.get("target_transform", "none"),
+                reference_target=head.get("reference_target"),
             )
         except Exception as e:  # noqa: BLE001 - a run must still finalize
             score, se, why_not = None, None, f"{type(e).__name__}: {e}"
@@ -3011,6 +3089,7 @@ def finalize_run(session: RunSession) -> dict:
             session, source_path, models, head["feature_names"], spec,
             load_table(source_path)[spec.target],
             target_transform=head.get("target_transform", "none"),
+            reference_target=head.get("reference_target"),
         )
         blend = {
             "members": [m["experiment_id"] for m in members],
@@ -3055,6 +3134,7 @@ def finalize_run(session: RunSession) -> dict:
         ship["feature_names"],
         ship["task_type"],
         ship.get("target_transform", "none"),
+        ship.get("reference_target"),
     )
 
     credit = journal.attribution(j, ship["source_table"])

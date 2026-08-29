@@ -296,6 +296,72 @@ def test_unknown_transform_lists_the_real_ones():
         train_cv(X, y, folds, "regression", "rmse", target_transform="boxcox")
 
 
+def test_reference_target_round_trips_oof_and_bundle(tmp_path):
+    """Residual+scale fits are scored and served in the original target units."""
+    from tabular_agent.cv import make_folds
+    from tabular_agent.pipeline import Pipeline, load_bundle, predict_bundle, save_bundle
+    from tabular_agent.runctx import RunContext
+
+    n = 90
+    X = pd.DataFrame({
+        "x": np.arange(n, dtype=float),
+        "baseline": np.linspace(10.0, 40.0, n),
+        "scale": np.linspace(1.0, 3.0, n),
+    })
+    y = pd.Series(X["baseline"] + 3.0 * X["scale"])
+    reference = {"baseline_column": "baseline", "scale_column": "scale"}
+    folds = make_folds(y, "regression", n_splits=3)
+    result = train_cv(
+        X, y, folds, "regression", "rmse", model_type="baseline",
+        reference_target=reference,
+    )
+
+    assert result.reference_target == reference
+    assert np.nanmax(np.abs(result.oof - y.to_numpy())) < 1e-12
+    assert max(result.fold_metrics) < 1e-12
+
+    ctx = RunContext(str(tmp_path / "run"))
+    save_bundle(
+        ctx, Pipeline("regression"), [result.final_model], np.array([1.0]),
+        result.feature_names, "regression", reference_target=reference,
+    )
+    bundle_dir = ctx.path("bundle", "_").rsplit("/", 1)[0]
+    bundle = load_bundle(bundle_dir)
+    assert bundle["reference_target"] == reference
+    assert np.allclose(predict_bundle(bundle, X), y)
+
+
+def test_reference_target_refuses_noninvertible_rows():
+    from tabular_agent.cv import make_folds
+
+    X = pd.DataFrame({"x": np.arange(30.0), "scale": np.ones(30)})
+    X.loc[4, "scale"] = 0.0
+    y = pd.Series(np.arange(30.0))
+    folds = make_folds(y, "regression", n_splits=2)
+    with pytest.raises(ValueError, match="zero values"):
+        train_cv(
+            X, y, folds, "regression", "rmse",
+            reference_target={"scale_column": "scale"},
+        )
+
+
+def test_old_bundles_default_to_a_direct_target(tmp_path):
+    from tabular_agent.cv import make_folds
+    from tabular_agent.pipeline import Pipeline, load_bundle, save_bundle
+    from tabular_agent.runctx import RunContext
+
+    X, y = _skewed_regression(n=50)
+    result = train_cv(X, y, make_folds(y, "regression", n_splits=2),
+                      "regression", "rmse", model_type="baseline")
+    ctx = RunContext(str(tmp_path / "run"))
+    save_bundle(
+        ctx, Pipeline("regression"), [result.final_model], np.array([1.0]),
+        result.feature_names, "regression",
+    )
+    bundle = load_bundle(ctx.path("bundle", "_").rsplit("/", 1)[0])
+    assert bundle["reference_target"] is None
+
+
 def test_a_fit_reports_what_it_cost():
     """Wall clock is recorded because nothing else in a run measures it.
 
