@@ -265,6 +265,9 @@ def test_the_report_names_the_blend_and_prints_the_gap(sealed):
 
     text = open(os.path.join(sealed.run_dir, out["report_path"])).read()
     assert "What shipped is not that candidate" in text
+    assert "inverse-fold-spread-weighted blend" in text
+    assert "Every terminal fit still ships" in text
+    assert "equal-weight blend" not in text
     assert "(shipped)" in text and "(search's pick)" in text
     # A blend was never cross-validated, so the report must neither print folds
     # for it nor send the reader to a CV score it does not have.

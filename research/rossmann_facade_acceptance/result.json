@@ -1,0 +1,60 @@
+{
+  "acceptance": "rossmann_public_facade_live_llm",
+  "run_commit": "03b3edfb52928b4cded9a8bbecbbc4da2f47d18c",
+  "model": "fireworks/deepseek-v4-flash-0731",
+  "profile": "full",
+  "elapsed_minutes": 31.76,
+  "dataset": {
+    "training_rows": 1017209,
+    "serving_rows": 41088,
+    "split": {
+      "mode": "ordered",
+      "split_on": "Date",
+      "work_rows": 915744,
+      "validation_rows": 50175,
+      "sealed_holdout_rows": 51290
+    }
+  },
+  "agent": {
+    "tables_materialized": 12,
+    "refusals": 0,
+    "first_unavailable_customers_attempt_was_blocked": true,
+    "shipped_feature_count": 59,
+    "customers_in_shipped_features": false
+  },
+  "scores": {
+    "metric": "rmspe",
+    "baseline_validation": 0.7786564623476767,
+    "selected_lgbm_validation": 0.12737050570079456,
+    "selected_lgbm_sealed": 0.138493,
+    "shipped_blend_validation": 0.132667,
+    "shipped_blend_sealed": 0.140206
+  },
+  "bundle": {
+    "members": ["lgbm", "xgb", "catboost", "elasticnet"],
+    "weights": [
+      0.24414942488424368,
+      0.2699954599954308,
+      0.282514302044966,
+      0.20334081307535945
+    ],
+    "prediction_rows": 41088,
+    "predictions_finite": true,
+    "prediction_min": 1501.5627071463969,
+    "prediction_max": 41318.06092181815,
+    "save_load_replay_max_abs_diff": 3.637978807091713e-12,
+    "embedded_static_tables": ["store.csv"]
+  },
+  "live_findings": [
+    {
+      "severity": "blocking",
+      "finding": "chunked CSV inference produced mixed StateHoliday scalar types before parquet materialization",
+      "fix_commit": "03b3edfb52928b4cded9a8bbecbbc4da2f47d18c"
+    },
+    {
+      "severity": "reporting",
+      "finding": "run report still called the Decision-0080 inverse-fold-spread blend equal-weight",
+      "status": "fixed_with_regression_test_after_live_run"
+    }
+  ]
+}

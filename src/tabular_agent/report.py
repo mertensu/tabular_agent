@@ -23,8 +23,9 @@ def _gain(score: float, reference: float, metric: str) -> float:
 def selected_holdout(holdout: dict | None) -> dict | None:
     """The sealed score belonging to the candidate the *search* crowned.
 
-    Not necessarily the one that ships — since 0044 an equal-weight blend does,
-    and this entry is its runner-up in every sense. Kept distinct from
+    Not necessarily the one that ships — since 0044 a blend of every terminal
+    fit does, and since 0080 that blend is weighted inversely to each member's
+    cross-fitting fold spread. Kept distinct from
     :func:`shipped_holdout` because the optimism of the *selected* candidate is
     the quantity 0039 has been tracking across runs, and folding the two together
     would break that series at the run where the blend arrived.
@@ -81,8 +82,8 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
             "",
         ]
     # The A/B 0042 registered, produced by every sealed run from now on rather
-    # than by a script afterwards: an average pays no selection cost, so the sign
-    # of this line is the standing test of whether that is worth anything here.
+    # than by a script afterwards. Since 0080 every terminal fit still ships,
+    # but its pre-seal weight is inverse to cross-fitting fold spread.
     if (
         shipped is not None
         and selected is not None
@@ -92,12 +93,14 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
         delta = _gain(shipped["holdout_score"], selected["holdout_score"], metric)
         verdict = "better than" if delta > 0 else "worse than" if delta < 0 else "level with"
         lines += [
-            f"**What shipped is not that candidate.** The equal-weight blend scored "
+            f"**What shipped is not that candidate.** The precommitted "
+            f"inverse-fold-spread-weighted blend scored "
             f"**{shipped['holdout_score']:.4f}** on the same sealed rows — "
-            f"**{delta:+.4f}**, {verdict} the argmax winner. An average makes no "
-            "selection, so it pays none of the optimism above; whether that is "
-            "worth the loss of the best single model is exactly what this number "
-            "answers, once per run.",
+            f"**{delta:+.4f}**, {verdict} the argmax winner. Every terminal fit "
+            "still ships; the weights come only from cross-fitting fold "
+            "dispersion, not from validation or sealed scores. Whether that "
+            "precommitted reweighting is worth the loss of the best single model "
+            "is exactly what this number answers, once per run.",
             "",
         ]
     lines += [
