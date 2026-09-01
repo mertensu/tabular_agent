@@ -35,7 +35,7 @@ from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import _make_model, predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..probe import PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_probe, probe_predict
-from ..blend import apply_blend
+from ..blend import apply_blend, blend_weights
 from ..report import build_report, shipped_holdout, write_report
 from ..rows import select_rows
 from ..sandbox import SandboxError, run_readonly
@@ -316,8 +316,14 @@ def _score_on_held_out(
     spec,
     y_work: pd.Series,
     target_transform: str = "none",
+    weights=None,
 ) -> tuple[float | None, float | None, str | None, np.ndarray | None]:
     """Score just-fitted models on held-out rows. ``(score, se, why_not, preds)``.
+
+    ``weights`` blends the members with the given (already-normalised) vector
+    instead of an equal average — used only to score the inverse-fold-spread blend
+    the run may ship (0080). ``None`` keeps the equal average every other caller
+    relies on.
 
     The predictions come back with the score because they are the only thing that
     makes a *paired* comparison possible later (`compare.py`): the difference
@@ -382,7 +388,11 @@ def _score_on_held_out(
         if target_transform != "none":
             p = invert_target(target_transform, p)
         each.append(p)
-    preds = each[0] if len(each) == 1 else apply_blend(each, np.full(len(each), 1.0 / len(each)))
+    if len(each) == 1:
+        preds = each[0]
+    else:
+        w = np.full(len(each), 1.0 / len(each)) if weights is None else np.asarray(weights, dtype="float64")
+        preds = apply_blend(each, w)
     score = float(compute_metric(spec.metric, y_val, preds, labels=classes))
     # Computed here rather than in the stop rule because this is the only place
     # that still holds the predictions: the leaderboard keeps the score, not the
@@ -412,6 +422,7 @@ def _score_on_val(
     spec,
     y_work: pd.Series,
     target_transform: str = "none",
+    weights=None,
 ) -> tuple[float | None, float | None, str | None, np.ndarray | None]:
     """`_score_on_held_out` against the validation half — the leaderboard's exam.
 
@@ -420,7 +431,7 @@ def _score_on_val(
     """
     return _score_on_held_out(
         session, session.val_path, source_path, models, feature_names, spec, y_work,
-        target_transform=target_transform,
+        target_transform=target_transform, weights=weights,
     )
 
 
@@ -3041,6 +3052,18 @@ def finalize_run(session: RunSession) -> dict:
 
     ship = blend["meta"] if blend else meta
     ship_models = blend["models"] if blend else [model]
+    # 0080 — the blend ships weighted by inverse out-of-sample instability, not
+    # equally, so a member that will be optimistic out of sample cannot inflate the
+    # average by contributing 1/k of every prediction regardless of how wrong it is
+    # (the failure 0045 registered and the next sealed run confirmed). The weights
+    # come from each member's cross-fitting fold-spread — fixed before the sealed
+    # set is read, from neither `val` nor the seal. Every member still ships; this
+    # reweights, it does not select (0044).
+    if blend is not None:
+        spreads = [float(np.std(m["meta"].get("fold_metrics") or [np.nan])) for m in members]
+        ship_weights = blend_weights(spreads)
+    else:
+        ship_weights = np.array([1.0])
     # The bundle must be able to rebuild the shipped models' features from *raw*
     # input, so it inherits the lineage of whichever table they were trained on —
     # empty when trained on the raw table, one step per encoding otherwise. Every
@@ -3051,7 +3074,7 @@ def finalize_run(session: RunSession) -> dict:
         session.ctx,
         pipeline,
         ship_models,
-        np.full(len(ship_models), 1.0 / len(ship_models)),
+        ship_weights,
         ship["feature_names"],
         ship["task_type"],
         ship.get("target_transform", "none"),
