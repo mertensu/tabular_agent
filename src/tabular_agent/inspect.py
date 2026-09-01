@@ -1,15 +1,110 @@
-"""Dataset profiling for the inspect_data tool."""
+"""Dataset profiling for the inspect_data tool and public proposal facade."""
+
+import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from .encoders import to_periods
+from .io import load_table
 
 #: Low-cardinality categoricals get their actual values listed. Without this an
 #: agent knows a column has 3 levels but not what they are — which makes an
 #: ordinal encoding impossible to request, since the level *order* is a required
 #: argument. Capped so a high-cardinality column cannot flood the context.
 MAX_REPORTED_CATEGORIES = 20
+
+
+SUPPORTED_TABLE_SUFFIXES = {".csv", ".parquet"}
+
+
+def table_paths(source: str | os.PathLike) -> list[Path]:
+    """Return every supported table in a file/folder, without descending."""
+    path = Path(source).expanduser().resolve()
+    if path.is_file():
+        if path.suffix.lower() not in SUPPORTED_TABLE_SUFFIXES:
+            raise ValueError(f"unsupported table format: {path.suffix!r}")
+        return [path]
+    if not path.is_dir():
+        raise ValueError(f"data source does not exist: {path}")
+    paths = sorted(
+        p for p in path.iterdir()
+        if p.is_file() and p.suffix.lower() in SUPPORTED_TABLE_SUFFIXES
+    )
+    if not paths:
+        raise ValueError(f"no CSV or parquet tables in {path}")
+    return paths
+
+
+def profile_collection(source: str | os.PathLike) -> dict:
+    """Profile all tables and propose, but never apply, modeling decisions."""
+    paths = table_paths(source)
+    frames = {p.name: load_table(str(p)) for p in paths}
+    names = list(frames)
+
+    def name_rank(name: str, tokens: tuple[str, ...]) -> int:
+        return 0 if Path(name).stem.lower() in tokens else 1
+
+    training = min(
+        names,
+        key=lambda n: (name_rank(n, ("train", "training")), -len(frames[n]), n),
+    )
+    serving_matches = [
+        n for n in names
+        if name_rank(n, ("test", "serving", "predict", "prediction", "inference")) == 0
+    ]
+    serving = min(serving_matches) if serving_matches else None
+    train = frames[training]
+    serving_columns = list(frames[serving].columns) if serving else None
+
+    target_tokens = {"target", "label", "response", "outcome", "sales", "y"}
+    train_only = [
+        c for c in train.columns
+        if serving_columns is None or c not in serving_columns
+    ]
+    target_candidates = sorted(
+        train_only,
+        key=lambda c: (str(c).lower() not in target_tokens, str(c).lower()),
+    )
+    ordering_candidates = []
+    for column in train.columns:
+        series = train[column]
+        named = any(token in str(column).lower() for token in ("date", "time", "timestamp"))
+        if pd.api.types.is_datetime64_any_dtype(series) or named:
+            ordering_candidates.append(column)
+
+    joins = []
+    for right_name, right in frames.items():
+        if right_name in {training, serving}:
+            continue
+        for key in [c for c in train.columns if c in right.columns]:
+            if serving_columns is not None and key not in serving_columns:
+                continue
+            if right[key].notna().all() and right[key].is_unique:
+                added = [c for c in right.columns if c != key and c not in train.columns]
+                if added:
+                    joins.append({
+                        "right_table": right_name,
+                        "left_on": key,
+                        "right_on": key,
+                        "columns": added,
+                    })
+
+    return {
+        "source": str(Path(source).expanduser().resolve()),
+        "tables": {
+            name: {"path": str(paths[names.index(name)]), **profile_dataframe(frame)}
+            for name, frame in frames.items()
+        },
+        "training_table": training,
+        "serving_table": serving,
+        "target_candidates": target_candidates,
+        "training_only_columns": train_only,
+        "ordering_candidates": ordering_candidates,
+        "serving_columns": serving_columns,
+        "joins": joins,
+    }
 
 
 def profile_dataframe(
