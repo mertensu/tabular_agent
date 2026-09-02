@@ -52,7 +52,7 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
     """The gap, which is the whole reason the third split is worth its rows (0023).
 
     Printed as a table over every model scored, not just the winner: the run
-    selected one of these on the validation half, and seeing what the sealed rows
+    selected one of these on the validation set, and seeing what the sealed rows
     made of the others is what tells a reader whether the *selection* was the
     expensive part or the model was.
     """
@@ -67,18 +67,18 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
         # Spelled out in words rather than left to the sign, because a reader who
         # gets the direction backwards reads a flattered run as an honest one.
         reading = (
-            "the validation half overstated this model by that much"
+            "the validation set overstated this model by that much"
             if gap > 0
-            else "the sealed rows scored it *better* than the validation half did, "
+            else "the sealed rows scored it *better* than the validation set did, "
             "so the headline was not inflated"
         )
         lines += [
             f"The candidate the search crowned scored **{selected['val_score']:.4f}** "
-            f"on the validation half it ranked by, and "
+            f"on the validation set it ranked by, and "
             f"**{selected['holdout_score']:.4f}** on {holdout.get('n_rows')} sealed "
             f"rows nothing in this run could read — a gap of **{gap:+.4f}**, meaning "
-            f"{reading}. That is how much of the headline was the search finding "
-            "signal rather than finding luck.",
+            f"{reading}. This gap is the run's direct check on whether validation "
+            "flattered or understated the search winner.",
             "",
         ]
     # The A/B 0042 registered, produced by every sealed run from now on rather
@@ -98,9 +98,8 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
             f"**{shipped['holdout_score']:.4f}** on the same sealed rows — "
             f"**{delta:+.4f}**, {verdict} the argmax winner. Every terminal fit "
             "still ships; the weights come only from cross-fitting fold "
-            "dispersion, not from validation or sealed scores. Whether that "
-            "precommitted reweighting is worth the loss of the best single model "
-            "is exactly what this number answers, once per run.",
+            "dispersion, not from validation or sealed scores. This delta is the "
+            "direct gain or cost of shipping that blend instead of the search winner.",
             "",
         ]
     lines += [
@@ -121,7 +120,7 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
     lines += [
         "",
         "> **These rows ranked nothing.** The winner was already picked, on the "
-        "validation half, before any of them existed. Choosing between them by "
+        "validation set, before any of them existed. Choosing between them by "
         "this column would spend the third split the same way the second one was "
         "spent, and the next run would have no honest number at all.",
     ]
@@ -139,7 +138,7 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
             f"`{split['split_on']}`, the sealed rows are a *later period* than the "
             "validation rows, which are themselves later than the rows the model "
             "trained on. So the difference mixes how much the search gamed the "
-            "validation half with how much the world moved between the two "
+            "validation set with how much the world moved between the two "
             "periods, and this run cannot separate them.",
         ]
     return lines
@@ -175,13 +174,18 @@ def build_report(
         "",
         f"- **Task type:** {task_type}",
         f"- **Selection metric:** {metric}",
-        f"- **Validation score:** {headline}",
-        f"- **Baseline score:** {baseline_score:.3f}",
+        f"- **Shipped validation score:** {headline}",
+        f"- **Baseline score (trivial model):** {baseline_score:.3f}",
         f"- **Models:** {', '.join(model_types)}",
         f"- **Features ({len(feature_names)}):** {', '.join(feature_names)}",
     ]
+    if task_type == "binary":
+        lines.insert(
+            3, "- **Prediction output:** positive-class probability; accuracy uses a 0.5 threshold"
+        )
+    score_insert = 6 if task_type == "binary" else 5
     if cv_score is not None:
-        lines.insert(5, f"- **CV score:** {cv_score:.3f} (fold std {fold_std:.3f})")
+        lines.insert(score_insert, f"- **CV score:** {cv_score:.3f} (fold std {fold_std:.3f})")
     shipped = shipped_holdout(holdout)
     if shipped is not None:
         sealed = f"{shipped['holdout_score']:.3f}"
@@ -190,7 +194,7 @@ def build_report(
         # Beside the validation score, never instead of it (0023). The pair is
         # the point: one number is what the search steered towards, the other is
         # what it was worth, and the reader needs both to read the third.
-        lines.insert(5, f"- **Holdout score (sealed, scored once):** {sealed}")
+        lines.insert(score_insert, f"- **Shipped holdout score (sealed, scored once):** {sealed}")
     if split:
         where = f"ordered by `{split['split_on']}`" if split.get("split_on") else "random"
         sealed_rows = (
@@ -202,10 +206,10 @@ def build_report(
         )
         lines += [
             "",
-            "> **Read the validation score as a public leaderboard.** Every experiment in "
-            "this run was ranked against these same rows, so the winner is the best of "
-            f"{split['n_val']} rows seen many times over — the score is the one the search "
-            "was steering towards, not an independent check on it."
+            "> **Read validation results as public leaderboard evidence.** The search reused "
+            "these same rows to rank experiments and build the shipped result, so this run "
+            f"was steering toward these {split['n_val']} rows — they are not an independent "
+            "check on it."
             # Only when there is one to point at. A blend has no folds, and a
             # sentence sending the reader to a number the report does not print
             # is worse than the silence it replaces.

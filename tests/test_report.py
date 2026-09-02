@@ -47,6 +47,8 @@ def test_both_scores_are_reported_so_the_gap_is_visible():
         model_types=["lgbm"],
         feature_names=["a"],
     )
+    assert "Prediction output" in text and "0.5 threshold" in text
+    assert "Shipped validation score" in text
     assert "0.900" in text
     assert "0.940" in text
     assert "validation" in text.lower()
