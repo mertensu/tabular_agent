@@ -20,6 +20,39 @@ def _gain(score: float, reference: float, metric: str) -> float:
     return score - reference if greater_is_better(metric) else reference - score
 
 
+def accuracy_interval(score: float, n_rows: int) -> tuple[float, float]:
+    """Wilson 95% interval for an accuracy, bounded to its natural range."""
+    z = 1.96
+    if n_rows <= 0:
+        raise ValueError("accuracy interval requires at least one row")
+    p = float(score)
+    if not 0.0 <= p <= 1.0:
+        raise ValueError(f"accuracy must lie in [0, 1], got {score}")
+    denominator = 1 + z * z / n_rows
+    center = (p + z * z / (2 * n_rows)) / denominator
+    half = (
+        z
+        * np.sqrt(p * (1 - p) / n_rows + z * z / (4 * n_rows**2))
+        / denominator
+    )
+    return max(0.0, center - half), min(1.0, center + half)
+
+
+def target_composition(split: dict) -> str | None:
+    parts = split.get("target_composition") or {}
+    if not parts:
+        return None
+
+    def one(rows: list[dict]) -> str:
+        shown = rows[:8]
+        text = ", ".join(f"{row['label']}: {row['share']:.1%}" for row in shown)
+        return text + (
+            f", +{len(rows) - len(shown)} more" if len(rows) > len(shown) else ""
+        )
+
+    return "; ".join(f"{name} [{one(rows)}]" for name, rows in parts.items())
+
+
 def selected_holdout(holdout: dict | None) -> dict | None:
     """The sealed score belonging to the candidate the *search* crowned.
 
@@ -169,6 +202,14 @@ def build_report(
     headline = f"{selection_score:.3f}"
     if val_se is not None:
         headline += f" (+/- {val_se:.3f})"
+    if (
+        metric == "accuracy"
+        and split
+        and split.get("n_val")
+        and not split.get("split_on")
+    ):
+        low, high = accuracy_interval(selection_score, split["n_val"])
+        headline += f"; row-level 95% interval {low:.3f}-{high:.3f}"
     lines = [
         "# Run Report",
         "",
@@ -191,12 +232,24 @@ def build_report(
         sealed = f"{shipped['holdout_score']:.3f}"
         if shipped.get("holdout_se") is not None:
             sealed += f" (+/- {shipped['holdout_se']:.3f})"
+        if (
+            metric == "accuracy"
+            and split
+            and split.get("n_holdout")
+            and not split.get("split_on")
+        ):
+            low, high = accuracy_interval(shipped["holdout_score"], split["n_holdout"])
+            sealed += f"; row-level 95% interval {low:.3f}-{high:.3f}"
         # Beside the validation score, never instead of it (0023). The pair is
         # the point: one number is what the search steered towards, the other is
         # what it was worth, and the reader needs both to read the third.
         lines.insert(score_insert, f"- **Shipped holdout score (sealed, scored once):** {sealed}")
     if split:
-        where = f"ordered by `{split['split_on']}`" if split.get("split_on") else "random"
+        where = (
+            f"ordered by `{split['split_on']}`"
+            if split.get("split_on")
+            else "random, stratified" if split.get("stratified") else "random"
+        )
         sealed_rows = (
             f" / {split['n_holdout']} sealed holdout" if split.get("n_holdout") else ""
         )
@@ -204,6 +257,9 @@ def build_report(
             f"- **Split:** {split['n_work']} work / {split['n_val']} validation"
             f"{sealed_rows} ({where})"
         )
+        composition = target_composition(split)
+        if composition:
+            lines.append(f"- **Target composition:** {composition}")
         lines += [
             "",
             "> **Read validation results as public leaderboard evidence.** The search reused "

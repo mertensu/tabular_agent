@@ -19,6 +19,39 @@ MAX_REPORTED_CATEGORIES = 20
 SUPPORTED_TABLE_SUFFIXES = {".csv", ".parquet"}
 
 
+def propose_identifier_columns(
+    frame: pd.DataFrame,
+    serving_columns: list[str] | None = None,
+) -> list[str]:
+    """Conservatively propose row identifiers; never apply the proposal.
+
+    A unique column called ``PassengerId`` or ``transaction_id`` is usually a
+    carrier for joining predictions back to rows, not a quantity a model should
+    learn. Uniqueness alone is not enough (a continuous measurement can also be
+    unique), and an ``id``-shaped name alone is not enough (``store_id`` may be a
+    repeated, useful entity). Requiring both keeps this a proposal narrow enough
+    to put in front of the owner without silently deciding the role.
+    """
+    available = (
+        set(serving_columns) if serving_columns is not None else set(frame.columns)
+    )
+    proposed = []
+    for column in frame.columns:
+        raw_name = str(column)
+        name = raw_name.lower()
+        named = (
+            name == "id"
+            or name.endswith("_id")
+            or name.startswith("id_")
+            or raw_name.endswith("Id")
+            or raw_name.endswith("ID")
+        )
+        series = frame[column]
+        if column in available and named and series.notna().all() and series.is_unique:
+            proposed.append(column)
+    return proposed
+
+
 def table_paths(source: str | os.PathLike) -> list[Path]:
     """Return every supported table in a file/folder, without descending."""
     path = Path(source).expanduser().resolve()
@@ -57,6 +90,7 @@ def profile_collection(source: str | os.PathLike) -> dict:
     serving = min(serving_matches) if serving_matches else None
     train = frames[training]
     serving_columns = list(frames[serving].columns) if serving else None
+    identifier_columns = propose_identifier_columns(train, serving_columns)
 
     target_tokens = {"target", "label", "response", "outcome", "sales", "y"}
     train_only = [
@@ -103,6 +137,7 @@ def profile_collection(source: str | os.PathLike) -> dict:
         "training_only_columns": train_only,
         "ordering_candidates": ordering_candidates,
         "serving_columns": serving_columns,
+        "identifier_columns": identifier_columns,
         "joins": joins,
     }
 

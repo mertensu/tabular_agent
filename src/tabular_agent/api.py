@@ -16,7 +16,12 @@ import pandas as pd
 from .harness.agent import gateway_model, run as run_agent
 from .harness.session import RunSession
 from .harness.tools import finalize_run
-from .inspect import profile_collection, profile_dataframe, table_paths
+from .inspect import (
+    profile_collection,
+    profile_dataframe,
+    propose_identifier_columns,
+    table_paths,
+)
 from .io import load_table, save_parquet
 from .pipeline import load_bundle, predict_bundle
 from .taskspec import TaskSpec
@@ -53,9 +58,11 @@ class DataPlan:
     ordering_candidates: list[str]
     training_only_columns: list[str]
     proposed_serving_columns: list[str] | None
+    proposed_identifier_columns: list[str] = field(default_factory=list)
     joins: list[JoinProposal] = field(default_factory=list)
     target: str | None = None
     serving_columns: list[str] | None = None
+    identifier_columns: list[str] | None = field(default_factory=list)
     split_on: str | bool | None = None
     task_type: str | None = None
     metric: str | None = None
@@ -78,8 +85,21 @@ class DataPlan:
             ordering_candidates=profile["ordering_candidates"],
             training_only_columns=profile["training_only_columns"],
             proposed_serving_columns=profile["serving_columns"],
+            proposed_identifier_columns=list(profile.get("identifier_columns") or []),
+            # With no proposal there is no fifth decision to make. When a
+            # plausible identifier exists, keep the role unconfirmed just like
+            # the serving schema: inspection may propose, only the owner decides.
+            identifier_columns=([] if not profile.get("identifier_columns") else None),
             joins=[JoinProposal(**join) for join in profile["joins"]],
         )
+
+    def accept_identifier_proposals(self) -> DataPlan:
+        self.identifier_columns = list(self.proposed_identifier_columns)
+        return self
+
+    def reject_identifier_proposals(self) -> DataPlan:
+        self.identifier_columns = []
+        return self
 
     def accept_joins(self) -> DataPlan:
         for join in self.joins:
@@ -109,6 +129,22 @@ class DataPlan:
         if self.serving_columns is None:
             raise ValueError(
                 "serving_columns are unconfirmed; state exactly what exists at prediction time"
+            )
+        if self.identifier_columns is None:
+            raise ValueError(
+                "identifier_columns are unconfirmed; accept or reject the proposed "
+                f"row identifiers {self.proposed_identifier_columns}"
+            )
+        unknown_identifiers = [
+            column for column in self.identifier_columns if column not in available
+        ]
+        if unknown_identifiers:
+            raise ValueError(f"identifier_columns are not available: {unknown_identifiers}")
+        if self.target in self.identifier_columns:
+            raise ValueError("the target cannot also be an identifier")
+        if isinstance(self.split_on, str) and self.split_on in self.identifier_columns:
+            raise ValueError(
+                "split_on cannot also be an identifier; it is removed before modeling"
             )
         if self.target in self.serving_columns:
             raise ValueError("serving_columns must not contain the target")
@@ -166,6 +202,9 @@ class DataPlan:
         prepared = run_path / "prepared"
         prepared.mkdir(parents=True, exist_ok=True)
         frame = self._apply_joins(self._training_frame())
+        # Identifiers are transport metadata: accepted joins may need them first,
+        # but the feature agent and every fitted encoder must never see them.
+        frame = frame.drop(columns=list(self.identifier_columns or []), errors="raise")
         if isinstance(self.split_on, str):
             parsed = pd.to_datetime(frame[self.split_on], errors="coerce")
             if parsed.notna().all():
@@ -176,6 +215,7 @@ class DataPlan:
             "serving_table": self.serving_table,
             "target": self.target,
             "serving_columns": list(self.serving_columns or []),
+            "identifier_columns": list(self.identifier_columns or []),
             "split_on": self.split_on,
             "joins": [asdict(join) for join in self.joins if join.decision == "accepted"],
         }
@@ -245,6 +285,9 @@ class Bundle:
             parsed = pd.to_datetime(result[split_on], errors="coerce")
             if parsed.notna().all():
                 result[split_on] = parsed
+        result = result.drop(
+            columns=list(self._plan.get("identifier_columns") or []), errors="ignore"
+        )
         return result
 
     def predict(
@@ -312,6 +355,7 @@ class Agent:
                     or any(token in str(column).lower() for token in ("date", "time", "timestamp"))
                 ],
                 "serving_columns": None,
+                "identifier_columns": propose_identifier_columns(source),
                 "joins": [],
                 "training_only_columns": list(source.columns),
             }

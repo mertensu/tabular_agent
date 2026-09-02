@@ -41,6 +41,7 @@ def main() -> int:
         "the official test.csv defines the serving schema."
     )
     plan.serving_columns = list(plan.proposed_serving_columns or [])
+    plan.accept_identifier_proposals()
     plan.split_on = False
     plan.reject_joins()
     plan.validate()
@@ -53,6 +54,7 @@ def main() -> int:
         "metric": plan.metric,
         "split_on": plan.split_on,
         "serving_columns": plan.serving_columns,
+        "identifier_columns": plan.identifier_columns,
         "joins": [vars(join) for join in plan.joins],
     }
     (RUN_ROOT.parent / "confirmed_facade_plan.json").write_text(

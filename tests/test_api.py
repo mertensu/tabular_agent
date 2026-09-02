@@ -44,6 +44,44 @@ def test_inspect_profiles_all_tables_and_only_proposes(tmp_path):
     assert plan.joins[0].decision == "proposed"
 
 
+def test_identifier_role_is_proposed_confirmed_and_removed_before_modeling(tmp_path):
+    train = pd.DataFrame(
+        {
+            "PassengerId": [1, 2, 3, 4],
+            "valid": [0.1, 0.2, 0.3, 0.4],
+            "store_id": [10, 10, 11, 11],
+            "target": [0, 1, 0, 1],
+        }
+    )
+    train.to_csv(tmp_path / "train.csv", index=False)
+    train.drop(columns="target").to_csv(tmp_path / "test.csv", index=False)
+    pd.DataFrame(
+        {"PassengerId": [1, 2, 3, 4], "Tier": ["A", "B", "A", "B"]}
+    ).to_csv(tmp_path / "passengers.csv", index=False)
+
+    plan = ta.Agent(model=object()).inspect(tmp_path)
+
+    assert plan.proposed_identifier_columns == ["PassengerId"]
+    assert plan.identifier_columns is None
+    plan.target = "target"
+    plan.serving_columns = list(plan.proposed_serving_columns)
+    plan.split_on = False
+    plan.accept_joins()
+    plan.serving_columns.append("Tier")
+    with pytest.raises(ValueError, match="identifier_columns are unconfirmed"):
+        plan.validate()
+
+    plan.accept_identifier_proposals()
+    plan.validate()
+    prepared_path, manifest = plan.materialize(tmp_path / "run")
+    prepared = pd.read_parquet(prepared_path)
+
+    assert "PassengerId" not in prepared
+    assert "valid" in prepared and "store_id" in prepared
+    assert prepared["Tier"].tolist() == ["A", "B", "A", "B"]
+    assert manifest["identifier_columns"] == ["PassengerId"]
+
+
 def test_plan_refuses_every_unconfirmed_owner_decision(tmp_path):
     _tables(tmp_path)
     plan = ta.Agent(model=object()).inspect(tmp_path)
@@ -98,6 +136,7 @@ def test_bundle_predict_replays_static_join(monkeypatch, tmp_path):
             {
                 "serving_table": "test.csv",
                 "split_on": False,
+                "identifier_columns": ["RowId"],
                 "joins": [
                     {
                         "right_table": "store.csv",
@@ -119,10 +158,11 @@ def test_bundle_predict_replays_static_join(monkeypatch, tmp_path):
 
     monkeypatch.setattr(public_api, "predict_bundle", fake_predict)
     bundle = ta.Bundle(bundle_dir)
-    predictions = bundle.predict(pd.DataFrame({"Store": [2, 1]}))
+    predictions = bundle.predict(pd.DataFrame({"RowId": [20, 10], "Store": [2, 1]}))
 
     assert predictions.tolist() == [4.0, 3.0]
     assert seen["frame"]["Store"].tolist() == [2, 1]
+    assert "RowId" not in seen["frame"]
 
 
 def test_agent_run_delegates_to_session_and_finalizer(monkeypatch, tmp_path):

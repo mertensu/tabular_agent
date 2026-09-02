@@ -63,6 +63,7 @@ believed at the time and this table is what is believed now.
 
 | thread | where it stands | rests on |
 |---|---|---|
+| **Random classification and row identifiers** | [0081](0081-random-classification-preserves-classes-identifiers-are-transport.md): random binary/multiclass outer splits preserve target composition; an owner-confirmed identifier remains transport metadata and is removed before any model can see it | 0022, 0023, 0029, 0030 |
 | **How a table is ranked** — the ruler | [0078](0078-the-panel-was-a-stop-rule-and-the-gain-threshold-is-the-real-lever.md): 0077's panel is **reverted** — it rejected 96% of steps and its schemes behave like coin flips. What survives the measurement is that **gain size predicts survival**, and that on ordered runs there is currently **no bar at all** | 0017, 0022, 0028, 0034, 0035, 0036, 0054, 0056, 0058, 0059, 0073, 0077 |
 | **Model capacity** | [0068](0068-capacity-reaches-the-shipped-blend-at-half-strength-and-validation-picks-the-wrong-budget.md): capacity reaches the shipped blend at half the probe's strength, and `val` picks the budget wrongly on both datasets | 0054, 0067 |
 | **Where the search happens** | [0035](0035-the-search-is-over-features.md): the search is over features; models are enumerated, not searched | 0014, 0021, 0022 |
@@ -114,6 +115,8 @@ vocabulary for *new* records would be the fix, and is not yet decided.
   follows for time-ordered data)*
 - [0030 — A model that could never be served is refused, not scored](0030-a-model-that-cannot-be-served-is-not-trained.md)
   *(the serving schema, and the Rossmann run that argued for it)*
+- [0081 — Random classification preserves classes; row identifiers are transport, not features](0081-random-classification-preserves-classes-identifiers-are-transport.md)
+  *(stratified random outer splits, explicit owner-confirmed identifier roles, class composition and row-level accuracy uncertainty)*
 - [0079 — Building a table does not remove the data as given from the terminal ballot](0079-the-work-table-stays-on-the-terminal-ballot.md)
   *(bug fix: `work_probe` joins the derived tables on the terminal ballot, and wins a tie because its lineage is empty)*
 

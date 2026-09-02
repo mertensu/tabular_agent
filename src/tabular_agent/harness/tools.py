@@ -36,7 +36,13 @@ from ..models import _make_model, predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..probe import PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_probe, probe_predict
 from ..blend import apply_blend, blend_weights
-from ..report import build_report, shipped_holdout, write_report
+from ..report import (
+    accuracy_interval,
+    build_report,
+    shipped_holdout,
+    target_composition,
+    write_report,
+)
 from ..rows import select_rows
 from ..sandbox import SandboxError, run_readonly
 from ..target import TARGET_TRANSFORMS, invert_target
@@ -332,8 +338,8 @@ def _score_on_held_out(
     refitting, so they are returned here, where they already exist, and the caller
     decides whether to keep them.
 
-    ``models`` is a list because a run can ship an equal-weight average of the
-    terminal candidates rather than one of them (0044). One model and several go
+    ``models`` is a list because a run can ship the weighted average of the
+    terminal candidates rather than one of them (0044, 0080). One model and several go
     through the same code for the same reason the two row-sets do: a blend's
     score is only comparable to its members' if it was produced identically.
     Predictions are averaged **after** each model's transform is inverted,
@@ -2596,7 +2602,8 @@ def _terminal_fits(session: RunSession) -> list[dict]:
     """Fit the enumerated set on the best table, and leave them all on the board.
 
     Since 0044 this is **not** a selection event: `finalize_run` ships the
-    equal-weight average of everything fitted here, so no candidate has to win.
+    weighted average of everything fitted here, so no candidate has to win.
+    Since 0080 those weights are inverse to cross-fitting fold spread.
     The leaderboard still ranks them, because the ranking is the measurement —
     the argmax winner's sealed score against the blend's is the A/B this design
     was chosen on, and every run recomputes it.
@@ -2649,8 +2656,8 @@ def _blend_members(session: RunSession, terminal: list[dict]) -> list[dict]:
     model — is refuted by house v9, where elasticnet was the best model on the
     board. Rossmann v7 is the case against: elasticnet sat 0.054 of rmspe behind
     the next-worst candidate and the four-way average still landed within 0.0001
-    of the three-way one, because an equal-weight average is not very sensitive to
-    one dissenting member.
+    of the three-way one under the equal-weight rule then in force. Since 0080
+    all members remain, but their pre-seal fold stability determines their weight.
     """
     members = []
     for out in terminal:
@@ -2939,22 +2946,39 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
     j = journal.load(session.run_dir)
     credit = journal.attribution(j, table_rel)
     split = j.get("split") or {}
-    text = "\n".join([
+    split_mode = split.get("mode", "unknown")
+    if split.get("stratified"):
+        split_mode += ", stratified"
+    report_lines = [
         "# Run report",
         "",
         f"- **Task:** {spec.task_type}",
         f"- **Metric:** {spec.metric}",
         f"- **Evaluation score:** {evaluation_score:.6g}",
+    ]
+    if spec.metric == "accuracy" and not split.get("split_on") and split.get("n_val"):
+        low, high = accuracy_interval(evaluation_score, split["n_val"])
+        report_lines.append(
+            f"- **Evaluation row-level 95% interval:** {low:.3f}-{high:.3f}"
+        )
+    report_lines += [
         f"- **Baseline score:** {baseline_score:.6g}",
         f"- **Model:** {PROBE_MODEL_TYPE}",
         f"- **Selected table:** `{table_rel}`",
         f"- **Features:** {', '.join(fit.feature_names)}",
-        f"- **Split:** {split.get('mode', 'unknown')}",
+        f"- **Split:** {split.get('n_work')} work / {split.get('n_val')} evaluation "
+        f"({split_mode})",
+    ]
+    composition = target_composition(split)
+    if composition:
+        report_lines.append(f"- **Target composition:** {composition}")
+    report_lines += [
         "",
         "The evaluation rows were used repeatedly to rank candidate tables. This is",
         "an internal search score, not an independent estimate for a future population.",
         "The bundle replays the selected table's fitted lineage from raw rows.",
-    ])
+    ]
+    text = "\n".join(report_lines)
     report_path = write_report(session.ctx, text)
     journal.append_experiments(session.run_dir, [baseline_row, model_row])
     journal.mark_finalized(session.run_dir)
@@ -3002,8 +3026,9 @@ def finalize_run(session: RunSession) -> dict:
     best = j["best"]
     spec = session.resolved()
 
-    # What ships is the equal-weight average of every terminal candidate, not the
-    # one with the best validation score (0044). An argmax over k candidates costs
+    # What ships is the inverse-fold-spread-weighted average of every terminal
+    # candidate, not the one with the best validation score (0044, 0080). An argmax
+    # over k candidates costs
     # about `sqrt(2*ln k)` standard errors of luck by construction and an average
     # costs none, and on Rossmann v7 the argmax's pick was the *worst* of the
     # three boosted trees on rows it had never seen. One candidate is not a blend,
