@@ -50,6 +50,7 @@ def main() -> int:
     plan.serving_columns = [
         column for column in test.columns if column != "Id"
     ] + static_columns
+    plan.reject_identifier_proposals()
     for join in plan.joins:
         if join.right_table == "store.csv":
             join.accept()
@@ -65,6 +66,7 @@ def main() -> int:
         "split_on": plan.split_on,
         "forecast_horizon": plan.forecast_horizon,
         "serving_columns": plan.serving_columns,
+        "identifier_columns": plan.identifier_columns,
         "joins": [vars(join) for join in plan.joins],
     }
     RUN_ROOT.mkdir(parents=True, exist_ok=True)

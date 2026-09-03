@@ -88,6 +88,66 @@ def test_the_holdout_comes_out_of_work_and_leaves_validation_alone(tmp_path):
     assert len(load_table(with_holdout.holdout_path)) == 60
 
 
+def test_random_classification_split_stratifies_all_three_parts(tmp_path):
+    frame = pd.DataFrame(
+        {"row": range(100), "x": np.arange(100), "y": [0] * 90 + [1] * 10}
+    )
+    path = str(tmp_path / "classes.csv")
+    frame.to_csv(path, index=False)
+    session = RunSession(
+        str(tmp_path / "run"),
+        path,
+        TaskSpec(target="y", task_type="binary", metric="accuracy"),
+        val_fraction=0.2,
+        holdout_fraction=0.2,
+    )
+
+    parts = [
+        load_table(session.data_path),
+        load_table(session.val_path),
+        load_table(session.holdout_path),
+    ]
+    assert [part["y"].value_counts().sort_index().to_dict() for part in parts] == [
+        {0: 54, 1: 6}, {0: 18, 1: 2}, {0: 18, 1: 2},
+    ]
+    record = session.split_record()
+    assert record["stratified"] is True
+    assert record["target_composition"]["holdout"] == [
+        {"label": "0", "count": 18, "share": 0.9},
+        {"label": "1", "count": 2, "share": 0.1},
+    ]
+
+
+def test_random_regression_split_is_not_labeled_stratified(tmp_path):
+    frame = pd.DataFrame({"x": range(100), "y": np.linspace(0.0, 1.0, 100)})
+    path = str(tmp_path / "regression.csv")
+    frame.to_csv(path, index=False)
+    session = RunSession(
+        str(tmp_path / "run"),
+        path,
+        TaskSpec(target="y", task_type="regression", metric="rmse"),
+    )
+    assert session.split_record()["stratified"] is False
+    assert "target_composition" not in session.split_record()
+
+
+def test_stratification_refuses_a_class_too_rare_for_the_parts(tmp_path):
+    frame = pd.DataFrame({"x": range(30), "y": [0] * 28 + [1, 2]})
+    path = str(tmp_path / "rare.csv")
+    frame.to_csv(path, index=False)
+    session = RunSession(
+        str(tmp_path / "run"),
+        path,
+        TaskSpec(target="y", task_type="multiclass", metric="accuracy"),
+        val_fraction=0.2,
+        holdout_fraction=0.2,
+    )
+    with pytest.raises(
+        ValueError, match="cannot make a stratified random classification split"
+    ):
+        session.data_path
+
+
 def test_the_three_parts_are_disjoint_and_cover_the_input(sealed):
     """A row in two parts is a leak; a row in none is data thrown away silently."""
     parts = [
@@ -274,8 +334,8 @@ def test_the_report_prints_both_numbers_and_the_gap(sealed):
     out = finalize_run(sealed)
 
     text = open(os.path.join(sealed.run_dir, out["report_path"])).read()
-    assert "Validation score" in text
-    assert "Holdout score (sealed, scored once)" in text
+    assert "Shipped validation score" in text
+    assert "Shipped holdout score (sealed, scored once)" in text
     assert "## What the search cost" in text
     assert "These rows ranked nothing" in text
     assert "sealed holdout" in text

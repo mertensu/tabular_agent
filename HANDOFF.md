@@ -27,50 +27,52 @@ a **decorrelation-aware weighting** decision record.
 
 ## Current state
 
-Branch `simplify-v0.2` separates the autonomous product from its research lab.
-The full pre-simplification system is tagged `research-reference-2026-08-21`.
-Historical runners, probes, readings, notebooks and the closed handoff log are
-preserved under `research/archive/`.
+Branch `chad/generic-classification-contract` adds the two generic contracts
+exposed by the Titanic facade acceptance:
 
-The active target is documented in `docs/CURRENT.md`:
+- random binary/multiclass outer splits are stratified; ordered and regression
+  splits retain their existing behavior
+- `DataPlan` proposes plausible unique row identifiers but blocks until the owner
+  accepts or rejects the role; confirmed identifiers are usable for static joins
+  and result alignment, then are removed before the agent/model and during bundle
+  replay
+- split journals and both full/minimal reports show class composition; random
+  accuracy reports add a Wilson row-level 95% interval
 
-- one train/evaluation split
-- one bounded model contract
-- cross-fitting only for leakage-safe fitted features
-- baseline score, evaluation score and gain vs incumbent
-- transparent table/time budgets; no runtime uncertainty gates
+Decision record 0081 is accepted and implemented. No Titanic-specific family,
+ticket, public-label, or threshold rule entered `src/`.
 
-Implemented in shadow mode as `RunSession(..., profile="minimal")`: six tools,
-one fixed LGBM fit, no terminal CV/OOF, bootstrap, block interval, sealed score or
-blend. Regression, binary/string-label classification, non-zero-based multiclass,
-ordered evaluation, serving-schema and bundle-replay fixtures pass.
+## Verification so far
+
+- directly affected modules: 51 tests passed after final self-review
+- full repository suite before the final Minimal-report wiring: 582 passed in 5:47
+- provider-free live Titanic facade replay: `PassengerId` proposed and excluded
+  from the prepared table, 418/418 finite bundle predictions, report names
+  stratification, target composition, and the row-level interval
+- wheel and sdist build successfully
+
+The full suite must be rerun after the final commit and attributed to that exact
+HEAD before the branch is handed off.
 
 ## Next action
 
-Run the minimal profile through two release candidates while `profile="full"`
-remains available for comparison.
-Compare safety, replay, fit count, wall time, token use and finalization rate —
-not competition leaderboard movement.
+Commit the reviewed work, run the complete suite on that exact commit, push the
+branch, and report the commit plus verification. Do not submit Titanic again;
+its public score has already been consulted and 0081 explicitly rejects fitting
+new rules to it.
 
 ## Blocking gotchas
 
-- old bundles require legacy history/stream decoder compatibility
-- archived scripts require tag `research-reference-2026-08-21` and original data paths
-- the final minimal model choice must be judged by generic safety/replay fixtures,
-  not competition leaderboard movement
-
-## Uncommitted work
-
-Ready to commit/push the repository reorganization, safe cuts and minimal profile
-on `simplify-v0.2`. Final independent re-review was unavailable due provider HTTP
-429; local targeted gates and the full suite passed.
+- a class too rare for the requested random parts now refuses rather than yielding
+  a misleading split; the error includes class counts and part sizes
+- `identifier_columns` is an owner role, not an automatic drop rule; repeated
+  entity keys such as `store_id` remain ordinary candidate features
+- old bundles without `identifier_columns` remain backward compatible
+- ordered accuracy reports intentionally omit the binomial interval because rows
+  across time are not exchangeable
 
 ## Latest session
 
-2026-08-22, Hermes Linux: reduced the active surface to three prep scripts and one
-START_HERE notebook; archived research by `git mv`; removed refuted/unreachable
-runtime code; established the product/research split; added the six-tool minimal
-profile and hardened serving schemas,
-label mapping, resume invariants and crash-safe serialized finalization. No
-accepted decision record was edited. Final active suite: **558 passed**, 1,588
-known warnings, 10:10. START_HERE and the incumbent archive also smoke-tested.
+2026-09-02, Chad: implemented 0081, corrected the Minimal-profile report path
+found by the live Titanic replay, updated quickstart and both facade acceptance
+runners, and removed stale equal-weight wording left behind by 0080.

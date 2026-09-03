@@ -11,10 +11,12 @@ plan = agent.inspect("/path/to/data")
 
 print(plan.target_candidates)
 print(plan.ordering_candidates)
+print(plan.proposed_identifier_columns)
 print(plan.joins)
 
 plan.target = "target"
 plan.serving_columns = ["feature_a", "feature_b"]
+plan.accept_identifier_proposals()  # or reject_identifier_proposals()
 plan.split_on = False
 plan.reject_joins()
 

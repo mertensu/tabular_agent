@@ -47,6 +47,8 @@ def test_both_scores_are_reported_so_the_gap_is_visible():
         model_types=["lgbm"],
         feature_names=["a"],
     )
+    assert "Prediction output" in text and "0.5 threshold" in text
+    assert "Shipped validation score" in text
     assert "0.900" in text
     assert "0.940" in text
     assert "validation" in text.lower()
@@ -117,3 +119,42 @@ def test_an_unmeasured_link_is_called_out():
     )
     assert "never trained on" in text
     assert "Attribution gap" in text and "tables/t5.parquet" in text
+
+
+def test_classification_report_names_stratification_balance_and_row_uncertainty():
+    text = build_report(
+        task_type="binary", metric="accuracy", selection_score=0.8,
+        fold_metrics=[0.78, 0.82], baseline_score=0.6,
+        model_types=["lgbm"], feature_names=["x"],
+        split={
+            "n_work": 60, "n_val": 20, "n_holdout": 20, "split_on": None,
+            "stratified": True,
+            "target_composition": {
+                "work": [{"label": "0", "count": 42, "share": 0.7},
+                         {"label": "1", "count": 18, "share": 0.3}],
+                "validation": [{"label": "0", "count": 14, "share": 0.7},
+                               {"label": "1", "count": 6, "share": 0.3}],
+                "holdout": [{"label": "0", "count": 14, "share": 0.7},
+                            {"label": "1", "count": 6, "share": 0.3}],
+            },
+        },
+        holdout={"scores": [{
+            "experiment_id": "blend", "model_type": "blend", "selected": True,
+            "shipped": True, "val_score": 0.8, "holdout_score": 0.85,
+            "optimism": -0.05,
+        }]},
+    )
+    assert "random, stratified" in text
+    assert "Target composition" in text
+    assert "work [0: 70.0%, 1: 30.0%]" in text
+    assert text.count("row-level 95% interval") == 2
+
+
+def test_ordered_accuracy_report_does_not_claim_binomial_uncertainty():
+    text = build_report(
+        task_type="binary", metric="accuracy", selection_score=0.8,
+        fold_metrics=[0.8], baseline_score=0.6, model_types=["lgbm"],
+        feature_names=["x"],
+        split={"n_work": 80, "n_val": 20, "n_holdout": 0, "split_on": "date"},
+    )
+    assert "row-level 95% interval" not in text

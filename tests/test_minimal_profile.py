@@ -234,6 +234,27 @@ def test_minimal_classification_preserves_real_labels(tmp_path, labels, metric):
     assert out["evaluation_score"] is not None
 
 
+def test_minimal_random_accuracy_report_names_balance_and_row_interval(tmp_path):
+    path = tmp_path / "classification.csv"
+    pd.DataFrame(
+        {"x": range(100), "y": [0] * 90 + [1] * 10}
+    ).to_csv(path, index=False)
+    session = RunSession(
+        str(tmp_path / "classification-run"), str(path),
+        TaskSpec(target="y", task_type="binary", metric="accuracy"),
+        profile="minimal",
+    )
+
+    inspect_data(session)
+    out = finalize_run(session)
+    report = open(os.path.join(session.run_dir, out["report_path"])).read()
+
+    assert "random, stratified" in report
+    assert "Target composition" in report
+    assert "work [0: 90.0%, 1: 10.0%]" in report
+    assert "Evaluation row-level 95% interval" in report
+
+
 def test_minimal_ordered_evaluation_golden_fixture(tmp_path):
     session = _session(tmp_path, ordered=True)
     inspect_data(session)
