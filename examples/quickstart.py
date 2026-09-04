@@ -35,3 +35,11 @@ y_train = training[plan.target]
 # Build the matching feature matrix for genuinely new rows.
 X_serving = run.bundle.feature_table("/path/to/serving.csv")
 serving_with_features = run.bundle.feature_table("/path/to/serving.csv", include_input=True)
+
+# Why *this* number for *this* row: per-feature attribution of the shipped blend.
+# `base_value + contributions.sum(axis=1)` reconstructs the model output on
+# `explanation.space` — the prediction itself for a plain regression, and one
+# link away (`log1p(target)`, `log-odds`) otherwise.
+explanation = run.bundle.explain("/path/to/serving.csv")
+print(explanation.space, explanation.base_value)
+print(explanation.for_row(0))  # first row's pushes, largest magnitude first

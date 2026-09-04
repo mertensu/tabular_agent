@@ -23,6 +23,7 @@ from .inspect import (
     propose_identifier_columns,
     table_paths,
 )
+from .explain import Explanation, explain_bundle
 from .io import load_table, save_parquet
 from .pipeline import feature_table_bundle, load_bundle, predict_bundle
 from .taskspec import TaskSpec
@@ -513,6 +514,22 @@ class Bundle:
         streams: dict | None = None,
     ):
         return predict_bundle(self._bundle, self._prepare(self._raw_frame(rows)), streams=streams)
+
+    def explain(
+        self,
+        rows: pd.DataFrame | str | os.PathLike,
+        streams: dict | None = None,
+    ) -> Explanation:
+        """Per-feature attribution of the shipped prediction for each row.
+
+        Takes the same raw rows as :meth:`predict` and prepares them identically
+        (joins, identifier drop, split-column typing); see
+        :func:`~tabular_agent.explain.explain_bundle` for the additivity and
+        scale guarantees.
+        """
+        return explain_bundle(
+            self._bundle, self._prepare(self._raw_frame(rows)), streams=streams
+        )
 
 
 class Run:
