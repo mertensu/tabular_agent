@@ -231,6 +231,7 @@ def feature_table_bundle(bundle: dict, raw_df: pd.DataFrame,
         )
     return features.loc[:, bundle["feature_names"]].copy()
 
+
 def predict_bundle(bundle: dict, raw_df: pd.DataFrame,
                    streams: dict | None = None) -> np.ndarray:
     """Replay the lineage, predict with every model in the bundle, combine.
