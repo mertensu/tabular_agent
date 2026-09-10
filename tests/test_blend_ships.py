@@ -24,6 +24,7 @@ from tabular_agent.harness.tools import (
     finalize_run,
     inspect_data,
 )
+from tabular_agent.blend import blend_weights
 from tabular_agent.models import predict_model
 from tabular_agent.pipeline import load_bundle, predict_bundle
 from tabular_agent.target import invert_target
@@ -84,18 +85,30 @@ def sealed(tmp_path):
 # --------------------------------------------------------------- what is in it
 
 
-def test_the_bundle_holds_every_terminal_fit_at_equal_weight(run):
+def test_the_bundle_holds_every_terminal_fit_weighted_by_inverse_fold_spread(run):
+    """0080: every terminal fit still ships (0044 stands — this reweights, it does
+    not select), but the weights are inverse to each member's cross-fitting
+    fold-spread, not equal, so a member that will be optimistic out of sample
+    cannot contribute 1/k of every prediction."""
     inspect_data(run)
     fit_encoding(run, ["city"], "frequency")
     out = finalize_run(run)
 
     bundle = load_bundle(os.path.join(run.run_dir, out["bundle_dir"]))
     assert len(bundle["models"]) == len(out["blend_members"]) > 1
-    # Equal, and summing to one: no weight was fitted to anything, which is the
-    # whole reason the blend costs no selection.
-    assert np.allclose(bundle["weights"], 1.0 / len(bundle["models"]))
-    assert bundle["weights"].sum() == pytest.approx(1.0)
     assert out["model_type"].startswith("blend(")
+    # No weight is fitted to anything; they are a fixed function of the members'
+    # fold-spread and sum to one, so the blend still costs no selection.
+    assert bundle["weights"].sum() == pytest.approx(1.0)
+    assert (bundle["weights"] > 0).all()
+    # The weights are exactly blend_weights of the members' fold-spreads.
+    spreads = []
+    for exp_id in out["blend_members"]:
+        with open(os.path.join(run.run_dir, "experiments", exp_id, "meta.json")) as f:
+            spreads.append(float(np.std(json.load(f)["fold_metrics"])))
+    assert np.allclose(bundle["weights"], blend_weights(spreads))
+    # The most fold-unstable member carries the least weight.
+    assert int(np.argmax(spreads)) == int(np.argmin(bundle["weights"]))
 
 
 def test_a_failed_family_is_left_out_rather_than_ending_the_run(run, monkeypatch):
@@ -149,8 +162,10 @@ def test_predictions_are_averaged_after_the_transform_is_inverted(tmp_path):
 
     X = bundle["pipeline"].transform(raw)[bundle["feature_names"]]
     each = [predict_model(m, X, bundle["task_type"]) for m in bundle["models"]]
-    arithmetic = np.mean([invert_target("log1p", p) for p in each], axis=0)
-    geometric = invert_target("log1p", np.mean(each, axis=0))
+    w = bundle["weights"]
+    # Invert first, then combine with the shipped (0080 inverse-fold-spread) weights.
+    arithmetic = sum(wi * invert_target("log1p", p) for wi, p in zip(w, each))
+    geometric = invert_target("log1p", sum(wi * p for wi, p in zip(w, each)))
 
     assert np.allclose(got, arithmetic)
     # And the two really are distinguishable on this data, or the test proves
@@ -250,6 +265,9 @@ def test_the_report_names_the_blend_and_prints_the_gap(sealed):
 
     text = open(os.path.join(sealed.run_dir, out["report_path"])).read()
     assert "What shipped is not that candidate" in text
+    assert "inverse-fold-spread-weighted blend" in text
+    assert "Every terminal fit still ships" in text
+    assert "equal-weight blend" not in text
     assert "(shipped)" in text and "(search's pick)" in text
     # A blend was never cross-validated, so the report must neither print folds
     # for it nor send the reader to a CV score it does not have.

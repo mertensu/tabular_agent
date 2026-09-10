@@ -1,51 +1,52 @@
 # Handoff
 
-## Current state
+## Latest session (2026-09-10)
 
-Branch `simplify-v0.2` separates the autonomous product from its research lab.
-The full pre-simplification system is tagged `research-reference-2026-08-21`.
-Historical runners, probes, readings, notebooks and the closed handoff log are
-preserved under `research/archive/`.
+Added the public reusable-feature contract on branch
+`chad/feature-table-api`, based on `origin/master` at `4a7cb7e`:
 
-The active target is documented in `docs/CURRENT.md`:
+- `Bundle.describe_features()` returns one readable lineage row per shipped
+  feature: kind, source columns, pipeline step, explanation, and stored recipe
+- `Bundle.feature_table(new_rows)` returns the exact ordered shared model matrix;
+  `include_input=True` appends it to the original rows for IDs and other metadata
+- `Run.training_features()` returns the exact selected table fitted by the
+  shipped models, preserving OOF target/group-statistic values and optionally
+  appending the target
+- new bundle manifests retain the run-local selected-table reference; old bundles
+  remain prediction- and feature-replay-compatible but cannot recover an exact
+  OOF training table
+- row-local transforms now retain their output names as explanation-only metadata;
+  replay still executes the stored sandbox code
 
-- one train/evaluation split
-- one bounded model contract
-- cross-fitting only for leakage-safe fitted features
-- baseline score, evaluation score and gain vs incumbent
-- transparent table/time budgets; no runtime uncertainty gates
+Decision record: `docs/decisions/0083-learned-features-are-a-reusable-artifact.md`.
+The earlier handoff is archived verbatim under
+`research/archive/handoffs/2026-09-01--2026-09-10.md`.
 
-Implemented in shadow mode as `RunSession(..., profile="minimal")`: six tools,
-one fixed LGBM fit, no terminal CV/OOF, bootstrap, block interval, sealed score or
-blend. Regression, binary/string-label classification, non-zero-based multiclass,
-ordered evaluation, serving-schema and bundle-replay fixtures pass.
+## Verification so far
+
+- directly affected API/pipeline/stream/finalization tests pass
+- complete repository suite on the final branch commit: 585 tests pass
+- wheel and sdist build successfully
+- a real legacy Titanic bundle describes all 14 shipped features; legacy
+  row-transform outputs are explicitly marked unattributed rather than guessed
+- provider-free public-facade E2E proves finalization records the selected table
+  and `training_features()` returns its model columns plus target
+
 
 ## Next action
 
-Run the minimal profile through two release candidates while `profile="full"`
-remains available for comparison.
-Compare safety, replay, fit count, wall time, token use and finalization rate —
-not competition leaderboard movement.
+Review and merge `chad/feature-table-api`. A natural next acceptance check is a
+fresh full-profile run whose winning table includes both agent-written columns
+and a target-informed encoder, then fitting a small user-owned estimator from
+`training_features()` and predicting via `bundle.feature_table()`.
 
 ## Blocking gotchas
 
-- old bundles require legacy history/stream decoder compatibility
-- archived scripts require tag `research-reference-2026-08-21` and original data paths
-- the final minimal model choice must be judged by generic safety/replay fixtures,
-  not competition leaderboard movement
-
-## Uncommitted work
-
-Ready to commit/push the repository reorganization, safe cuts and minimal profile
-on `simplify-v0.2`. Final independent re-review was unavailable due provider HTTP
-429; local targeted gates and the full suite passed.
-
-## Latest session
-
-2026-08-22, Hermes Linux: reduced the active surface to three prep scripts and one
-START_HERE notebook; archived research by `git mv`; removed refuted/unreachable
-runtime code; established the product/research split; added the six-tool minimal
-profile and hardened serving schemas,
-label mapping, resume invariants and crash-safe serialized finalization. No
-accepted decision record was edited. Final active suite: **558 passed**, 1,588
-known warnings, 10:10. START_HERE and the incumbent archive also smoke-tested.
+- `Bundle.feature_table()` is for genuinely new/serving rows. Custom training
+  must start from `Run.training_features()`; replaying final target-informed
+  lookups over their own fit rows is leakage and differs from the OOF matrix.
+- estimator-specific preprocessing is deliberately not part of the shared table;
+  a blend can contain several different imputers/scalers.
+- `Run.training_features()` depends on the original run directory. A copied
+  standalone bundle continues to describe and transform new rows, but does not
+  carry the potentially large training table.

@@ -22,13 +22,24 @@ class Pipeline:
     def add_encoder(self, encoder) -> None:
         self.steps.append({"type": "encode", "encoder": encoder.to_dict()})
 
-    def add_transform(self, code: str, func_name: str = "transform_features") -> None:
+    def add_transform(
+        self,
+        code: str,
+        func_name: str = "transform_features",
+        new_columns: list[str] | None = None,
+    ) -> None:
         """Persist a stateless df->df sandbox transform (§5.1) as an ordered step.
 
-        Only the code is stored; it is re-run in the sandbox at ``transform``
-        time (i.e. at predict), never the produced columns — that is what keeps
-        it reproducible and train/serve-skew-free."""
-        self.steps.append({"type": "transform", "code": code, "func_name": func_name})
+        The code is re-run in the sandbox at ``transform`` time (i.e. at
+        predict). Output names may be stored as explanation metadata, but their
+        values are never stored or trusted — that is what keeps replay
+        reproducible and train/serve-skew-free."""
+        step = {"type": "transform", "code": code, "func_name": func_name}
+        if new_columns is not None:
+            # Explanation metadata only. Replay still executes the stored code;
+            # trusting remembered output would reintroduce train/serve skew.
+            step["new_columns"] = list(new_columns)
+        self.steps.append(step)
 
     def add_filter(self, code: str, func_name: str = "keep_rows") -> None:
         """Record a row filter — the one step that is applied at fit and never replayed.
@@ -124,7 +135,9 @@ class Pipeline:
 
 
 def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_names, task_type,
-                target_transform: str = "none", reference_target=None) -> str:
+                target_transform: str = "none",
+                reference_target=None,
+                training_table: str | None = None) -> str:
     bundle_dir = run_ctx.path("bundle", "_")
     bundle_dir = os.path.dirname(bundle_dir)
     model_paths = []
@@ -142,6 +155,10 @@ def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_name
         "target_transform": target_transform,
         "reference_target": normalize_reference_target(reference_target),
     }
+    # Retain the exact fitted table so Run.training_features can return its OOF
+    # values instead of leaking through final target-informed encoders.
+    if training_table is not None:
+        manifest["training_table"] = training_table
     # Derived from the steps, never passed in. A bundle that needs a second input
     # has to say so where somebody will read it — the alternative is a file that
     # predicts only when the caller happens to know, and a `streams=` argument
@@ -171,7 +188,49 @@ def load_bundle(bundle_dir: str) -> dict:
         # written before streams existed, which is what "needs nothing extra"
         # looks like.
         "streams": manifest.get("streams", {}),
+        # Optional: bundles written before reusable features remain valid.
+        "training_table": manifest.get("training_table"),
     }
+
+
+def feature_table_bundle(bundle: dict, raw_df: pd.DataFrame,
+                         streams: dict | None = None) -> pd.DataFrame:
+    """Replay lineage and return the exact matrix handed to every shipped model.
+
+    This is the reusable half of :func:`predict_bundle`: a custom estimator
+    receives the same ordered columns and fitted encoder values on new rows as
+    the bundle's models. It deliberately stops before model-specific
+    preprocessing (for example an estimator's imputer or scaler), because those
+    parameters belong to that model rather than to the learned feature pipeline.
+
+    Stream requirements are checked here so feature export and prediction fail
+    in the same way when a time-varying second input is absent.
+    """
+    streams = streams or {}
+    requirements = bundle["pipeline"].stream_requirements()
+    absent = [name for name in sorted(requirements) if name not in streams]
+    if absent:
+        needs = "; ".join(
+            f"{name}: event time {requirements[name]['event_time']!r}, observation "
+            f"time {requirements[name]['observed_at']!r}, plus "
+            f"{requirements[name]['columns']}"
+            for name in absent
+        )
+        raise ValueError(
+            f"this bundle was built on stream(s) {absent} and cannot predict without "
+            f"them or build features: pass streams={{name: frame}}. Each needs "
+            f"— {needs}. Hand in the file as it stands now, not a copy from training "
+            "time: the whole point of storing the recipe is that the records which "
+            "have arrived since are the ones a served row should be reading."
+        )
+    features = bundle["pipeline"].transform(raw_df, streams=streams)
+    missing = [name for name in bundle["feature_names"] if name not in features]
+    if missing:
+        raise ValueError(
+            "the learned feature pipeline did not produce the model columns "
+            f"{missing}; the bundle cannot be replayed"
+        )
+    return features.loc[:, bundle["feature_names"]].copy()
 
 
 def predict_bundle(bundle: dict, raw_df: pd.DataFrame,
@@ -198,28 +257,7 @@ def predict_bundle(bundle: dict, raw_df: pd.DataFrame,
     a single-model bundle the two are identical, which is every bundle this
     library wrote before 0044.
     """
-    streams = streams or {}
-    # Checked here rather than left to the encoder, which knows only its own name.
-    # One message naming everything that is missing, and what each file must hold,
-    # beats discovering them one raised exception at a time.
-    requirements = bundle["pipeline"].stream_requirements()
-    absent = [name for name in sorted(requirements) if name not in streams]
-    if absent:
-        needs = "; ".join(
-            f"{name}: event time {requirements[name]['event_time']!r}, observation "
-            f"time {requirements[name]['observed_at']!r}, plus "
-            f"{requirements[name]['columns']}"
-            for name in absent
-        )
-        raise ValueError(
-            f"this bundle was built on stream(s) {absent} and cannot predict without "
-            f"them: pass streams={{name: frame}}. Each needs — {needs}. Hand in the "
-            "file as it stands now, not a copy from training time: the whole point of "
-            "storing the recipe is that the records which have arrived since are the "
-            "ones a served row should be reading."
-        )
-    features = bundle["pipeline"].transform(raw_df, streams=streams)
-    X = features[bundle["feature_names"]]
+    X = feature_table_bundle(bundle, raw_df, streams=streams)
     task_type = bundle["task_type"]
     transform = bundle.get("target_transform", "none")
     reference_target = bundle.get("reference_target")
@@ -228,6 +266,6 @@ def predict_bundle(bundle: dict, raw_df: pd.DataFrame,
         p = predict_model(m, X, task_type)
         if transform != "none":
             p = invert_target(transform, p)
-        p = invert_reference_target(p, features, reference_target)
+        p = invert_reference_target(p, X, reference_target)
         preds.append(p)
     return apply_blend(preds, bundle["weights"])

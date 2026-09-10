@@ -9,7 +9,11 @@ def load_table(path: str) -> pd.DataFrame:
     if path.endswith(".parquet"):
         return pd.read_parquet(path)
     if path.endswith(".csv"):
-        return pd.read_csv(path)
+        # Chunkwise inference can assign Python ints in early chunks and strings
+        # in later ones to one object column. That frame cannot be serialized to
+        # parquet, which is the first thing RunSession does with a public plan.
+        # Infer each column once over the complete file so its scalar type is stable.
+        return pd.read_csv(path, low_memory=False)
     raise ValueError(f"unsupported extension: {path}")
 
 

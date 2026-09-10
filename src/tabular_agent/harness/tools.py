@@ -35,8 +35,14 @@ from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import _make_model, predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..probe import PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_probe, probe_predict
-from ..blend import apply_blend
-from ..report import build_report, shipped_holdout, write_report
+from ..blend import apply_blend, blend_weights
+from ..report import (
+    accuracy_interval,
+    build_report,
+    shipped_holdout,
+    target_composition,
+    write_report,
+)
 from ..rows import select_rows
 from ..sandbox import SandboxError, run_readonly
 from ..target import (
@@ -323,8 +329,14 @@ def _score_on_held_out(
     y_work: pd.Series,
     target_transform: str = "none",
     reference_target=None,
+    weights=None,
 ) -> tuple[float | None, float | None, str | None, np.ndarray | None]:
     """Score just-fitted models on held-out rows. ``(score, se, why_not, preds)``.
+
+    ``weights`` blends the members with the given (already-normalised) vector
+    instead of an equal average — used only to score the inverse-fold-spread blend
+    the run may ship (0080). ``None`` keeps the equal average every other caller
+    relies on.
 
     The predictions come back with the score because they are the only thing that
     makes a *paired* comparison possible later (`compare.py`): the difference
@@ -333,8 +345,8 @@ def _score_on_held_out(
     refitting, so they are returned here, where they already exist, and the caller
     decides whether to keep them.
 
-    ``models`` is a list because a run can ship an equal-weight average of the
-    terminal candidates rather than one of them (0044). One model and several go
+    ``models`` is a list because a run can ship the weighted average of the
+    terminal candidates rather than one of them (0044, 0080). One model and several go
     through the same code for the same reason the two row-sets do: a blend's
     score is only comparable to its members' if it was produced identically.
     Predictions are averaged **after** each model's transform is inverted,
@@ -390,7 +402,11 @@ def _score_on_held_out(
             p = invert_target(target_transform, p)
         p = invert_reference_target(p, features, reference_target)
         each.append(p)
-    preds = each[0] if len(each) == 1 else apply_blend(each, np.full(len(each), 1.0 / len(each)))
+    if len(each) == 1:
+        preds = each[0]
+    else:
+        w = np.full(len(each), 1.0 / len(each)) if weights is None else np.asarray(weights, dtype="float64")
+        preds = apply_blend(each, w)
     score = float(compute_metric(spec.metric, y_val, preds, labels=classes))
     # Computed here rather than in the stop rule because this is the only place
     # that still holds the predictions: the leaderboard keeps the score, not the
@@ -421,6 +437,7 @@ def _score_on_val(
     y_work: pd.Series,
     target_transform: str = "none",
     reference_target=None,
+    weights=None,
 ) -> tuple[float | None, float | None, str | None, np.ndarray | None]:
     """`_score_on_held_out` against the validation half — the leaderboard's exam.
 
@@ -430,6 +447,7 @@ def _score_on_val(
     return _score_on_held_out(
         session, session.val_path, source_path, models, feature_names, spec, y_work,
         target_transform=target_transform, reference_target=reference_target,
+        weights=weights,
     )
 
 
@@ -1672,7 +1690,7 @@ def transform_features(
     save_parquet(out, out_path)
 
     lineage = _load_lineage(path, spec.task_type)
-    lineage.add_transform(code)
+    lineage.add_transform(code, new_columns=list(summary["new_columns"]))
     with open(_lineage_path(out_path), "w") as f:
         json.dump(lineage.to_dict(), f, indent=2)
 
@@ -2646,7 +2664,8 @@ def _terminal_fits(session: RunSession) -> list[dict]:
     """Fit the enumerated set on the best table, and leave them all on the board.
 
     Since 0044 this is **not** a selection event: `finalize_run` ships the
-    equal-weight average of everything fitted here, so no candidate has to win.
+    weighted average of everything fitted here, so no candidate has to win.
+    Since 0080 those weights are inverse to cross-fitting fold spread.
     The leaderboard still ranks them, because the ranking is the measurement —
     the argmax winner's sealed score against the blend's is the A/B this design
     was chosen on, and every run recomputes it.
@@ -2714,8 +2733,8 @@ def _blend_members(session: RunSession, terminal: list[dict]) -> list[dict]:
     model — is refuted by house v9, where elasticnet was the best model on the
     board. Rossmann v7 is the case against: elasticnet sat 0.054 of rmspe behind
     the next-worst candidate and the four-way average still landed within 0.0001
-    of the three-way one, because an equal-weight average is not very sensitive to
-    one dissenting member.
+    of the three-way one under the equal-weight rule then in force. Since 0080
+    all members remain, but their pre-seal fold stability determines their weight.
     """
     members = []
     for out in terminal:
@@ -3002,26 +3021,44 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
     bundle_dir = save_bundle(
         session.ctx, pipeline, [fit.model], np.array([1.0]), fit.feature_names,
         spec.task_type, fit.target_transform,
+        training_table=table_rel,
     )
     j = journal.load(session.run_dir)
     credit = journal.attribution(j, table_rel)
     split = j.get("split") or {}
-    text = "\n".join([
+    split_mode = split.get("mode", "unknown")
+    if split.get("stratified"):
+        split_mode += ", stratified"
+    report_lines = [
         "# Run report",
         "",
         f"- **Task:** {spec.task_type}",
         f"- **Metric:** {spec.metric}",
         f"- **Evaluation score:** {evaluation_score:.6g}",
+    ]
+    if spec.metric == "accuracy" and not split.get("split_on") and split.get("n_val"):
+        low, high = accuracy_interval(evaluation_score, split["n_val"])
+        report_lines.append(
+            f"- **Evaluation row-level 95% interval:** {low:.3f}-{high:.3f}"
+        )
+    report_lines += [
         f"- **Baseline score:** {baseline_score:.6g}",
         f"- **Model:** {PROBE_MODEL_TYPE}",
         f"- **Selected table:** `{table_rel}`",
         f"- **Features:** {', '.join(fit.feature_names)}",
-        f"- **Split:** {split.get('mode', 'unknown')}",
+        f"- **Split:** {split.get('n_work')} work / {split.get('n_val')} evaluation "
+        f"({split_mode})",
+    ]
+    composition = target_composition(split)
+    if composition:
+        report_lines.append(f"- **Target composition:** {composition}")
+    report_lines += [
         "",
         "The evaluation rows were used repeatedly to rank candidate tables. This is",
         "an internal search score, not an independent estimate for a future population.",
         "The bundle replays the selected table's fitted lineage from raw rows.",
-    ])
+    ]
+    text = "\n".join(report_lines)
     report_path = write_report(session.ctx, text)
     journal.append_experiments(session.run_dir, [baseline_row, model_row])
     journal.mark_finalized(session.run_dir)
@@ -3069,8 +3106,9 @@ def finalize_run(session: RunSession) -> dict:
     best = j["best"]
     spec = session.resolved()
 
-    # What ships is the equal-weight average of every terminal candidate, not the
-    # one with the best validation score (0044). An argmax over k candidates costs
+    # What ships is the inverse-fold-spread-weighted average of every terminal
+    # candidate, not the one with the best validation score (0044, 0080). An argmax
+    # over k candidates costs
     # about `sqrt(2*ln k)` standard errors of luck by construction and an average
     # costs none, and on Rossmann v7 the argmax's pick was the *worst* of the
     # three boosted trees on rows it had never seen. One candidate is not a blend,
@@ -3120,6 +3158,18 @@ def finalize_run(session: RunSession) -> dict:
 
     ship = blend["meta"] if blend else meta
     ship_models = blend["models"] if blend else [model]
+    # 0080 — the blend ships weighted by inverse out-of-sample instability, not
+    # equally, so a member that will be optimistic out of sample cannot inflate the
+    # average by contributing 1/k of every prediction regardless of how wrong it is
+    # (the failure 0045 registered and the next sealed run confirmed). The weights
+    # come from each member's cross-fitting fold-spread — fixed before the sealed
+    # set is read, from neither `val` nor the seal. Every member still ships; this
+    # reweights, it does not select (0044).
+    if blend is not None:
+        spreads = [float(np.std(m["meta"].get("fold_metrics") or [np.nan])) for m in members]
+        ship_weights = blend_weights(spreads)
+    else:
+        ship_weights = np.array([1.0])
     # The bundle must be able to rebuild the shipped models' features from *raw*
     # input, so it inherits the lineage of whichever table they were trained on —
     # empty when trained on the raw table, one step per encoding otherwise. Every
@@ -3130,11 +3180,12 @@ def finalize_run(session: RunSession) -> dict:
         session.ctx,
         pipeline,
         ship_models,
-        np.full(len(ship_models), 1.0 / len(ship_models)),
+        ship_weights,
         ship["feature_names"],
         ship["task_type"],
         ship.get("target_transform", "none"),
-        ship.get("reference_target"),
+        reference_target=ship.get("reference_target"),
+        training_table=ship["source_table"],
     )
 
     credit = journal.attribution(j, ship["source_table"])

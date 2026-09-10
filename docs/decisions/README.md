@@ -63,12 +63,14 @@ believed at the time and this table is what is believed now.
 
 | thread | where it stands | rests on |
 |---|---|---|
+| **Reusing learned features** | [0083](0083-learned-features-are-a-reusable-artifact.md): describe every shipped column; export the exact OOF-safe fitted table for custom training and replay the same feature recipe on new rows | 0006, 0010, 0030, 0081 |
+| **Random classification and row identifiers** | [0081](0081-random-classification-preserves-classes-identifiers-are-transport.md): random binary/multiclass outer splits preserve target composition; an owner-confirmed identifier remains transport metadata and is removed before any model can see it | 0022, 0023, 0029, 0030 |
 | **How a table is ranked** — the ruler | [0078](0078-the-panel-was-a-stop-rule-and-the-gain-threshold-is-the-real-lever.md): 0077's panel is **reverted** — it rejected 96% of steps and its schemes behave like coin flips. What survives the measurement is that **gain size predicts survival**, and that on ordered runs there is currently **no bar at all** | 0017, 0022, 0028, 0034, 0035, 0036, 0054, 0056, 0058, 0059, 0073, 0077 |
 | **Model capacity** | [0068](0068-capacity-reaches-the-shipped-blend-at-half-strength-and-validation-picks-the-wrong-budget.md): capacity reaches the shipped blend at half the probe's strength, and `val` picks the budget wrongly on both datasets | 0054, 0067 |
 | **Where the search happens** | [0035](0035-the-search-is-over-features.md): the search is over features; models are enumerated, not searched | 0014, 0021, 0022 |
 | **Feature credit** | [0017](0017-credit-by-ablation.md): credit is measured by refitting without the columns | 0015, 0016, 0037 |
 | **The seal, and what an internal score is worth** | [0066](0066-the-collapsed-column-wins-everywhere-except-where-it-is-graded.md): a sealed score is a lower bound on a *difference* too, and can order two candidates backwards when the defect is in the data's provenance | 0019, 0023, 0041, 0043, 0060, 0061, 0065 |
-| **What ships at the end of a run** | [0044](0044-what-ships-is-the-average-not-the-argmax.md): the equal-weight average of the terminal fits, not the argmax — with its cost corrected by [0045](0045-the-cost-of-the-unfiltered-blend-was-underestimated-44x.md). [0079](0079-the-work-table-stays-on-the-terminal-ballot.md) fixes the table beneath that ballot: building a derived table no longer removes the data as given from consideration | 0042, 0045, 0079 |
+| **What ships at the end of a run** | [0080](0080-a-blend-weight-a-member-cannot-inflate-decided-before-the-seal.md): the terminal fits blended by inverse cross-fitting fold-spread, not equally — a member that will be optimistic out of sample cannot inflate the average; every member still ships (0044 stands, its equal weighting superseded; 0045's registered gap confirmed and its no-select refusal kept). [0079](0079-the-work-table-stays-on-the-terminal-ballot.md) fixes the table beneath that ballot: building a derived table no longer removes the data as given from consideration | 0044, 0045, 0079 |
 | **Time-aware features** | [0072](0072-a-feature-is-an-average-over-a-stretch-not-the-value-of-one-row.md): `fit_history` emits trailing windows and nothing else — no last-known pair, no lags | 0047, 0048, 0049, 0050, 0051, 0052, 0053, 0071 |
 | **Second inputs (streams)** | [0063](0063-the-grain-is-measured-from-the-table-not-required-of-the-caller.md): the grain is measured from the table, not required of the caller — and [0064](0064-month-ahead-is-the-same-idea-and-does-not-get-the-same-tool.md) refuses the single-input sibling | 0057, 0062, 0064 |
 | **What the winner had that we do not** | [0070](0070-what-the-winner-had-that-we-cannot-express.md), narrowed by [0071](0071-the-gap-was-not-the-vocabulary-it-was-a-column-nobody-asked-for.md): the distance is **not** the feature vocabulary | 0057, 0070, 0071 |
@@ -114,6 +116,10 @@ vocabulary for *new* records would be the fix, and is not yet decided.
   follows for time-ordered data)*
 - [0030 — A model that could never be served is refused, not scored](0030-a-model-that-cannot-be-served-is-not-trained.md)
   *(the serving schema, and the Rossmann run that argued for it)*
+  *(stratified random outer splits, explicit owner-confirmed identifier roles, class composition and row-level accuracy uncertainty)*
+- [0081 — Random classification preserves classes; row identifiers are transport, not features](0081-random-classification-preserves-classes-identifiers-are-transport.md)
+- [0083 — Learned features are a reusable artifact](0083-learned-features-are-a-reusable-artifact.md)
+  *(readable feature provenance plus separate leakage-safe training export and new-row replay)*
 - [0079 — Building a table does not remove the data as given from the terminal ballot](0079-the-work-table-stays-on-the-terminal-ballot.md)
   *(bug fix: `work_probe` joins the derived tables on the terminal ballot, and wins a tie because its lineage is empty)*
 

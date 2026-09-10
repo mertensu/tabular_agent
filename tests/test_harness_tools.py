@@ -301,6 +301,10 @@ def test_transformed_features_reach_the_bundle_and_predict_from_raw_rows(session
     inspect_data(session)
     out = transform_features(session, RATIO_CODE)
     train_tabular_model(session, table=out["table"], model_type="lgbm")
+    state = journal.load(session.run_dir)
+    state["work_probe"]["probe_score"] = 1.0
+    state["tables"][0]["probe_score"] = 0.0
+    journal.save(session.run_dir, state)
     final = finalize_run(session)
 
     from tabular_agent.pipeline import load_bundle, predict_bundle
@@ -831,7 +835,9 @@ def test_a_table_the_ruler_could_not_score_still_leaves_a_gap(session):
     t1 = transform_features(session, RATIO_CODE)
     fit_encoding(session, ["city"], "frequency", table=t1["table"])
     j = journal.load(session.run_dir)
+    j["work_probe"]["probe_score"] = 1.0
     j["tables"][0]["probe_score"] = None
+    j["tables"][1]["probe_score"] = 0.0
     journal.save(session.run_dir, j)
 
     out = finalize_run(session)
@@ -847,6 +853,11 @@ def test_a_fully_measured_chain_has_no_gap(session):
     train_tabular_model(session, table=t1["table"], model_type="lgbm")
     t2 = fit_encoding(session, ["city"], "frequency", table=t1["table"])
     train_tabular_model(session, table=t2["table"], model_type="lgbm")
+    state = journal.load(session.run_dir)
+    state["work_probe"]["probe_score"] = 1.0
+    state["tables"][0]["probe_score"] = 0.5
+    state["tables"][1]["probe_score"] = 0.0
+    journal.save(session.run_dir, state)
 
     out = finalize_run(session)
     assert out["unmeasured_tables"] == []

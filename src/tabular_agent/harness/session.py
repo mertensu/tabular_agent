@@ -16,6 +16,7 @@ import os
 import re
 
 import numpy as np
+from sklearn.model_selection import StratifiedShuffleSplit
 
 from ..cv import boundary_cut
 from ..io import load_table, save_parquet
@@ -393,13 +394,54 @@ class RunSession:
             val_pos = order[cut_work:cut_val]
             holdout_pos = order[cut_val:]
         else:
-            # One permutation, validation taken off the front of it, so which rows
-            # are validation depends only on `n` and the seed — not on whether a
-            # holdout was asked for. Adding one takes rows out of *work* and
-            # leaves every val-denominated number comparable to a run without it.
-            perm = np.random.default_rng(self.spec.seed).permutation(n)
-            val_pos = perm[:n_val]
-            holdout_pos = perm[n_val : n_val + n_holdout]
+            resolved = self.resolved()
+            if resolved.task_type in {"binary", "multiclass"}:
+                # Accuracy and log loss both depend on class composition. A raw
+                # permutation can make the sealed slice easier simply by putting
+                # fewer positives in it — exactly the optimism the third split is
+                # supposed to expose. Take validation first so enabling a seal
+                # still leaves every validation row unchanged, then stratify the
+                # remainder into work/holdout.
+                y = df[resolved.target].to_numpy()
+                try:
+                    rest_pos, val_pos = next(
+                        StratifiedShuffleSplit(
+                            n_splits=1,
+                            test_size=n_val,
+                            random_state=self.spec.seed,
+                        ).split(np.zeros(n), y)
+                    )
+                    if self.holdout_fraction:
+                        _, inner_holdout = next(
+                            StratifiedShuffleSplit(
+                                n_splits=1,
+                                test_size=n_holdout,
+                                random_state=self.spec.seed + 1,
+                            ).split(np.zeros(len(rest_pos)), y[rest_pos])
+                        )
+                        holdout_pos = rest_pos[inner_holdout]
+                    else:
+                        holdout_pos = np.array([], dtype=int)
+                except ValueError as exc:
+                    labels, class_counts = np.unique(y, return_counts=True)
+                    counts = {
+                        str(label): int(count)
+                        for label, count in zip(labels, class_counts)
+                    }
+                    raise ValueError(
+                        "cannot make a stratified random classification split at "
+                        f"these sizes; class counts are {counts} and parts are {parts}. "
+                        "Increase the data, reduce the number/fraction of held-out "
+                        "parts, or declare an ordered split."
+                    ) from exc
+            else:
+                # One permutation, validation taken off the front of it, so which
+                # rows are validation depends only on `n` and the seed — not on
+                # whether a holdout was asked for. Adding one takes rows out of
+                # *work* and leaves every val-denominated number comparable.
+                perm = np.random.default_rng(self.spec.seed).permutation(n)
+                val_pos = perm[:n_val]
+                holdout_pos = perm[n_val : n_val + n_holdout]
 
         held = np.zeros(n, dtype=bool)
         held[val_pos] = True
@@ -443,10 +485,14 @@ class RunSession:
         work, val, holdout = self._ensure_split()
         n_val = len(load_table(val))
         n_holdout = len(load_table(holdout)) if holdout else 0
-        return {
+        record = {
             "source_path": self.source_path,
             "profile": self.profile,
             "mode": "ordered" if self.split_on else "random",
+            "stratified": bool(
+                self.split_on is None
+                and self.resolved().task_type in {"binary", "multiclass"}
+            ),
             "split_on": self.split_on,
             "seed": self.spec.seed,
             "val_fraction": self.val_fraction,
@@ -462,6 +508,27 @@ class RunSession:
             # gap, or the reverse.
             "holdout_is_thin": bool(holdout) and n_holdout < SMALL_VAL_ROWS,
         }
+        if self.resolved().task_type in {"binary", "multiclass"}:
+            target = self.resolved().target
+
+            def composition(path: str) -> list[dict]:
+                counts = load_table(path)[target].value_counts(dropna=False, sort=False)
+                total = int(counts.sum())
+                return [
+                    {
+                        "label": str(label),
+                        "count": int(count),
+                        "share": float(count / total),
+                    }
+                    for label, count in counts.items()
+                ]
+
+            record["target_composition"] = {
+                "work": composition(work),
+                "validation": composition(val),
+                **({"holdout": composition(holdout)} if holdout else {}),
+            }
+        return record
 
     # ------------------------------------------------------------------ specs
 

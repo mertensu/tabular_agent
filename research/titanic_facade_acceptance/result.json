@@ -1,0 +1,57 @@
+{
+  "acceptance": "titanic_public_facade_live_llm",
+  "run_commit": "300b22c897c6fd3576fa19517d6249465c3bd094",
+  "model": "fireworks/deepseek-v4-flash-0731",
+  "profile": "full",
+  "elapsed_minutes": 4.97,
+  "dataset": {
+    "training_rows": 891,
+    "serving_rows": 418,
+    "split": {
+      "mode": "random",
+      "work_rows": 535,
+      "validation_rows": 178,
+      "sealed_holdout_rows": 178
+    }
+  },
+  "agent": {
+    "tables_materialized": 8,
+    "refusals": 0,
+    "shipped_feature_count": 24
+  },
+  "scores": {
+    "metric": "accuracy",
+    "baseline_validation": 0.5561797752808989,
+    "selected_lgbm_validation": 0.7921348314606742,
+    "selected_lgbm_sealed": 0.825843,
+    "shipped_blend_validation": 0.797753,
+    "shipped_blend_sealed": 0.837079,
+    "kaggle_public": 0.77272
+  },
+  "bundle": {
+    "members": [
+      "lgbm",
+      "xgb",
+      "catboost",
+      "elasticnet"
+    ],
+    "prediction_rows": 418,
+    "probability_min": 0.0034042737466965143,
+    "probability_max": 0.9890450629964354,
+    "submission_class_counts": {
+      "0": 283,
+      "1": 135
+    },
+    "save_load_replay_max_abs_diff": 0.0
+  },
+  "report_review": {
+    "understandable_after_fixes": true,
+    "fixes": [
+      "name headline scores as shipped",
+      "describe binary probability output and 0.5 accuracy threshold",
+      "replace validation half with validation set",
+      "state blend delta without implying a loss",
+      "remove ambiguous headline signal-versus-luck claim"
+    ]
+  }
+}

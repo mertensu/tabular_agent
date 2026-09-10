@@ -21,6 +21,21 @@ def test_load_csv(tmp_path):
     assert list(df.columns) == ["a", "b"]
     assert df.shape == (2, 2)
 
+def test_load_csv_disables_chunkwise_mixed_scalar_types(tmp_path, monkeypatch):
+    path = tmp_path / "mixed.csv"
+    path.write_text("value\n0\na\n")
+    called = {}
+    real_read_csv = pd.read_csv
+
+    def recording_read_csv(*args, **kwargs):
+        called.update(kwargs)
+        return real_read_csv(*args, **kwargs)
+
+    monkeypatch.setattr(pd, "read_csv", recording_read_csv)
+    load_table(str(path))
+    assert called["low_memory"] is False
+
+
 
 def test_runcontext_path_creates_dirs(tmp_path):
     ctx = RunContext(str(tmp_path / "run1"))
