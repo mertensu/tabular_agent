@@ -44,6 +44,33 @@ session = RunSession("run", "train.csv", TaskSpec(target="y"), profile="minimal"
 run(session, "Build the best safe table you can, then finalize.")
 ```
 
+## Reuse the learned features
+
+The feature pipeline is public, not trapped inside the shipped model:
+
+```python
+run = agent.run(plan)
+
+# One readable row per shipped feature: source columns, kind, pipeline step,
+# explanation, and the stored recipe.
+print(run.bundle.describe_features())
+
+# The exact leakage-safe matrix the shipped models fitted, plus the target.
+training = run.training_features()
+my_model.fit(training[run.bundle.feature_names], training[plan.target])
+
+# Apply the same fitted feature recipe to genuinely new rows.
+serving = run.bundle.feature_table("test.csv")
+predictions = my_model.predict(serving)
+
+# Or retain identifiers/raw columns and append the learned model columns.
+enriched = run.bundle.feature_table("test.csv", include_input=True)
+```
+
+Use `run.training_features()` for custom-model training. Replaying a bundle's
+final target-informed encoders over their own fit rows can leak; `feature_table`
+is intentionally the new-row/serving half of the workflow.
+
 The minimal profile exposes six product tools, uses one train/evaluation split,
 and ships one fixed LGBM model without terminal CV, bootstrap uncertainty,
 sealed scoring or blending. `profile="full"` remains available on the

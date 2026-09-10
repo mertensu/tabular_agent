@@ -1680,7 +1680,7 @@ def transform_features(
     save_parquet(out, out_path)
 
     lineage = _load_lineage(path, spec.task_type)
-    lineage.add_transform(code)
+    lineage.add_transform(code, new_columns=list(summary["new_columns"]))
     with open(_lineage_path(out_path), "w") as f:
         json.dump(lineage.to_dict(), f, indent=2)
 
@@ -2942,6 +2942,7 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
     bundle_dir = save_bundle(
         session.ctx, pipeline, [fit.model], np.array([1.0]), fit.feature_names,
         spec.task_type, fit.target_transform,
+        training_table=table_rel,
     )
     j = journal.load(session.run_dir)
     credit = journal.attribution(j, table_rel)
@@ -3103,6 +3104,7 @@ def finalize_run(session: RunSession) -> dict:
         ship["feature_names"],
         ship["task_type"],
         ship.get("target_transform", "none"),
+        training_table=ship["source_table"],
     )
 
     credit = journal.attribution(j, ship["source_table"])

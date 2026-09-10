@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import pandas as pd
 
+from .encoders import ENCODER_CLASSES
 from .harness.agent import gateway_model, run as run_agent
 from .harness.session import RunSession
 from .harness.tools import finalize_run
@@ -23,7 +24,7 @@ from .inspect import (
     table_paths,
 )
 from .io import load_table, save_parquet
-from .pipeline import load_bundle, predict_bundle
+from .pipeline import feature_table_bundle, load_bundle, predict_bundle
 from .taskspec import TaskSpec
 
 
@@ -224,6 +225,76 @@ class DataPlan:
         return path, manifest
 
 
+def _describe_encoder(stored: dict) -> tuple[list[str], str, str]:
+    """Summarise a serialized encoder without exposing its fitted lookup values."""
+    kind = stored["kind"]
+    if kind == "target":
+        sources = list(stored["columns"])
+        recipe = {
+            "columns": sources,
+            "stats": stored.get("stats", ["mean"]),
+            "smoothing": stored["smoothing"],
+        }
+        return (
+            sources,
+            "Out-of-fold target statistics by category; the saved lookup is used on new rows.",
+            json.dumps(recipe, sort_keys=True),
+        )
+    if kind == "frequency":
+        sources = list(stored["columns"])
+        unit = "share" if stored["normalize"] else "count"
+        return (
+            sources,
+            f"Training-set category {unit}; unseen values become zero.",
+            f"{unit} by {sources}",
+        )
+    if kind == "ordinal":
+        sources = list(stored["categories"])
+        recipe = {"categories": stored["categories"], "unknown": stored["unknown"]}
+        return (
+            sources,
+            "Declared category order converted to numeric ranks.",
+            json.dumps(recipe, sort_keys=True),
+        )
+    if kind == "group_stats":
+        sources = [*stored["by"], stored["value"]]
+        recipe = {key: stored[key] for key in ("by", "value", "stat")}
+        return (
+            sources,
+            "Out-of-fold group statistic fitted on training rows and looked up on new rows.",
+            json.dumps(recipe, sort_keys=True),
+        )
+    if kind == "history":
+        sources = list(dict.fromkeys([*stored["by"], stored["value"], stored["order"]]))
+        recipe = {
+            key: stored.get(key)
+            for key in ("by", "value", "order", "offsets", "windows", "latest", "keep")
+        }
+        return (
+            sources,
+            "Past-only group history with stored state and explicit offsets/windows.",
+            json.dumps(recipe, sort_keys=True),
+        )
+    if kind == "stream_aggregate":
+        sources = list(dict.fromkeys([
+            *stored["by"], stored["value"], stored["event_time"],
+            stored["observed_at"], stored["order"],
+        ]))
+        recipe = {
+            key: stored.get(key)
+            for key in (
+                "stream", "by", "value", "event_time", "observed_at", "order",
+                "leads", "stats", "event_grain", "grain", "origin",
+            )
+        }
+        return (
+            sources,
+            "Observation-time-guarded aggregate from a named event stream.",
+            json.dumps(recipe, sort_keys=True),
+        )
+    return [], f"Learned {kind!r} encoder output.", json.dumps({"kind": kind})
+
+
 class Bundle:
     """A deployable predictor that accepts the same raw rows the facade inspected."""
 
@@ -285,10 +356,156 @@ class Bundle:
             parsed = pd.to_datetime(result[split_on], errors="coerce")
             if parsed.notna().all():
                 result[split_on] = parsed
-        result = result.drop(
-            columns=list(self._plan.get("identifier_columns") or []), errors="ignore"
-        )
+        hidden = [
+            *list(self._plan.get("identifier_columns") or []),
+            *([self._plan["target"]] if self._plan.get("target") else []),
+        ]
+        result = result.drop(columns=hidden, errors="ignore")
         return result
+
+    @property
+    def feature_names(self) -> list[str]:
+        """The exact ordered columns consumed by the shipped models."""
+        return list(self._bundle["feature_names"])
+
+    def feature_table(
+        self,
+        rows: pd.DataFrame | str | os.PathLike,
+        streams: dict | None = None,
+        *,
+        include_input: bool = False,
+    ) -> pd.DataFrame:
+        """Apply learned feature lineage to new rows without running the models.
+
+        By default the result is the exact ordered matrix the bundle's models
+        consume. ``include_input=True`` adds those model-ready columns to a copy
+        of the raw table, preserving identifiers and a target column if the user
+        supplied one. A raw column also used as a model feature is replaced by
+        its replayed value, so selecting ``bundle.feature_names`` from the
+        enriched table always recovers the exact matrix.
+
+        The feature pipeline stops before estimator-specific preprocessing such
+        as an individual model's imputer or scaler. Streams have the same
+        requirements and semantics as :meth:`predict`.
+        For fitting another estimator, use :meth:`Run.training_features` for
+        the training side. Replaying a final target/group-statistics lookup over
+        rows it was fitted on would not reproduce the out-of-fold values the
+        agent trained on and can leak; this method is the serving/new-row half
+        of that workflow.
+        """
+
+        raw = self._raw_frame(rows)
+        matrix = feature_table_bundle(
+            self._bundle, self._prepare(raw.copy()), streams=streams
+        )
+        if len(matrix) != len(raw):
+            raise ValueError(
+                "the learned feature pipeline changed the number of rows; "
+                "features cannot be aligned to the input table"
+            )
+        matrix.index = raw.index
+        if not include_input:
+            return matrix
+        enriched = raw.copy()
+        for name in matrix.columns:
+            # Assign by position: static joins may replace an arbitrary source
+            # index with a RangeIndex while preserving row order and count.
+            enriched[name] = matrix[name].to_numpy()
+        return enriched
+
+    def describe_features(self) -> pd.DataFrame:
+        """Return one readable lineage row for every shipped model feature.
+
+        ``definition`` is the exact stored recipe where one exists. New bundles
+        record which columns each row-local transform introduced; legacy bundles
+        still list every feature but may only identify it as a transform output.
+        No fitted category-to-value mappings are dumped into this summary.
+        """
+        pipeline = self._bundle["pipeline"]
+        provenance: dict[str, dict] = {}
+        transform_steps = []
+        for step_number, step in enumerate(pipeline.steps, start=1):
+            if step["type"] == "transform":
+                transform_steps.append((step_number, step))
+                for output in step.get("new_columns", []):
+                    provenance[output] = {
+                        "kind": "row_transform",
+                        "source_columns": [],
+                        "pipeline_step": step_number,
+                        "description": "Created by agent-written row-local transform code.",
+                        "definition": step["code"],
+                    }
+                continue
+            if step["type"] != "encode":
+                continue
+            stored = step["encoder"]
+            if stored["kind"] == "frequency":
+                outputs = [f"{column}_freq" for column in stored["columns"]]
+            elif stored["kind"] == "ordinal":
+                outputs = [f"{column}_ord" for column in stored["categories"]]
+            else:
+                encoder = ENCODER_CLASSES[stored["kind"]].from_dict(stored)
+                outputs = getattr(encoder, "output_columns", None)
+                if outputs is None:
+                    outputs = [encoder.output_column]
+                elif callable(outputs):
+                    outputs = outputs()
+            source_columns, description, definition = _describe_encoder(stored)
+            for output in outputs:
+                provenance[str(output)] = {
+                    "kind": stored["kind"],
+                    "source_columns": source_columns,
+                    "pipeline_step": step_number,
+                    "description": description,
+                    "definition": definition,
+                }
+
+        input_columns = list(self._plan.get("serving_columns") or [])
+        for join in self._plan.get("joins", []):
+            input_columns.extend(join.get("columns") or [])
+        rows = []
+        for feature in self.feature_names:
+            info = provenance.get(feature)
+            if info is None and feature in input_columns:
+                info = {
+                    "kind": "input",
+                    "source_columns": [feature],
+                    "pipeline_step": 0,
+                    "description": "Numeric input column used directly by the models.",
+                    "definition": feature,
+                }
+            elif info is None and transform_steps:
+                # Old pipeline manifests stored executable transform code but
+                # not the outputs it introduced. Stay useful without pretending
+                # an exact per-step attribution can be recovered after the fact.
+                info = {
+                    "kind": "row_transform",
+                    "source_columns": [],
+                    "pipeline_step": pd.NA,
+                    "description": (
+                        "Derived by stored row-local transform code; this legacy "
+                        "bundle did not record which transform introduced it."
+                    ),
+                    "definition": "\n\n".join(s["code"] for _, s in transform_steps),
+                }
+            elif info is None:
+                info = {
+                    "kind": "input_or_legacy",
+                    "source_columns": [],
+                    "pipeline_step": pd.NA,
+                    "description": (
+                        "Shipped feature; detailed lineage is absent in this legacy bundle."
+                    ),
+                    "definition": "",
+                }
+            rows.append({"feature": feature, **info})
+        return pd.DataFrame(
+            rows,
+            columns=[
+                "feature", "kind", "source_columns", "pipeline_step",
+                "description", "definition",
+            ],
+        )
 
     def predict(
         self,
@@ -313,6 +530,42 @@ class Run:
     def report(self) -> str:
         with open(Path(self.run_dir) / "run_report.md") as handle:
             return handle.read()
+
+    def training_features(self, *, include_target: bool = True) -> pd.DataFrame:
+        """Return the exact leakage-safe table used to fit the shipped models.
+
+        Unlike replaying the final bundle over its own training rows, this reads
+        the selected run table, preserving out-of-fold values for target and
+        group-statistics encoders. The result contains model columns in their
+        exact order and, by default, the target as the last column.
+
+        This table is the training half of a custom-model workflow;
+        ``run.bundle.feature_table(new_rows)`` is its serving half.
+        """
+        source = self.bundle._bundle.get("training_table")
+        if not source:
+            raise ValueError(
+                "this run predates reusable training features; its bundle can still "
+                "build features for new rows, but the exact out-of-fold training "
+                "table was not recorded"
+            )
+        root = Path(self.run_dir).resolve()
+        path = (root / source).resolve()
+        if root not in path.parents:
+            raise ValueError("bundle training-table reference leaves the run directory")
+        table = load_table(str(path))
+        columns = self.bundle.feature_names
+        missing = [column for column in columns if column not in table]
+        if missing:
+            raise ValueError(f"recorded training table is missing shipped features {missing}")
+        if include_target:
+            target = self.bundle._plan.get("target") or (
+                self.journal.get("task") or {}
+            ).get("target")
+            if not target or target not in table:
+                raise ValueError("recorded training table does not contain the run target")
+            columns = [*columns, target]
+        return table.loc[:, columns].copy()
 
 
 class Agent:

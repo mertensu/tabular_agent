@@ -7,6 +7,8 @@ import pytest
 
 import tabular_agent as ta
 import tabular_agent.api as public_api
+from tabular_agent.encoders import FrequencyEncoder
+from tabular_agent.pipeline import Pipeline
 from tabular_agent.inspect import profile_collection
 
 
@@ -134,6 +136,7 @@ def test_bundle_predict_replays_static_join(monkeypatch, tmp_path):
     (bundle_dir / "api_plan.json").write_text(
         json.dumps(
             {
+                "target": "target",
                 "serving_table": "test.csv",
                 "split_on": False,
                 "identifier_columns": ["RowId"],
@@ -158,11 +161,14 @@ def test_bundle_predict_replays_static_join(monkeypatch, tmp_path):
 
     monkeypatch.setattr(public_api, "predict_bundle", fake_predict)
     bundle = ta.Bundle(bundle_dir)
-    predictions = bundle.predict(pd.DataFrame({"RowId": [20, 10], "Store": [2, 1]}))
+    predictions = bundle.predict(
+        pd.DataFrame({"RowId": [20, 10], "Store": [2, 1], "target": [9, 8]})
+    )
 
     assert predictions.tolist() == [4.0, 3.0]
     assert seen["frame"]["Store"].tolist() == [2, 1]
     assert "RowId" not in seen["frame"]
+    assert "target" not in seen["frame"]
 
 
 def test_agent_run_delegates_to_session_and_finalizer(monkeypatch, tmp_path):
@@ -230,6 +236,100 @@ def test_facade_minimal_run_finalizes_and_predicts_end_to_end(tmp_path):
     run = agent.run(plan)
     predictions = run.bundle.predict(frame[["x"]].iloc[:3])
 
+    training = run.training_features()
+    assert training.columns.tolist() == ["x", "target"]
+    assert len(training) == 40
+
     assert len(predictions) == 3
     assert np.isfinite(predictions).all()
     assert "#" in run.report()
+
+
+def test_bundle_describes_and_replays_learned_features(monkeypatch, tmp_path):
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir()
+    (bundle_dir / "api_plan.json").write_text(
+        json.dumps({
+            "target": "target",
+            "serving_columns": ["x", "category"],
+            "identifier_columns": ["RowId"],
+            "joins": [],
+            "split_on": False,
+        })
+    )
+    raw = pd.DataFrame(
+        {
+            "RowId": [9, 8],
+            "x": [2.0, 3.0],
+            "category": ["a", "b"],
+            "target": [10.0, 20.0],
+        },
+        index=[7, 3],
+    )
+    pipeline = Pipeline("regression")
+    pipeline.add_transform(
+        "def transform_features(df):\n"
+        "    df = df.copy()\n"
+        "    df['double_x'] = df['x'] * 2\n"
+        "    return df\n",
+        new_columns=["double_x"],
+    )
+    pipeline.add_encoder(FrequencyEncoder(["category"]).fit(raw))
+    payload = {
+        "pipeline": pipeline,
+        "models": [],
+        "weights": np.array([]),
+        "feature_names": ["x", "double_x", "category_freq"],
+        "task_type": "regression",
+        "target_transform": "none",
+        "streams": {},
+        "training_table": None,
+    }
+    monkeypatch.setattr(public_api, "load_bundle", lambda _: payload)
+
+    bundle = ta.Bundle(bundle_dir)
+    matrix = bundle.feature_table(raw)
+    enriched = bundle.feature_table(raw, include_input=True)
+    descriptions = bundle.describe_features().set_index("feature")
+
+    assert matrix.index.tolist() == [7, 3]
+    assert matrix.columns.tolist() == bundle.feature_names
+    assert matrix["double_x"].tolist() == [4.0, 6.0]
+    assert matrix["category_freq"].tolist() == [0.5, 0.5]
+    assert enriched[["RowId", "target"]].equals(raw[["RowId", "target"]])
+    pd.testing.assert_frame_equal(enriched[bundle.feature_names], matrix)
+    assert descriptions.loc["x", "kind"] == "input"
+    assert descriptions.loc["double_x", "kind"] == "row_transform"
+    assert descriptions.loc["category_freq", "kind"] == "frequency"
+    assert descriptions.loc["category_freq", "source_columns"] == ["category"]
+    assert "df['double_x']" in descriptions.loc["double_x", "definition"]
+
+
+def test_run_training_features_reads_oof_table_instead_of_replaying(monkeypatch, tmp_path):
+    run_dir = tmp_path / "run"
+    bundle_dir = run_dir / "bundle"
+    table_dir = run_dir / "tables"
+    bundle_dir.mkdir(parents=True)
+    table_dir.mkdir()
+    (bundle_dir / "api_plan.json").write_text(json.dumps({"target": "target"}))
+    fitted = pd.DataFrame(
+        {"x": [1.0, 2.0], "group_te": [0.25, 0.75], "target": [0, 1]}
+    )
+    fitted.to_parquet(table_dir / "winner.parquet", index=False)
+    payload = {
+        "pipeline": Pipeline("binary"),
+        "models": [],
+        "weights": np.array([]),
+        "feature_names": ["x", "group_te"],
+        "task_type": "binary",
+        "target_transform": "none",
+        "streams": {},
+        "training_table": "tables/winner.parquet",
+    }
+    monkeypatch.setattr(public_api, "load_bundle", lambda _: payload)
+
+    run = ta.Run(run_dir)
+    exported = run.training_features()
+
+    pd.testing.assert_frame_equal(exported, fitted)
+    assert run.training_features(include_target=False).columns.tolist() == ["x", "group_te"]
