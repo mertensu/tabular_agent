@@ -70,4 +70,3 @@ only `Run.training_features()` depends on the retained run directory. Regression
 tests cover exact ordering, identifiers/targets kept only in the enriched outer
 table, readable transform and encoder provenance, and direct retrieval of an
 OOF-safe fitted table rather than final-encoder replay.
-

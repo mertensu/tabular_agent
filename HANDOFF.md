@@ -2,8 +2,9 @@
 
 ## Latest session (2026-09-10)
 
-Added the public reusable-feature contract on branch
-`chad/feature-table-api`, based on `origin/master` at `4a7cb7e`:
+Merged the public reusable-feature contract from `chad/feature-table-api` into
+`master`, alongside the previously merged reference-relative target contract.
+The two optional bundle/scoring contracts are preserved together:
 
 - `Bundle.describe_features()` returns one readable lineage row per shipped
   feature: kind, source columns, pipeline step, explanation, and stored recipe
@@ -24,8 +25,9 @@ The earlier handoff is archived verbatim under
 
 ## Verification so far
 
-- directly affected API/pipeline/stream/finalization tests pass
-- complete repository suite on the final branch commit: 585 tests pass
+- combined API/pipeline/blend/model/finalization/reference-target tests pass
+- complete repository suite on the final merged master commit: 592 tests pass
+- independent review on the feature branch: 585 tests pass from a fresh checkout
 - wheel and sdist build successfully
 - a real legacy Titanic bundle describes all 14 shipped features; legacy
   row-transform outputs are explicitly marked unattributed rather than guessed
@@ -35,9 +37,9 @@ The earlier handoff is archived verbatim under
 
 ## Next action
 
-Review and merge `chad/feature-table-api`. A natural next acceptance check is a
-fresh full-profile run whose winning table includes both agent-written columns
-and a target-informed encoder, then fitting a small user-owned estimator from
+Push and review merged `master`. A natural next acceptance check is a fresh
+full-profile run whose winning table includes both agent-written columns and a
+target-informed encoder, then fitting a small user-owned estimator from
 `training_features()` and predicting via `bundle.feature_table()`.
 
 ## Blocking gotchas
