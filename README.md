@@ -12,9 +12,16 @@ quietly leak the target into your validation score.
 
 ## Install
 
+Until it is published to a package index, install it straight from the repository —
+pip clones and builds it for you:
+
 ```bash
-pip install tabular-agent
+pip install git+https://github.com/mertensu/tabular_agent.git
 ```
+
+For a private repository, use SSH instead:
+`pip install git+ssh://git@github.com/mertensu/tabular_agent.git`. To pin a
+version, append `@<tag-or-commit>`.
 
 Everything it needs — LightGBM, XGBoost, CatBoost, scikit-learn — comes with it as
 prebuilt wheels; there is nothing to compile. Python ≥ 3.11.
@@ -80,6 +87,25 @@ The bundle takes the same raw rows you started with and replays the exact featur
 lineage — no separate preprocessing to reproduce. The report is written to be read
 without insider knowledge: it separates the search winner from what actually
 ships, and flags where a score is optimistic.
+
+## Explain a single prediction
+
+Ask *why this number for this row*, feature by feature — an exact, model-native
+attribution of the prediction the bundle actually ships (the weighted blend, not
+one member):
+
+```python
+explanation = run.bundle.explain("path/to/new_rows.csv")
+print(explanation.for_row(0))     # this row's feature pushes, largest magnitude first
+print(explanation.base_value)     # the expected value the row is explained away from
+```
+
+`base_value + contributions.sum(axis=1)` reconstructs the model output, and
+`explanation.space` names the scale it is additive on: `"target"` for a plain
+regression (so the reconstruction *is* the prediction), or one link away
+(`"log1p(target)"`, `"log-odds"`) when a transform or a classifier is involved.
+It is exact — TreeSHAP for the boosted models, closed-form for the linear one — so
+there is no surrogate model or sampling noise to second-guess.
 
 ## Bring your own model — reuse the learned features
 
