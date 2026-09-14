@@ -113,6 +113,11 @@ connection. It adds accessible glossary tooltips, model/optimism comparison,
 the feature-building story, a searchable feature catalog, the confirmed serving
 contract, and warnings; it never recomputes scores or selects another model.
 
+[Open the sanitized House Prices example HTML report](docs/examples/house-prices-run-report.html)
+or download it and open it locally to try the offline interactions. It uses the
+recorded acceptance-run scores and representative feature lineage, but contains
+no training rows, target values, fitted lookup values, or other raw data.
+
 The bundle takes the same raw rows you started with and replays the exact feature
 lineage — no separate preprocessing to reproduce. The report is written to be read
 without insider knowledge: it separates the search winner from what actually
