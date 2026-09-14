@@ -116,19 +116,19 @@ run:
 # Run Report
 - Task type:                                regression
 - Selection metric:                         rmsle
-- Shipped validation score:                 0.126 (+/- 0.011)
-- Shipped holdout score (sealed, once):     0.126 (+/- 0.011)
+- Shipped validation score:                 0.1260
+- Shipped test score (scored once):         0.1259 (+/- 0.0114)
 - Baseline score (trivial model):           0.363
 - Models:                                   lgbm, xgb, catboost, elasticnet
 - Features (145):                           OverallQual, GrLivArea, TotalSF, ... , Neighborhood_te
-- Split:                                    876 work / 292 validation / 292 sealed holdout (random)
+- Split:                                    876 work / 292 validation / 292 test (random)
 
 ## What the search cost
 The candidate the search crowned scored 0.1319 on validation and 0.1283 on 292
-sealed rows nothing in this run could read. What shipped is not that candidate:
-the precommitted, fold-spread-weighted blend scored 0.1259 sealed — +0.0025 better.
+test rows nothing in this run could read. What shipped is not that candidate:
+the precommitted, fold-spread-weighted blend scored 0.1259 on those rows — +0.0025 better.
 
-| model                                    | validation | sealed | optimism |
+| model                                    | validation |   test | optimism |
 |------------------------------------------|-----------:|-------:|---------:|
 | catboost (search's pick)                 |     0.1319 | 0.1283 |  -0.0036 |
 | lgbm                                     |     0.1342 | 0.1349 |  +0.0007 |
@@ -136,7 +136,7 @@ the precommitted, fold-spread-weighted blend scored 0.1259 sealed — +0.0025 be
 | elasticnet                               |     0.1339 | 0.1358 |  +0.0020 |
 | blend(lgbm+xgb+catboost+elasticnet) ✅   |     0.1260 | 0.1259 |  -0.0001 |
 
-> These sealed rows ranked nothing — the winner was picked on validation before
+> These test rows ranked nothing — the winner was picked on validation before
 > they existed. Choosing between models by this column would spend the last
 > honest number the run has.
 ```

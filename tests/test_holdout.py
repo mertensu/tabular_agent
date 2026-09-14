@@ -335,10 +335,10 @@ def test_the_report_prints_both_numbers_and_the_gap(sealed):
 
     text = open(os.path.join(sealed.run_dir, out["report_path"])).read()
     assert "Shipped validation score" in text
-    assert "Shipped holdout score (sealed, scored once)" in text
+    assert "Shipped test score (scored once)" in text
     assert "## What the search cost" in text
     assert "These rows ranked nothing" in text
-    assert "sealed holdout" in text
+    assert "| validation | test |" in text
 
 
 def test_a_run_without_a_seal_finalizes_unchanged(tmp_path):

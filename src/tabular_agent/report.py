@@ -102,13 +102,13 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
         reading = (
             "the validation set overstated this model by that much"
             if gap > 0
-            else "the sealed rows scored it *better* than the validation set did, "
+            else "the test rows scored it *better* than the validation set did, "
             "so the headline was not inflated"
         )
         lines += [
             f"The candidate the search crowned scored **{selected['val_score']:.4f}** "
             f"on the validation set it ranked by, and "
-            f"**{selected['holdout_score']:.4f}** on {holdout.get('n_rows')} sealed "
+            f"**{selected['holdout_score']:.4f}** on {holdout.get('n_rows')} test "
             f"rows nothing in this run could read — a gap of **{gap:+.4f}**, meaning "
             f"{reading}. This gap is the run's direct check on whether validation "
             "flattered or understated the search winner.",
@@ -128,15 +128,15 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
         lines += [
             f"**What shipped is not that candidate.** The precommitted "
             f"inverse-fold-spread-weighted blend scored "
-            f"**{shipped['holdout_score']:.4f}** on the same sealed rows — "
+            f"**{shipped['holdout_score']:.4f}** on the same test rows — "
             f"**{delta:+.4f}**, {verdict} the argmax winner. Every terminal fit "
             "still ships; the weights come only from cross-fitting fold "
-            "dispersion, not from validation or sealed scores. This delta is the "
+            "dispersion, not from validation or test scores. This delta is the "
             "direct gain or cost of shipping that blend instead of the search winner.",
             "",
         ]
     lines += [
-        "| model | experiment | validation | sealed holdout | optimism |",
+        "| model | experiment | validation | test | optimism |",
         "|---|---|---|---|---|",
     ]
     for e in scores:
@@ -160,7 +160,7 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
     if split and split.get("holdout_is_thin"):
         lines += [
             "",
-            f"> **WARNING:** {split['n_holdout']} sealed rows is thin. The gap above "
+            f"> **WARNING:** {split['n_holdout']} test rows is thin. The gap above "
             "has its own standard error and a small one should not be read as a "
             "clean bill of health.",
         ]
@@ -168,7 +168,7 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
         lines += [
             "",
             f"> **The gap is not purely selection here.** Split on "
-            f"`{split['split_on']}`, the sealed rows are a *later period* than the "
+            f"`{split['split_on']}`, the test rows are a *later period* than the "
             "validation rows, which are themselves later than the rows the model "
             "trained on. So the difference mixes how much the search gamed the "
             "validation set with how much the world moved between the two "
@@ -199,9 +199,9 @@ def build_report(
     # The headline number's own uncertainty, printed beside it (0022). A score
     # reported bare invites the reader to compare it against other runs digit by
     # digit; +/- one standard error is what says how many of those digits are real.
-    headline = f"{selection_score:.3f}"
+    headline = f"{selection_score:.4f}"
     if val_se is not None:
-        headline += f" (+/- {val_se:.3f})"
+        headline += f" (+/- {val_se:.4f})"
     if (
         metric == "accuracy"
         and split
@@ -229,9 +229,9 @@ def build_report(
         lines.insert(score_insert, f"- **CV score:** {cv_score:.3f} (fold std {fold_std:.3f})")
     shipped = shipped_holdout(holdout)
     if shipped is not None:
-        sealed = f"{shipped['holdout_score']:.3f}"
+        sealed = f"{shipped['holdout_score']:.4f}"
         if shipped.get("holdout_se") is not None:
-            sealed += f" (+/- {shipped['holdout_se']:.3f})"
+            sealed += f" (+/- {shipped['holdout_se']:.4f})"
         if (
             metric == "accuracy"
             and split
@@ -243,7 +243,7 @@ def build_report(
         # Beside the validation score, never instead of it (0023). The pair is
         # the point: one number is what the search steered towards, the other is
         # what it was worth, and the reader needs both to read the third.
-        lines.insert(score_insert, f"- **Shipped holdout score (sealed, scored once):** {sealed}")
+        lines.insert(score_insert, f"- **Shipped test score (scored once):** {sealed}")
     if split:
         where = (
             f"ordered by `{split['split_on']}`"
@@ -251,7 +251,7 @@ def build_report(
             else "random, stratified" if split.get("stratified") else "random"
         )
         sealed_rows = (
-            f" / {split['n_holdout']} sealed holdout" if split.get("n_holdout") else ""
+            f" / {split['n_holdout']} test" if split.get("n_holdout") else ""
         )
         lines.append(
             f"- **Split:** {split['n_work']} work / {split['n_val']} validation"
