@@ -47,8 +47,27 @@ plan = agent.inspect("path/to/folder")  # profiles every file, proposes nothing 
 ```
 
 `inspect()` does not decide anything — it *proposes*, and you confirm. That single
-rule is the whole safety story (see "Why the confirmation step" below). Look at
-what it found:
+rule is the whole safety story (see "Why the confirmation step" below).
+`print(plan.summary())` shows the whole checklist at a glance — each decision, its
+proposal, whether it is confirmed, and the one line that sets it:
+
+```text
+DataPlan — 3 decision(s) still to confirm.
+
+  [ ] target             not set
+                         candidates: Sales, Customers
+                         set: plan.target = '<column>'
+  [ ] serving_columns    not set
+                         present at predict time: Store, Date
+                         set: plan.serving_columns = [...]
+  [ ] split_on           not set
+                         date/time candidates: Date
+                         set: plan.split_on = '<column>' (ordered) or False (random)
+  [x] identifier_columns (none)
+  [x] joins              store.csv:accepted
+```
+
+Or look at the raw proposals directly:
 
 ```python
 plan.target_candidates           # likely target columns, best guess first

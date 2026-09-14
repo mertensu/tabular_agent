@@ -84,6 +84,30 @@ def test_identifier_role_is_proposed_confirmed_and_removed_before_modeling(tmp_p
     assert manifest["identifier_columns"] == ["PassengerId"]
 
 
+def test_plan_summary_tracks_open_decisions(tmp_path):
+    _tables(tmp_path)
+    plan = ta.Agent(model=object()).inspect(tmp_path)
+
+    fresh = plan.summary()
+    # Unconfirmed decisions are shown as open, with their proposals to guide the owner.
+    assert "still to confirm" in fresh
+    assert "[ ] target" in fresh
+    assert "[ ] serving_columns" in fresh
+    assert "[ ] split_on" in fresh
+    assert "[ ] joins" in fresh
+    assert "Sales" in fresh  # a target candidate is surfaced
+
+    plan.target = "Sales"
+    plan.serving_columns = list(plan.proposed_serving_columns)
+    plan.split_on = "Date"
+    plan.accept_joins()
+
+    done = plan.summary()
+    assert "all decisions confirmed" in done
+    assert "[ ]" not in done  # nothing left open
+    assert "agent.run(plan)" in done
+
+
 def test_plan_refuses_every_unconfirmed_owner_decision(tmp_path):
     _tables(tmp_path)
     plan = ta.Agent(model=object()).inspect(tmp_path)

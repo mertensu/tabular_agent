@@ -113,6 +113,96 @@ class DataPlan:
             join.reject()
         return self
 
+    def summary(self) -> str:
+        """A readable checklist of the owner decisions and what is still open.
+
+        Display only — it changes nothing and enforces nothing. It exists so the
+        confirmation step reads as a guided list rather than five attributes you
+        have to remember: for each decision it shows whether it is confirmed, the
+        value or the proposal, and the one call that sets it. :meth:`validate` (run
+        by :meth:`Agent.run`) remains the actual gate and refuses on anything still
+        open, so this can never let an unconfirmed run start — it only makes the
+        open items easy to see first.
+        """
+
+        def _preview(items: list, limit: int = 8) -> str:
+            items = [str(item) for item in items]
+            if not items:
+                return "(none)"
+            shown = ", ".join(items[:limit])
+            return shown if len(items) <= limit else f"{shown}, … (+{len(items) - limit} more)"
+
+        lines: list[str] = []
+        open_count = 0
+
+        def _row(confirmed: bool, name: str, value: str, *hints: str) -> None:
+            nonlocal open_count
+            if not confirmed:
+                open_count += 1
+            mark = "[x]" if confirmed else "[ ]"
+            lines.append(f"  {mark} {name:<18} {value}")
+            for hint in hints:
+                lines.append(f"                         {hint}")
+
+        _row(
+            bool(self.target),
+            "target",
+            str(self.target) if self.target else "not set",
+            *(() if self.target else (f"candidates: {_preview(self.target_candidates)}",
+                                      "set: plan.target = '<column>'")),
+        )
+        _row(
+            self.serving_columns is not None,
+            "serving_columns",
+            _preview(self.serving_columns) if self.serving_columns is not None else "not set",
+            *(() if self.serving_columns is not None else (
+                f"present at predict time: {_preview(self.proposed_serving_columns or [])}",
+                "set: plan.serving_columns = [...]")),
+        )
+        _row(
+            self.split_on is not None,
+            "split_on",
+            ("random split (False)" if self.split_on is False else str(self.split_on))
+            if self.split_on is not None else "not set",
+            *(() if self.split_on is not None else (
+                f"date/time candidates: {_preview(self.ordering_candidates)}",
+                "set: plan.split_on = '<column>' (ordered) or False (random)")),
+        )
+        _row(
+            self.identifier_columns is not None,
+            "identifier_columns",
+            _preview(self.identifier_columns) if self.identifier_columns is not None else "not set",
+            *(() if self.identifier_columns is not None else (
+                f"proposed: {_preview(self.proposed_identifier_columns)}",
+                "set: plan.accept_identifier_proposals() or .reject_identifier_proposals()")),
+        )
+        pending = [join.right_table for join in self.joins if join.decision == "proposed"]
+        if not self.joins:
+            joins_value = "(none proposed)"
+        else:
+            decided = [f"{join.right_table}:{join.decision}" for join in self.joins]
+            joins_value = _preview(decided)
+        _row(
+            not pending,
+            "joins",
+            joins_value,
+            *(() if not pending else (
+                f"undecided: {_preview(pending)}",
+                "set: plan.accept_joins() or .reject_joins()")),
+        )
+
+        header = (
+            "DataPlan — all decisions confirmed."
+            if open_count == 0
+            else f"DataPlan — {open_count} decision(s) still to confirm."
+        )
+        footer = (
+            "Pass it to agent.run(plan)."
+            if open_count == 0
+            else "Confirm the [ ] items, then agent.run(plan) (it refuses on anything left)."
+        )
+        return "\n".join([header, "", *lines, "", footer])
+
     def validate(self) -> None:
         train_columns = set(self.tables[self.training_table]["columns"])
         accepted_columns = {
