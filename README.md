@@ -70,6 +70,10 @@ plan.reject_joins()                      # or accept_joins()
 run = agent.run(plan)                     # builds features, evaluates, finalizes
 ```
 
+You confirm by setting these attributes on the plan — plain Python, no wizard. If
+you forget one, `agent.run(plan)` refuses before doing any work and names exactly
+what is still unconfirmed, so you cannot start a run on an unstated assumption.
+
 Working from a single DataFrame in a notebook works too — pass it to `inspect(df)`,
 set `serving_columns` to the columns you'll have at prediction time, and choose
 `split_on`.
@@ -86,7 +90,37 @@ run.bundle.save("my_model")                # a self-contained, replayable bundle
 The bundle takes the same raw rows you started with and replays the exact feature
 lineage — no separate preprocessing to reproduce. The report is written to be read
 without insider knowledge: it separates the search winner from what actually
-ships, and flags where a score is optimistic.
+ships, and flags where a score is optimistic. An excerpt from a real House Prices
+run:
+
+```text
+# Run Report
+- Task type:                                regression
+- Selection metric:                         rmsle
+- Shipped validation score:                 0.126 (+/- 0.011)
+- Shipped holdout score (sealed, once):     0.126 (+/- 0.011)
+- Baseline score (trivial model):           0.363
+- Models:                                   lgbm, xgb, catboost, elasticnet
+- Features (145):                           OverallQual, GrLivArea, TotalSF, ... , Neighborhood_te
+- Split:                                    876 work / 292 validation / 292 sealed holdout (random)
+
+## What the search cost
+The candidate the search crowned scored 0.1319 on validation and 0.1283 on 292
+sealed rows nothing in this run could read. What shipped is not that candidate:
+the precommitted, fold-spread-weighted blend scored 0.1259 sealed — +0.0025 better.
+
+| model                                    | validation | sealed | optimism |
+|------------------------------------------|-----------:|-------:|---------:|
+| catboost (search's pick)                 |     0.1319 | 0.1283 |  -0.0036 |
+| lgbm                                     |     0.1342 | 0.1349 |  +0.0007 |
+| xgb                                      |     0.1419 | 0.1450 |  +0.0031 |
+| elasticnet                               |     0.1339 | 0.1358 |  +0.0020 |
+| blend(lgbm+xgb+catboost+elasticnet) ✅   |     0.1260 | 0.1259 |  -0.0001 |
+
+> These sealed rows ranked nothing — the winner was picked on validation before
+> they existed. Choosing between models by this column would spend the last
+> honest number the run has.
+```
 
 ## Explain a single prediction
 
@@ -98,6 +132,22 @@ one member):
 explanation = run.bundle.explain("path/to/new_rows.csv")
 print(explanation.for_row(0))     # this row's feature pushes, largest magnitude first
 print(explanation.base_value)     # the expected value the row is explained away from
+```
+
+For one House Prices house, largest push first:
+
+```text
+>>> explanation.space
+'log1p(target)'
+>>> explanation.base_value
+12.0235
+>>> explanation.for_row(0).head(6)
+Neighborhood_te     0.0390
+Qual_x_SF          -0.0246
+SaleCondition_te   -0.0198
+HouseAge           -0.0185
+TotalQual           0.0179
+YearRemodAdd       -0.0147
 ```
 
 `base_value + contributions.sum(axis=1)` reconstructs the model output, and
