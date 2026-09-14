@@ -1,54 +1,52 @@
 # Handoff
 
-## Latest session (2026-09-10)
+## Latest session (2026-09-14)
 
-Merged the public reusable-feature contract from `chad/feature-table-api` into
-`master`, alongside the previously merged reference-relative target contract.
-The two optional bundle/scoring contracts are preserved together:
+Implemented the first offline HTML run dashboard on branch
+`chad/html-report-v1`, based on `origin/master` at `1d2b5ec`.
 
-- `Bundle.describe_features()` returns one readable lineage row per shipped
-  feature: kind, source columns, pipeline step, explanation, and stored recipe
-- `Bundle.feature_table(new_rows)` returns the exact ordered shared model matrix;
-  `include_input=True` appends it to the original rows for IDs and other metadata
-- `Run.training_features()` returns the exact selected table fitted by the
-  shipped models, preserving OOF target/group-statistic values and optionally
-  appending the target
-- new bundle manifests retain the run-local selected-table reference; old bundles
-  remain prediction- and feature-replay-compatible but cannot recover an exact
-  OOF training table
-- row-local transforms now retain their output names as explanation-only metadata;
-  replay still executes the stored sandbox code
+- every finalization now writes `run_report.md`, versioned
+  `run_report.json`, and a self-contained `run_report.html`
+- the dashboard shows outcome cards, split purpose, shipped members and weights,
+  validation/test/optimism comparison, feature-block history, searchable feature
+  definitions, serving contract, and warnings
+- glossary help works on hover and keyboard focus; HTML content is escaped,
+  print/mobile/dark-mode styles are embedded, and there are no remote assets
+- `Run.report()` remains the Markdown-compatible default;
+  `Run.report_path()` points to HTML and `Run.report("html"|"json")` reads the
+  other views
+- bundle and dashboard feature definitions now share
+  `feature_catalog.describe_feature_rows`; fitted lookup mappings remain absent
+- the facade enriches the finalized dashboard with the owner-confirmed target,
+  serving columns, identifiers, and static joins
 
-Decision record: `docs/decisions/0083-learned-features-are-a-reusable-artifact.md`.
-The earlier handoff is archived verbatim under
-`research/archive/handoffs/2026-09-01--2026-09-10.md`.
+Decision record:
+`docs/decisions/0084-one-finalized-run-has-one-report-model-and-three-views.md`.
+The previous handoff is archived verbatim under
+`research/archive/handoffs/2026-09-10--2026-09-14.md`.
 
 ## Verification so far
 
-- combined API/pipeline/blend/model/finalization/reference-target tests pass
-- complete repository suite on the final merged master commit: 592 tests pass
-- independent review on the feature branch: 585 tests pass from a fresh checkout
-- wheel and sdist build successfully
-- a real legacy Titanic bundle describes all 14 shipped features; legacy
-  row-transform outputs are explicitly marked unattributed rather than guessed
-- provider-free public-facade E2E proves finalization records the selected table
-  and `training_features()` returns its model columns plus target
-
+- full repository suite: 609 tests pass
+- focused dashboard/API/report/minimal suite: 38 tests pass
+- full-profile blend/holdout/finalization regression suite passes
+- tests prove offline/no-external-URL output, HTML escaping, keyboard glossary
+  access, metric-direction-correct baseline gain, safe feature recipes, confirmed
+  serving-contract enrichment, and public Run access
+- wheel and sdist build successfully with `uv build`
 
 ## Next action
 
-Push and review merged `master`. A natural next acceptance check is a fresh
-full-profile run whose winning table includes both agent-written columns and a
-target-informed encoder, then fitting a small user-owned estimator from
-`training_features()` and predicting via `bundle.feature_table()`.
+Review and merge `chad/html-report-v1`. A useful post-merge acceptance check is
+to open the generated HTML from one fresh real facade run and assess the visual
+hierarchy with a human reader; the semantic and offline contracts are already
+covered automatically.
 
 ## Blocking gotchas
 
-- `Bundle.feature_table()` is for genuinely new/serving rows. Custom training
-  must start from `Run.training_features()`; replaying final target-informed
-  lookups over their own fit rows is leakage and differs from the OOF matrix.
-- estimator-specific preprocessing is deliberately not part of the shared table;
-  a blend can contain several different imputers/scalers.
-- `Run.training_features()` depends on the original run directory. A copied
-  standalone bundle continues to describe and transform new rows, but does not
-  carry the potentially large training table.
+- the per-run dashboard is intentionally plain HTML/CSS/JavaScript. React belongs
+  to a later multi-run viewer consuming several `run_report.json` files.
+- the HTML renderer never scores or selects; do not add test-driven model actions
+  to it, because the internal test ranked nothing.
+- report JSON is a sanitized projection, not the complete journal. Do not expose
+  raw rows, targets, fitted encoder mappings, or estimator objects through it.

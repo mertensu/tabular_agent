@@ -22,6 +22,8 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from ..dashboard import build_dashboard_data, write_dashboard_artifacts
+from ..feature_catalog import describe_feature_rows
 from ..compare import compare_predictions
 from ..cv import make_folds
 from ..encoders import STREAM_STATS, TARGET_STATS, StreamAggregateEncoder
@@ -3059,7 +3061,26 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         "The bundle replays the selected table's fitted lineage from raw rows.",
     ]
     text = "\n".join(report_lines)
+    report_data = build_dashboard_data(
+        task_type=spec.task_type,
+        metric=spec.metric,
+        selection_score=evaluation_score,
+        baseline_score=baseline_score,
+        model_types=[PROBE_MODEL_TYPE],
+        feature_names=fit.feature_names,
+        split=split,
+        attribution=credit,
+        feature_catalog=describe_feature_rows(
+            pipeline, fit.feature_names, input_columns=session.serving_columns
+        ),
+        serving_contract={
+            "target": spec.target,
+            "serving_columns": session.serving_columns or [],
+            "required_streams": list(pipeline.required_streams()),
+        },
+    )
     report_path = write_report(session.ctx, text)
+    report_paths = write_dashboard_artifacts(session.ctx, text, report_data)
     journal.append_experiments(session.run_dir, [baseline_row, model_row])
     journal.mark_finalized(session.run_dir)
     return {
@@ -3071,6 +3092,8 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         "n_experiments": len(j["leaderboard"]),
         "bundle_dir": session.rel(bundle_dir),
         "report_path": session.rel(report_path),
+        "report_html_path": session.rel(report_paths["html"]),
+        "report_json_path": session.rel(report_paths["json"]),
         **({"required_streams": pipeline.required_streams()}
            if pipeline.required_streams() else {}),
         "unmeasured_tables": [item["table"] for item in credit if not item["measured"]],
@@ -3208,7 +3231,31 @@ def finalize_run(session: RunSession) -> dict:
         split=j.get("split"),
         holdout=holdout,
     )
-    report_path = write_report(session.ctx, text)
+    report_data = build_dashboard_data(
+        attribution=credit,
+        task_type=ship["task_type"],
+        metric=ship["metric"],
+        selection_score=blend["val_score"] if blend else meta["val_score"],
+        val_se=blend["val_se"] if blend else meta.get("val_se"),
+        cv_score=None if blend else meta["cv_score"],
+        fold_metrics=[] if blend else meta["fold_metrics"],
+        baseline_score=j["baseline"]["val_score"],
+        model_types=blend["model_types"] if blend else [meta["model_type"]],
+        feature_names=ship["feature_names"],
+        split=j.get("split"),
+        holdout=holdout,
+        feature_catalog=describe_feature_rows(
+            pipeline, ship["feature_names"], input_columns=session.serving_columns
+        ),
+        blend_weights=ship_weights.tolist(),
+        serving_contract={
+            "target": spec.target,
+            "serving_columns": session.serving_columns or [],
+            "required_streams": list(pipeline.required_streams()),
+        },
+    )
+    report_paths = write_dashboard_artifacts(session.ctx, text, report_data)
+    report_path = report_paths["markdown"]
     journal.mark_finalized(session.run_dir)
 
     shipped = shipped_holdout(holdout)
@@ -3245,6 +3292,8 @@ def finalize_run(session: RunSession) -> dict:
         **({"required_streams": pipeline.required_streams()}
            if pipeline.required_streams() else {}),
         "report_path": session.rel(report_path),
+        "report_html_path": session.rel(report_paths["html"]),
+        "report_json_path": session.rel(report_paths["json"]),
         # Which links in the winning table's history were actually measured. An
         # unmeasured one means the score cannot be attributed to the columns
         # either side of it — worth saying, since the agent is about to write a

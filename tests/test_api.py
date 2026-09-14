@@ -267,6 +267,13 @@ def test_facade_minimal_run_finalizes_and_predicts_end_to_end(tmp_path):
     assert len(predictions) == 3
     assert np.isfinite(predictions).all()
     assert "#" in run.report()
+    assert "<!doctype html>" in run.report("html")
+    assert run.report_path().name == "run_report.html"
+    report_data = json.loads(run.report("json"))
+    assert report_data["summary"]["validation_score"] is not None
+    assert report_data["serving_contract"]["target"] == "target"
+    assert report_data["serving_contract"]["serving_columns"] == ["x"]
+    assert report_data["features"]["catalog"][0]["feature"] == "x"
 
 
 def test_bundle_describes_and_replays_learned_features(monkeypatch, tmp_path):

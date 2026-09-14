@@ -100,11 +100,18 @@ set `serving_columns` to the columns you'll have at prediction time, and choose
 ## What you get back
 
 ```python
-print(run.report())                       # what it tried, what it shipped, and how honest the score is
+print(run.report())                       # portable Markdown fallback
+run.report_path()                         # self-contained run_report.html dashboard
+run.report("json")                       # the same sanitized, machine-readable facts
 
 predictions = run.bundle.predict("path/to/new_rows.csv")   # or predict(df)
 run.bundle.save("my_model")                # a self-contained, replayable bundle
 ```
+
+The HTML dashboard opens directly in a browser without a server or network
+connection. It adds accessible glossary tooltips, model/optimism comparison,
+the feature-building story, a searchable feature catalog, the confirmed serving
+contract, and warnings; it never recomputes scores or selects another model.
 
 The bundle takes the same raw rows you started with and replays the exact feature
 lineage — no separate preprocessing to reproduce. The report is written to be read

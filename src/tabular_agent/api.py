@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pandas as pd
 
-from .encoders import ENCODER_CLASSES
+from .dashboard import update_dashboard_contract
 from .harness.agent import gateway_model, run as run_agent
 from .harness.session import RunSession
 from .harness.tools import finalize_run
@@ -24,6 +24,7 @@ from .inspect import (
     table_paths,
 )
 from .explain import Explanation, explain_bundle
+from .feature_catalog import describe_features_frame
 from .io import load_table, save_parquet
 from .pipeline import feature_table_bundle, load_bundle, predict_bundle
 from .taskspec import TaskSpec
@@ -316,75 +317,6 @@ class DataPlan:
         return path, manifest
 
 
-def _describe_encoder(stored: dict) -> tuple[list[str], str, str]:
-    """Summarise a serialized encoder without exposing its fitted lookup values."""
-    kind = stored["kind"]
-    if kind == "target":
-        sources = list(stored["columns"])
-        recipe = {
-            "columns": sources,
-            "stats": stored.get("stats", ["mean"]),
-            "smoothing": stored["smoothing"],
-        }
-        return (
-            sources,
-            "Out-of-fold target statistics by category; the saved lookup is used on new rows.",
-            json.dumps(recipe, sort_keys=True),
-        )
-    if kind == "frequency":
-        sources = list(stored["columns"])
-        unit = "share" if stored["normalize"] else "count"
-        return (
-            sources,
-            f"Training-set category {unit}; unseen values become zero.",
-            f"{unit} by {sources}",
-        )
-    if kind == "ordinal":
-        sources = list(stored["categories"])
-        recipe = {"categories": stored["categories"], "unknown": stored["unknown"]}
-        return (
-            sources,
-            "Declared category order converted to numeric ranks.",
-            json.dumps(recipe, sort_keys=True),
-        )
-    if kind == "group_stats":
-        sources = [*stored["by"], stored["value"]]
-        recipe = {key: stored[key] for key in ("by", "value", "stat")}
-        return (
-            sources,
-            "Out-of-fold group statistic fitted on training rows and looked up on new rows.",
-            json.dumps(recipe, sort_keys=True),
-        )
-    if kind == "history":
-        sources = list(dict.fromkeys([*stored["by"], stored["value"], stored["order"]]))
-        recipe = {
-            key: stored.get(key)
-            for key in ("by", "value", "order", "offsets", "windows", "latest", "keep")
-        }
-        return (
-            sources,
-            "Past-only group history with stored state and explicit offsets/windows.",
-            json.dumps(recipe, sort_keys=True),
-        )
-    if kind == "stream_aggregate":
-        sources = list(dict.fromkeys([
-            *stored["by"], stored["value"], stored["event_time"],
-            stored["observed_at"], stored["order"],
-        ]))
-        recipe = {
-            key: stored.get(key)
-            for key in (
-                "stream", "by", "value", "event_time", "observed_at", "order",
-                "leads", "stats", "event_grain", "grain", "origin",
-            )
-        }
-        return (
-            sources,
-            "Observation-time-guarded aggregate from a named event stream.",
-            json.dumps(recipe, sort_keys=True),
-        )
-    return [], f"Learned {kind!r} encoder output.", json.dumps({"kind": kind})
-
 
 class Bundle:
     """A deployable predictor that accepts the same raw rows the facade inspected."""
@@ -512,91 +444,13 @@ class Bundle:
         still list every feature but may only identify it as a transform output.
         No fitted category-to-value mappings are dumped into this summary.
         """
-        pipeline = self._bundle["pipeline"]
-        provenance: dict[str, dict] = {}
-        transform_steps = []
-        for step_number, step in enumerate(pipeline.steps, start=1):
-            if step["type"] == "transform":
-                transform_steps.append((step_number, step))
-                for output in step.get("new_columns", []):
-                    provenance[output] = {
-                        "kind": "row_transform",
-                        "source_columns": [],
-                        "pipeline_step": step_number,
-                        "description": "Created by agent-written row-local transform code.",
-                        "definition": step["code"],
-                    }
-                continue
-            if step["type"] != "encode":
-                continue
-            stored = step["encoder"]
-            if stored["kind"] == "frequency":
-                outputs = [f"{column}_freq" for column in stored["columns"]]
-            elif stored["kind"] == "ordinal":
-                outputs = [f"{column}_ord" for column in stored["categories"]]
-            else:
-                encoder = ENCODER_CLASSES[stored["kind"]].from_dict(stored)
-                outputs = getattr(encoder, "output_columns", None)
-                if outputs is None:
-                    outputs = [encoder.output_column]
-                elif callable(outputs):
-                    outputs = outputs()
-            source_columns, description, definition = _describe_encoder(stored)
-            for output in outputs:
-                provenance[str(output)] = {
-                    "kind": stored["kind"],
-                    "source_columns": source_columns,
-                    "pipeline_step": step_number,
-                    "description": description,
-                    "definition": definition,
-                }
-
         input_columns = list(self._plan.get("serving_columns") or [])
         for join in self._plan.get("joins", []):
             input_columns.extend(join.get("columns") or [])
-        rows = []
-        for feature in self.feature_names:
-            info = provenance.get(feature)
-            if info is None and feature in input_columns:
-                info = {
-                    "kind": "input",
-                    "source_columns": [feature],
-                    "pipeline_step": 0,
-                    "description": "Numeric input column used directly by the models.",
-                    "definition": feature,
-                }
-            elif info is None and transform_steps:
-                # Old pipeline manifests stored executable transform code but
-                # not the outputs it introduced. Stay useful without pretending
-                # an exact per-step attribution can be recovered after the fact.
-                info = {
-                    "kind": "row_transform",
-                    "source_columns": [],
-                    "pipeline_step": pd.NA,
-                    "description": (
-                        "Derived by stored row-local transform code; this legacy "
-                        "bundle did not record which transform introduced it."
-                    ),
-                    "definition": "\n\n".join(s["code"] for _, s in transform_steps),
-                }
-            elif info is None:
-                info = {
-                    "kind": "input_or_legacy",
-                    "source_columns": [],
-                    "pipeline_step": pd.NA,
-                    "description": (
-                        "Shipped feature; detailed lineage is absent in this legacy bundle."
-                    ),
-                    "definition": "",
-                }
-            rows.append({"feature": feature, **info})
-        return pd.DataFrame(
-            rows,
-            columns=[
-                "feature", "kind", "source_columns", "pipeline_step",
-                "description", "definition",
-            ],
+        return describe_features_frame(
+            self._bundle["pipeline"], self.feature_names, input_columns=input_columns
         )
+
 
     def predict(
         self,
@@ -634,8 +488,20 @@ class Run:
         with open(Path(self.run_dir) / "run_journal.json") as handle:
             return json.load(handle)
 
-    def report(self) -> str:
-        with open(Path(self.run_dir) / "run_report.md") as handle:
+    def report_path(self, format: str = "html") -> Path:
+        """Path to the HTML dashboard, Markdown fallback, or sanitized JSON."""
+        suffixes = {"html": "html", "markdown": "md", "json": "json"}
+        if format not in suffixes:
+            raise ValueError("report format must be 'html', 'markdown', or 'json'")
+        path = Path(self.run_dir) / f"run_report.{suffixes[format]}"
+        if not path.exists():
+            raise ValueError(f"this run does not contain a {format} report")
+        return path
+
+    def report(self, format: str = "markdown") -> str:
+        """Read one report artifact; Markdown remains the compatible default."""
+        path = self.report_path(format)
+        with open(path, encoding="utf-8") as handle:
             return handle.read()
 
     def training_features(self, *, include_target: bool = True) -> pd.DataFrame:
@@ -772,4 +638,5 @@ class Agent:
             shutil.copy2(plan.tables[join.right_table]["path"], static_dir / join.right_table)
         with open(bundle_path / "api_plan.json", "w") as handle:
             json.dump(manifest, handle, indent=2)
+        update_dashboard_contract(str(run_dir), manifest)
         return Run(run_dir)

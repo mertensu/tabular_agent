@@ -63,6 +63,7 @@ believed at the time and this table is what is believed now.
 
 | thread | where it stands | rests on |
 |---|---|---|
+| **Run report surfaces** | [0084](0084-one-finalized-run-has-one-report-model-and-three-views.md): one sanitized finalized view model renders portable Markdown, machine-readable JSON, and a self-contained offline HTML dashboard; renderers never score or select | 0015, 0023, 0083 |
 | **Reusing learned features** | [0083](0083-learned-features-are-a-reusable-artifact.md): describe every shipped column; export the exact OOF-safe fitted table for custom training and replay the same feature recipe on new rows | 0006, 0010, 0030, 0081 |
 | **Random classification and row identifiers** | [0081](0081-random-classification-preserves-classes-identifiers-are-transport.md): random binary/multiclass outer splits preserve target composition; an owner-confirmed identifier remains transport metadata and is removed before any model can see it | 0022, 0023, 0029, 0030 |
 | **How a table is ranked** — the ruler | [0078](0078-the-panel-was-a-stop-rule-and-the-gain-threshold-is-the-real-lever.md): 0077's panel is **reverted** — it rejected 96% of steps and its schemes behave like coin flips. What survives the measurement is that **gain size predicts survival**, and that on ordered runs there is currently **no bar at all** | 0017, 0022, 0028, 0034, 0035, 0036, 0054, 0056, 0058, 0059, 0073, 0077 |
