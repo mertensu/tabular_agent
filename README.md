@@ -293,6 +293,13 @@ training table but absent from the serving table is excluded), and asks you to
 confirm the rest via `serving_columns`. Requiring one confirmation is the price of
 never shipping that model by accident.
 
+## Long runs stay robust
+
+A run executes in fresh episodes that read their state from the run journal rather
+than an ever-growing context, so a long or expensive search does not balloon in
+cost and can resume where it left off if interrupted. The mechanics live in the
+decision records ([`docs/decisions/`](docs/decisions/), 0024–0027).
+
 ## What this is not
 
 - a general-purpose feature library you assemble yourself
