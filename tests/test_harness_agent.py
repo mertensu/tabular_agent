@@ -272,6 +272,32 @@ def test_concurrent_id_claims_never_collide(tmp_path):
         assert all(g.startswith(prefix) for g in got)
 
 
+def test_concurrent_journal_mutations_are_one_transaction(tmp_path):
+    """Concurrent writers preserve every fact and always leave valid JSON.
+
+    Atomic replace alone only protects readers. Without a lock around load plus
+    mutation plus replace, writers can share the temp path or overwrite facts
+    another writer appended after their stale read.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    import json
+
+    from tabular_agent.harness import journal
+
+    run_dir = str(tmp_path / "run")
+    notes = [{"worker": i, "fact": f"note-{i}"} for i in range(64)]
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        futures = [pool.submit(journal.append_note, run_dir, note) for note in notes]
+        for future in futures:
+            future.result()
+
+    state = journal.load(run_dir)
+    assert {row["worker"] for row in state["log"]} == set(range(64))
+    with open(journal.journal_path(run_dir)) as handle:
+        assert json.load(handle) == state
+    assert not list((tmp_path / "run").glob(".run-journal.*.tmp"))
+
+
 def test_a_table_write_is_all_or_nothing(tmp_path):
     """A reader must see the old file or the new one, never a half-written one.
 

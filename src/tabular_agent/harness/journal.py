@@ -13,8 +13,12 @@ The journal *is* the run state. A fresh agent after a context reset reads this
 file plus the task spec and knows what has been tried and what to beat.
 """
 
+import contextlib
+import fcntl
+import functools
 import json
 import os
+import tempfile
 
 from ..metrics import greater_is_better
 
@@ -23,6 +27,35 @@ SCHEMA_VERSION = 1
 
 def journal_path(run_dir: str) -> str:
     return os.path.join(run_dir, "run_journal.json")
+
+
+@contextlib.contextmanager
+def _write_lock(run_dir: str):
+    """Serialize one journal mutation across threads and processes.
+
+    The JSON replace makes readers atomic; this lock makes the preceding
+    read-modify-write atomic too. Advisory locking is sufficient because every
+    journal mutator lives in this module.
+    """
+    os.makedirs(run_dir, exist_ok=True)
+    path = os.path.join(run_dir, ".run-journal.lock")
+    with open(path, "a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _serialized_mutation(func):
+    """Run a journal read-modify-write while holding its durable lock."""
+
+    @functools.wraps(func)
+    def wrapped(run_dir: str, *args, **kwargs):
+        with _write_lock(run_dir):
+            return func(run_dir, *args, **kwargs)
+
+    return wrapped
 
 
 def load(run_dir: str) -> dict:
@@ -42,34 +75,54 @@ def load(run_dir: str) -> dict:
         return json.load(f)
 
 
-def save(run_dir: str, journal: dict) -> str:
-    """Write the journal atomically.
+def _save_unlocked(run_dir: str, journal: dict) -> str:
+    """Replace the journal from inside its write transaction.
 
-    ``open(path, "w")`` truncates before it writes, so a crash, OOM or kill
-    between the two leaves an empty or half-written file — and the journal *is*
-    the run state, so that loses the entire run, including trained artifacts that
-    can no longer be attributed. Write a sibling temp file and ``os.replace`` it:
-    the rename is atomic, so a reader sees either the old journal or the new one,
-    never a partial one. ``fsync`` before the rename so the bytes are on disk and
-    not just in the page cache when the machine goes down mid-run.
+    A unique sibling temp file prevents concurrent full-state writers from ever
+    sharing an inode. Mutating helpers additionally hold the write lock across
+    their load and this replace, so valid updates cannot silently overwrite one
+    another.
     """
     path = journal_path(run_dir)
-    tmp = f"{path}.tmp"
-    with open(tmp, "w") as f:
-        json.dump(journal, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    os.makedirs(run_dir, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        prefix=".run-journal.",
+        suffix=".tmp",
+        dir=run_dir,
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(journal, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
     return path
 
 
+def save(run_dir: str, journal: dict) -> str:
+    """Atomically replace a complete journal supplied by an external caller.
+
+    Product code should prefer the dedicated mutation helpers below: they lock
+    the load and save as one transaction and therefore preserve concurrent
+    updates. This full-state API remains for initialization and tests.
+    """
+    with _write_lock(run_dir):
+        return _save_unlocked(run_dir, journal)
+
+
+@_serialized_mutation
 def set_task(run_dir: str, *, target: str, task_type: str, metric: str) -> dict:
     journal = load(run_dir)
     journal["task"] = {"target": target, "task_type": task_type, "metric": metric}
-    save(run_dir, journal)
+    _save_unlocked(run_dir, journal)
     return journal
 
 
+@_serialized_mutation
 def set_split(run_dir: str, record: dict) -> dict:
     """Record how the input was divided into work and validation halves.
 
@@ -81,10 +134,11 @@ def set_split(run_dir: str, record: dict) -> dict:
     journal = load(run_dir)
     if journal.get("split") is None:
         journal["split"] = record
-        save(run_dir, journal)
+        _save_unlocked(run_dir, journal)
     return journal
 
 
+@_serialized_mutation
 def set_streams(run_dir: str, record: dict) -> dict:
     """Record the run's declared second inputs (0062).
 
@@ -96,10 +150,11 @@ def set_streams(run_dir: str, record: dict) -> dict:
     journal = load(run_dir)
     if record and journal.get("streams") is None:
         journal["streams"] = record
-        save(run_dir, journal)
+        _save_unlocked(run_dir, journal)
     return journal
 
 
+@_serialized_mutation
 def set_work_probe(run_dir: str, scored: dict) -> dict:
     """The ruler's score for the data as given, before any table was built.
 
@@ -110,10 +165,11 @@ def set_work_probe(run_dir: str, scored: dict) -> dict:
     journal = load(run_dir)
     if journal.get("work_probe") is None:
         journal["work_probe"] = scored
-        save(run_dir, journal)
+        _save_unlocked(run_dir, journal)
     return journal
 
 
+@_serialized_mutation
 def set_holdout(run_dir: str, record: dict) -> dict:
     """The sealed split's verdict, written once at finalize (0023).
 
@@ -127,7 +183,7 @@ def set_holdout(run_dir: str, record: dict) -> dict:
     journal = load(run_dir)
     if journal.get("holdout") is None:
         journal["holdout"] = record
-        save(run_dir, journal)
+        _save_unlocked(run_dir, journal)
     return journal
 
 
@@ -165,6 +221,7 @@ def next_table_id(run_dir: str) -> str:
         return f"t{n}"
 
 
+@_serialized_mutation
 def append_table(run_dir: str, row: dict) -> dict:
     """Record a derived feature table (§19.2, same discipline as experiments).
 
@@ -174,10 +231,11 @@ def append_table(run_dir: str, row: dict) -> dict:
     """
     journal = load(run_dir)
     journal.setdefault("tables", []).append(row)
-    save(run_dir, journal)
+    _save_unlocked(run_dir, journal)
     return journal
 
 
+@_serialized_mutation
 def update_table(run_dir: str, path: str, fields: dict) -> dict:
     """Merge ``fields`` into an already-appended table row.
 
@@ -193,7 +251,7 @@ def update_table(run_dir: str, path: str, fields: dict) -> dict:
     for row in journal.get("tables") or []:
         if row.get("path") == path:
             row.update(fields)
-            save(run_dir, journal)
+            _save_unlocked(run_dir, journal)
             break
     return journal
 
@@ -252,12 +310,13 @@ def _derive_leaderboard_pointers(run_journal: dict) -> None:
         }
 
 
+@_serialized_mutation
 def append_experiments(run_dir: str, rows: list[dict]) -> dict:
     """Append a related experiment set in one atomic journal write."""
     run_journal = load(run_dir)
     run_journal["leaderboard"].extend(rows)
     _derive_leaderboard_pointers(run_journal)
-    save(run_dir, run_journal)
+    _save_unlocked(run_dir, run_journal)
     return run_journal
 
 
@@ -266,6 +325,7 @@ def append_experiment(run_dir: str, row: dict) -> dict:
     return append_experiments(run_dir, [row])
 
 
+@_serialized_mutation
 def update_experiment(run_dir: str, exp_id: str, fields: dict) -> dict:
     """Merge ``fields`` into an already-appended leaderboard row.
 
@@ -286,7 +346,7 @@ def update_experiment(run_dir: str, exp_id: str, fields: dict) -> dict:
             break
     else:
         raise KeyError(f"no experiment {exp_id!r} in the leaderboard")
-    save(run_dir, journal)
+    _save_unlocked(run_dir, journal)
     return journal
 
 
@@ -384,16 +444,18 @@ def stop_state(run_dir: str) -> dict:
     return load(run_dir).get("stop") or {"refusals": 0, "finalized": False}
 
 
+@_serialized_mutation
 def record_refusal(run_dir: str) -> int:
     """Count a training call the harness turned down; return the new total."""
     journal = load(run_dir)
     state = journal.get("stop") or {"refusals": 0, "finalized": False}
     state["refusals"] = state.get("refusals", 0) + 1
     journal["stop"] = state
-    save(run_dir, journal)
+    _save_unlocked(run_dir, journal)
     return state["refusals"]
 
 
+@_serialized_mutation
 def record_table_refusal(run_dir: str, table: str) -> int:
     """Count a refused request for one exhausted table; return that table's total.
 
@@ -405,21 +467,23 @@ def record_table_refusal(run_dir: str, table: str) -> int:
     per_table = state.setdefault("table_refusals", {})
     per_table[table] = per_table.get(table, 0) + 1
     journal["stop"] = state
-    save(run_dir, journal)
+    _save_unlocked(run_dir, journal)
     return per_table[table]
 
 
+@_serialized_mutation
 def mark_finalized(run_dir: str) -> dict:
     journal = load(run_dir)
     state = journal.get("stop") or {"refusals": 0, "finalized": False}
     state["finalized"] = True
     journal["stop"] = state
-    save(run_dir, journal)
+    _save_unlocked(run_dir, journal)
     return journal
 
 
+@_serialized_mutation
 def append_note(run_dir: str, note: dict) -> dict:
     journal = load(run_dir)
     journal["log"].append(note)
-    save(run_dir, journal)
+    _save_unlocked(run_dir, journal)
     return journal

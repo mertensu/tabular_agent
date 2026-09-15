@@ -1,52 +1,54 @@
 # Handoff
 
-## Latest session (2026-09-14)
+## Latest session (2026-09-15)
 
-Implemented the first offline HTML run dashboard on branch
-`chad/html-report-v1`, based on `origin/master` at `1d2b5ec`.
+Fixed concurrent journal corruption on branch `chad/journal-transaction-lock`,
+based on `origin/master` at `1780c7b`.
 
-- every finalization now writes `run_report.md`, versioned
-  `run_report.json`, and a self-contained `run_report.html`
-- the dashboard shows outcome cards, split purpose, shipped members and weights,
-  validation/test/optimism comparison, feature-block history, searchable feature
-  definitions, serving contract, and warnings
-- glossary help works on hover and keyboard focus; HTML content is escaped,
-  print/mobile/dark-mode styles are embedded, and there are no remote assets
-- `Run.report()` remains the Markdown-compatible default;
-  `Run.report_path()` points to HTML and `Run.report("html"|"json")` reads the
-  other views
-- bundle and dashboard feature definitions now share
-  `feature_catalog.describe_feature_rows`; fitted lookup mappings remain absent
-- the facade enriches the finalized dashboard with the owner-confirmed target,
-  serving columns, identifiers, and static joins
+- every product journal mutator now holds `.run-journal.lock` across the complete
+  load, mutation, fsync, and atomic replace
+- the lock uses `fcntl.flock`, so independent threads and processes sharing one
+  run directory serialize their updates; separate runs remain independent
+- every physical write uses a unique hidden temp file in the run directory, so
+  even full-state writers can never interleave bytes in one temp inode
+- readers remain lock-free because `os.replace` still exposes only a complete
+  old or new JSON document
+- the public full-state `journal.save` remains for initialization and tests; the
+  dedicated product mutators are the safe read-modify-write API
+
+The triggering House Prices A/B run ended with trailing non-JSON bytes. The old
+implementation used one shared `run_journal.json.tmp` path and protected only
+the destination rename, not the preceding read-modify-write transaction. That
+allowed both malformed bytes and valid-but-lost facts.
 
 Decision record:
-`docs/decisions/0084-one-finalized-run-has-one-report-model-and-three-views.md`.
+`docs/decisions/0086-a-journal-update-is-one-filesystem-transaction.md`.
 The previous handoff is archived verbatim under
-`research/archive/handoffs/2026-09-10--2026-09-14.md`.
+`research/archive/handoffs/2026-09-14--2026-09-15.md`.
 
 ## Verification so far
 
-- full repository suite: 609 tests pass
-- focused dashboard/API/report/minimal suite: 38 tests pass
-- full-profile blend/holdout/finalization regression suite passes
-- tests prove offline/no-external-URL output, HTML escaping, keyboard glossary
-  access, metric-direction-correct baseline gain, safe feature recipes, confirmed
-  serving-contract enrichment, and public Run access
-- wheel and sdist build successfully with `uv build`
+- full repository suite: 612 tests pass, exit 0
+- focused journal/holdout/resume suite passes
+- a new stress test launches 64 concurrent journal mutations and proves all 64
+  facts survive, the final file reparses exactly, and no temp files remain
+- an additional direct 200-writer stress check passed before the test was added
+- `git diff --check` passes
 
 ## Next action
 
-Review and merge `chad/html-report-v1`. A useful post-merge acceptance check is
-to open the generated HTML from one fresh real facade run and assess the visual
-hierarchy with a human reader; the semantic and offline contracts are already
-covered automatically.
+Review and merge `chad/journal-transaction-lock`. No model, feature, score, or
+report behavior changed.
 
 ## Blocking gotchas
 
-- the per-run dashboard is intentionally plain HTML/CSS/JavaScript. React belongs
-  to a later multi-run viewer consuming several `run_report.json` files.
-- the HTML renderer never scores or selects; do not add test-driven model actions
-  to it, because the internal test ranked nothing.
-- report JSON is a sanitized projection, not the complete journal. Do not expose
-  raw rows, targets, fitted encoder mappings, or estimator objects through it.
+- `.run-journal.lock` is a durable coordination file, not stale lock state;
+  `flock` attaches to the open descriptor and is released on close or process
+  death, so the file should not be deleted as cleanup
+- readers must stay on the atomically replaced `run_journal.json`; do not make
+  them inspect a temp file or require the write lock
+- new journal mutations must use a decorated mutator or explicitly hold
+  `_write_lock` across load and `_save_unlocked`; calling load and public save as
+  two separate operations does not create a transaction
+- the package already depends on Unix `fcntl` for minimal finalization; this
+  change does not introduce a new platform assumption
