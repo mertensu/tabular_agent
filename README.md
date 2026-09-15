@@ -26,11 +26,67 @@ version, append `@<tag-or-commit>`.
 Everything it needs — LightGBM, XGBoost, CatBoost, scikit-learn — comes with it as
 prebuilt wheels; there is nothing to compile. Python ≥ 3.11.
 
-The agent reasons with an LLM, so set an API key once:
+## Choose an LLM provider
+
+The API key is **not** passed to `ta.Agent(...)`. Set it in the environment; the
+provider selected by `model=` reads its own variable. This keeps secrets out of
+notebooks, scripts, and run artifacts.
+
+| Provider | `model=` example | Environment variable |
+|---|---|---|
+| Anthropic (default) | `anthropic:claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
+| OpenAI | `openai:gpt-5.2` | `OPENAI_API_KEY` |
+| Google Gemini | `google:gemini-2.5-flash` | `GOOGLE_API_KEY` |
+| Groq | `groq:<model-name>` | `GROQ_API_KEY` |
+| Mistral | `mistral:<model-name>` | `MISTRAL_API_KEY` |
+| OpenRouter | `openrouter:<provider/model>` | `OPENROUTER_API_KEY` |
+| Fireworks | `fireworks:<model-name>` | `FIREWORKS_API_KEY` |
+| DeepSeek | `deepseek:<model-name>` | `DEEPSEEK_API_KEY` |
+| Requesty gateway | `<provider>/<model>` | `REQUESTY_API_KEY` |
+
+Choose one provider, export its key, and use the matching model prefix:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+# Default: Anthropic
+export ANTHROPIC_API_KEY="..."
 ```
+
+```python
+import tabular_agent as ta
+
+agent = ta.Agent()  # default: anthropic:claude-opus-5
+```
+
+For example, to use OpenAI or Google instead:
+
+```bash
+export OPENAI_API_KEY="..."  # when using the OpenAI example below
+# export GOOGLE_API_KEY="..."  # alternatively, for the Google example
+```
+
+```python
+openai_agent = ta.Agent(model="openai:gpt-5.2")
+google_agent = ta.Agent(model="google:gemini-2.5-flash")
+```
+
+Native Pydantic AI providers use `provider:model`. A string containing `/` but
+no `:` selects the project's OpenAI-compatible Requesty gateway instead:
+
+```bash
+export REQUESTY_API_KEY="..."
+```
+
+```python
+gateway_agent = ta.Agent(model="tensorx/deepseek-v4-flash")
+```
+
+Only the Requesty path also supports a gitignored `config.env` containing
+`REQUESTY_API_KEY=...`; native providers read their standard environment
+variables. Advanced providers that need more than one setting can be passed as
+a preconfigured Pydantic AI model object. For example, Azure additionally needs
+`AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY` (and older endpoints may need
+`OPENAI_API_VERSION`). Whichever provider you choose, its model must support
+reliable tool calling because the agent's entire workflow uses tools.
 
 ## Try it on your own data
 
@@ -47,7 +103,7 @@ passed through verbatim; the agent structures the free text itself.
 ```python
 import tabular_agent as ta
 
-agent = ta.Agent()                      # uses ANTHROPIC_API_KEY
+agent = ta.Agent()                      # uses the default Anthropic provider
 plan = agent.inspect("path/to/folder")  # profiles every file, proposes nothing final
 ```
 

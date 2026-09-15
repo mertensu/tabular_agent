@@ -18,7 +18,7 @@ from .instructions import SYSTEM_PROMPT
 from .session import RunSession
 
 #: Default model. Any PydanticAI model string works — `openai:gpt-...`,
-#: `google-gla:gemini-...` — because nothing above this line is Claude-specific.
+#: `google:gemini-...` — because nothing above this line is Claude-specific.
 DEFAULT_MODEL = "anthropic:claude-opus-5"
 
 #: OpenAI-compatible gateway used when there is no first-party provider key.
@@ -232,8 +232,9 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
     """An agent whose *entire* tool surface is the ten functions below.
 
     ``model`` is either a PydanticAI model string (``"anthropic:..."``,
-    ``"openai:..."``) or a ``Model`` object — e.g. from :func:`gateway_model`,
-    for a provider reached through an OpenAI-compatible gateway.
+    ``"openai:..."``, ``"google:..."``) or a ``Model`` object — e.g. from
+    :func:`gateway_model`, for a provider reached through an OpenAI-compatible
+    gateway.
     """
     if profile not in {"full", "minimal"}:
         raise ValueError(f"unknown agent profile {profile!r}; use 'full' or 'minimal'")

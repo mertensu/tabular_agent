@@ -26,20 +26,43 @@ uv sync --extra dev     # + pytest
 uv run pytest           # sanity check — the active product/compatibility suite
 ```
 
-## 2. API key
+## 2. API key and model provider
 
-The harness (`src/tabular_agent/harness/agent.py`) calls an LLM through the
-[Requesty](https://router.requesty.ai) gateway. It reads `REQUESTY_API_KEY` from
-the environment, falling back to an untracked `config.env` file.
+The public default calls Anthropic directly. Set the provider's key in the
+environment and select its model with `provider:model`:
+
+```bash
+export ANTHROPIC_API_KEY="..."
+```
+
+```python
+import tabular_agent as ta
+
+agent = ta.Agent()  # anthropic:claude-opus-5
+```
+
+Other native Pydantic AI providers work the same way: for example,
+`OPENAI_API_KEY` with `ta.Agent(model="openai:gpt-5.2")`, or `GOOGLE_API_KEY`
+with `ta.Agent(model="google:gemini-2.5-flash")`. The full provider/key table is
+in the [README](../README.md#choose-an-llm-provider).
+
+Historical research runners commonly use the
+[Requesty](https://router.requesty.ai) gateway instead. A model name containing
+`/` but no `:` selects that path and reads `REQUESTY_API_KEY`:
 
 ```bash
 cp config.env.example config.env
 # then edit config.env and paste your own Requesty key
 ```
 
-`config.env` is gitignored (`*.env`); the key is never committed. Each
-collaborator uses their own. You only need this to run the *agent*; the library,
-tests, and `scripts/prep_*.py` do not touch the LLM.
+```python
+agent = ta.Agent(model="tensorx/deepseek-v4-flash")
+```
+
+`config.env` is gitignored (`*.env`) and is supported only by the Requesty
+helper; native providers read their standard environment variables. Each
+collaborator uses their own key. You only need a key to run the *agent*; the
+library, tests, and `scripts/prep_*.py` do not touch the LLM.
 
 ## 3. Kaggle competition data
 
