@@ -84,6 +84,33 @@ def test_identifier_role_is_proposed_confirmed_and_removed_before_modeling(tmp_p
     assert manifest["identifier_columns"] == ["PassengerId"]
 
 
+def test_inspect_picks_up_a_data_description_into_notes(tmp_path):
+    _tables(tmp_path)
+    (tmp_path / "data_description.txt").write_text(
+        "Store: the store id\nSales: daily revenue (target)\n"
+    )
+    # A generic README is a weaker candidate than a named dictionary.
+    (tmp_path / "README.md").write_text("repo readme, not the data dictionary")
+
+    plan = ta.Agent(model=object()).inspect(tmp_path)
+
+    assert plan.notes_source == "data_description.txt"
+    assert plan.notes.startswith("Store: the store id")
+    assert plan.description_candidates == ["data_description.txt", "README.md"]
+    # It is surfaced, with the losing candidate and how to override.
+    text = plan.summary()
+    assert "loaded from data_description.txt" in text
+    assert "README.md" in text
+
+
+def test_inspect_without_a_description_leaves_notes_empty(tmp_path):
+    _tables(tmp_path)
+    plan = ta.Agent(model=object()).inspect(tmp_path)
+    assert plan.notes is None
+    assert plan.notes_source is None
+    assert plan.description_candidates == []
+
+
 def test_plan_summary_tracks_open_decisions(tmp_path):
     _tables(tmp_path)
     plan = ta.Agent(model=object()).inspect(tmp_path)

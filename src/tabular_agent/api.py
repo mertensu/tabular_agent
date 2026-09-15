@@ -71,6 +71,13 @@ class DataPlan:
     metric: str | None = None
     notes: str | None = None
     column_notes: dict[str, str] | None = None
+    #: The description file whose text was auto-loaded into ``notes`` at inspect
+    #: time (``None`` if the folder had none). Reported by :meth:`summary` so the
+    #: owner can see what was picked up and override it.
+    notes_source: str | None = None
+    #: Every description-file candidate found in the folder, best-ranked first.
+    #: More than one means the owner may want to override the auto-pick.
+    description_candidates: list[str] = field(default_factory=list)
     n_splits: int = 5
     seed: int = 42
     target_transform: str | None = None
@@ -94,6 +101,14 @@ class DataPlan:
             # the serving schema: inspection may propose, only the owner decides.
             identifier_columns=([] if not profile.get("identifier_columns") else None),
             joins=[JoinProposal(**join) for join in profile["joins"]],
+            # A data dictionary found in the folder flows straight into notes, so
+            # the agent reads the owner's own column explanations. It is context,
+            # not a modeling decision, so it is attached rather than left for a
+            # confirmation step — but the source and any rival candidates are
+            # recorded so summary() can show what was picked and let it be swapped.
+            notes=profile.get("description_text"),
+            notes_source=profile.get("description_source"),
+            description_candidates=list(profile.get("description_candidates") or []),
         )
 
     def accept_identifier_proposals(self) -> DataPlan:
@@ -191,6 +206,17 @@ class DataPlan:
                 f"undecided: {_preview(pending)}",
                 "set: plan.accept_joins() or .reject_joins()")),
         )
+
+        # Not a decision — context the agent reads. Shown so the owner knows a
+        # data dictionary was picked up, and can swap it when several were found.
+        if self.notes_source:
+            lines.append(f"  (i) data description   loaded from {self.notes_source}")
+            others = [c for c in self.description_candidates if c != self.notes_source]
+            if others:
+                lines.append(f"                         other files found: {_preview(others)}")
+                lines.append("                         override: plan.notes = Path('<file>').read_text()")
+        elif self.notes:
+            lines.append("  (i) data description   set manually in plan.notes")
 
         header = (
             "DataPlan — all decisions confirmed."

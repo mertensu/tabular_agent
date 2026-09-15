@@ -39,6 +39,11 @@ later predict on (e.g. a Kaggle-style `test.csv` without the target), put both i
 one folder and point at the folder — the agent reads the two schemas and works out
 which columns will actually exist at prediction time.
 
+Drop a data description (`data_description.txt`, a `.md` dictionary, …) in the same
+folder and `inspect()` loads it into `plan.notes` automatically, so the agent reads
+your own column explanations — worth a lot when the column names are cryptic. It is
+passed through verbatim; the agent structures the free text itself.
+
 ```python
 import tabular_agent as ta
 

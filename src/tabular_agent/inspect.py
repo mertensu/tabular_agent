@@ -52,6 +52,62 @@ def propose_identifier_columns(
     return proposed
 
 
+#: Text files inspection reads as a data dictionary rather than as a table.
+DESCRIPTION_SUFFIXES = {".txt", ".md"}
+
+#: Name stems that mark a file as a data description, best match first. A folder
+#: often carries an unrelated ``README`` too, so an explicitly named dictionary is
+#: preferred over it, and a bare ``.txt``/``.md`` is used only when it is the sole
+#: candidate — never guessed against a rival.
+_DESCRIPTION_NAME_HINTS = (
+    "data_description",
+    "data_dictionary",
+    "dictionary",
+    "description",
+    "columns",
+    "readme",
+)
+
+#: A description is passed to the agent verbatim, so an enormous file would bloat
+#: every episode's brief. Past this it is truncated with a visible marker; the head
+#: is where a data dictionary puts its column definitions.
+DESCRIPTION_MAX_CHARS = 20_000
+
+
+def _rank_description(path: Path) -> int:
+    stem = path.stem.lower()
+    for rank, hint in enumerate(_DESCRIPTION_NAME_HINTS):
+        if hint in stem:
+            return rank
+    return len(_DESCRIPTION_NAME_HINTS)
+
+
+def find_descriptions(source: str | os.PathLike) -> list[Path]:
+    """Non-table text files in a folder that could be the data description.
+
+    Ordered so the caller can take the first as the pick: explicitly named
+    dictionaries before a generic ``README``, and named files before an unnamed
+    ``notes.txt``. Returns every candidate so the facade can *propose* rather than
+    silently choose when more than one is plausible.
+    """
+    path = Path(source).expanduser().resolve()
+    if not path.is_dir():
+        return []
+    candidates = [
+        p for p in path.iterdir()
+        if p.is_file() and p.suffix.lower() in DESCRIPTION_SUFFIXES
+    ]
+    return sorted(candidates, key=lambda p: (_rank_description(p), p.name.lower()))
+
+
+def read_description(path: str | os.PathLike) -> str:
+    """The description text, truncated with a marker if it is very large."""
+    text = Path(path).expanduser().read_text(encoding="utf-8", errors="replace").strip()
+    if len(text) > DESCRIPTION_MAX_CHARS:
+        text = text[:DESCRIPTION_MAX_CHARS] + "\n\n[... description truncated ...]"
+    return text
+
+
 def table_paths(source: str | os.PathLike) -> list[Path]:
     """Return every supported table in a file/folder, without descending."""
     path = Path(source).expanduser().resolve()
@@ -125,6 +181,9 @@ def profile_collection(source: str | os.PathLike) -> dict:
                         "columns": added,
                     })
 
+    descriptions = find_descriptions(source)
+    description_text = read_description(descriptions[0]) if descriptions else None
+
     return {
         "source": str(Path(source).expanduser().resolve()),
         "tables": {
@@ -139,6 +198,13 @@ def profile_collection(source: str | os.PathLike) -> dict:
         "serving_columns": serving_columns,
         "identifier_columns": identifier_columns,
         "joins": joins,
+        # The data dictionary the owner dropped in the folder, passed through to
+        # the agent verbatim (it structures the free text itself). Only the
+        # best-ranked file's text is loaded; every candidate's name is offered so
+        # the facade can propose rather than silently pick when several exist.
+        "description_source": descriptions[0].name if descriptions else None,
+        "description_text": description_text,
+        "description_candidates": [p.name for p in descriptions],
     }
 
 
