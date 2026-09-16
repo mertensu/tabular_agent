@@ -88,6 +88,36 @@ a preconfigured Pydantic AI model object. For example, Azure additionally needs
 `OPENAI_API_VERSION`). Whichever provider you choose, its model must support
 reliable tool calling because the agent's entire workflow uses tools.
 
+## Local and self-hosted models
+
+Anything that serves an **OpenAI-compatible API** works — Ollama, vLLM,
+llama.cpp's `llama-server`, LM Studio, Text Generation Inference, … Pass a
+preconfigured model object pointing at the server; only the `base_url` changes:
+
+```python
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
+import tabular_agent as ta
+
+llm = OpenAIChatModel(
+    "qwen2.5-coder:32b",
+    provider=OpenAIProvider(
+        base_url="http://localhost:11434/v1",  # Ollama; vLLM :8000, llama-server :8080, …
+        api_key="-",                            # local servers ignore it; any placeholder works
+    ),
+)
+agent = ta.Agent(model=llm)
+```
+
+Two things to keep in mind. First, pick a model with **strong tool calling** and
+enough context: the whole workflow is tool-driven (it writes sandboxed pandas,
+follows strict schemas), so small models tend to emit malformed tool calls and
+stall — larger instruct/coder models (e.g. Qwen2.5-Coder 32B, Llama 3.3 70B) fare
+far better. Second, the model choice affects *quality, never safety*: the
+leakage-safety guarantees live in the tools, not the model, so a weak local model
+produces a worse run, never an unsafe one. Running fully local also means your
+data and prompts never leave the machine.
+
 ## Try it on your own data
 
 You need a training table with a target column. If you also have the table you'll
