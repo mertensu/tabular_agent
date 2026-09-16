@@ -111,9 +111,9 @@ agent = ta.Agent(model=llm)
 
 Two things to keep in mind. First, pick a model with **strong tool calling** and
 enough context: the whole workflow is tool-driven (it writes sandboxed pandas,
-follows strict schemas), so small models tend to emit malformed tool calls and
-stall — larger instruct/coder models (e.g. Qwen2.5-Coder 32B, Llama 3.3 70B) fare
-far better. Second, the model choice affects *quality, never safety*: the
+follows strict schemas), so small or weak-tool-calling models tend to emit
+malformed tool calls and stall. Second, the model choice affects *quality, never
+safety*: the
 leakage-safety guarantees live in the tools, not the model, so a weak local model
 produces a worse run, never an unsafe one. Running fully local also means your
 data and prompts never leave the machine.
