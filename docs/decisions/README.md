@@ -65,6 +65,7 @@ believed at the time and this table is what is believed now.
 |---|---|---|
 | **Journal integrity under concurrency** | [0086](0086-a-journal-update-is-one-filesystem-transaction.md): every journal read-modify-write holds one cross-process filesystem lock and writes through a unique fsynced temp file; readers remain lock-free | 0003, 0004, 0008, 0031 |
 | **Run report surfaces** | [0084](0084-one-finalized-run-has-one-report-model-and-three-views.md): one sanitized finalized view model renders portable Markdown, machine-readable JSON, and a self-contained offline HTML dashboard; renderers never score or select | 0015, 0023, 0083 |
+| **Learning from completed runs** | [0088](0088-a-run-may-propose-a-capability-gap-but-not-change-the-product.md): an explicit tool-less postmortem may propose an evidence-cited generic gap; recurrence only earns a preregistered test and never changes the product automatically | 0023, 0029, 0057, 0070, 0071, 0084 |
 | **Reusing learned features** | [0083](0083-learned-features-are-a-reusable-artifact.md): describe every shipped column; export the exact OOF-safe fitted table for custom training and replay the same feature recipe on new rows | 0006, 0010, 0030, 0081 |
 | **Random classification and row identifiers** | [0081](0081-random-classification-preserves-classes-identifiers-are-transport.md): random binary/multiclass outer splits preserve target composition; an owner-confirmed identifier remains transport metadata and is removed before any model can see it | 0022, 0023, 0029, 0030 |
 | **How a table is ranked** — the ruler | [0078](0078-the-panel-was-a-stop-rule-and-the-gain-threshold-is-the-real-lever.md): 0077's panel is **reverted** — it rejected 96% of steps and its schemes behave like coin flips. What survives the measurement is that **gain size predicts survival**, and that on ordered runs there is currently **no bar at all** | 0017, 0022, 0028, 0034, 0035, 0036, 0054, 0056, 0058, 0059, 0073, 0077 |
@@ -151,6 +152,7 @@ vocabulary for *new* records would be the fix, and is not yet decided.
 - [0013 — A refusal is a return value, not an exception](0013-refusal-as-return-value.md)
 - [0031 — The serialisation guard was decorative; correctness moves into the primitives](0031-the-guard-was-decorative.md)
 - [0086 — A journal update is one filesystem transaction](0086-a-journal-update-is-one-filesystem-transaction.md)
+- [0088 — A run may propose a capability gap, but not change the product](0088-a-run-may-propose-a-capability-gap-but-not-change-the-product.md)
 - [0033 — A ceiling in the wrong unit is no ceiling; the search is bounded, the fit is not](0033-a-ceiling-in-the-wrong-unit-is-no-ceiling.md)
   *(what a self-tuning model may cost at scale; and a wall-clock bound that still
   cannot bound a single fold)*

@@ -1,54 +1,54 @@
 # Handoff
 
-## Latest session (2026-09-15)
+## Latest session (2026-09-16)
 
-Fixed concurrent journal corruption on branch `chad/journal-transaction-lock`,
-based on `origin/master` at `1780c7b`.
+Built an evidence-bound capability-review V1 on branch
+chad/capability-review-v1, based on origin/master at 8bcf0e3.
 
-- every product journal mutator now holds `.run-journal.lock` across the complete
-  load, mutation, fsync, and atomic replace
-- the lock uses `fcntl.flock`, so independent threads and processes sharing one
-  run directory serialize their updates; separate runs remain independent
-- every physical write uses a unique hidden temp file in the run directory, so
-  even full-state writers can never interleave bytes in one temp inode
-- readers remain lock-free because `os.replace` still exposes only a complete
-  old or new JSON document
-- the public full-state `journal.save` remains for initialization and tests; the
-  dedicated product mutators are the safe read-modify-write API
+- Agent.review_capabilities(run) performs one explicit post-finalization LLM
+  review with structured output and no tools
+- the reviewer receives allow-listed aggregate run evidence, never raw rows,
+  target values, fitted lookups, transform code, artifact paths, or transcripts
+- findings distinguish capability, agent, tool, model/selection, and data-contract
+  gaps from a run that demonstrates no generic gap
+- every finding must cite real evidence IDs, name a generic capability, state an
+  alternative cause and leakage/serving risk, and propose a falsifiable test
+- unknown evidence references are rejected before persistence
+- capability_review.json is write-once under a cross-process lock; repeat calls
+  return the persisted result instead of spending another model call
+- Markdown, sanitized JSON, and offline HTML all gain a “What limited this run?”
+  section; dynamic prose is escaped in rendered surfaces
+- tabular_agent.capability_backlog(runs) groups deterministic fingerprints as
+  proposed or recurring; it can never accept a product change
 
-The triggering House Prices A/B run ended with trailing non-JSON bytes. The old
-implementation used one shared `run_journal.json.tmp` path and protected only
-the destination rename, not the preceding read-modify-write transaction. That
-allowed both malformed bytes and valid-but-lost facts.
-
-Decision record:
-`docs/decisions/0086-a-journal-update-is-one-filesystem-transaction.md`.
+The architectural boundary and rejected alternatives are recorded in
+docs/decisions/0088-a-run-may-propose-a-capability-gap-but-not-change-the-product.md.
 The previous handoff is archived verbatim under
-`research/archive/handoffs/2026-09-14--2026-09-15.md`.
+research/archive/handoffs/2026-09-15--2026-09-16.md.
 
 ## Verification so far
 
-- full repository suite: 612 tests pass, exit 0
-- focused journal/holdout/resume suite passes
-- a new stress test launches 64 concurrent journal mutations and proves all 64
-  facts survive, the final file reparses exactly, and no temp files remain
-- an additional direct 200-writer stress check passed before the test was added
-- `git diff --check` passes
+- focused reviewer/dashboard/API suite: 21 tests pass
+- full repository suite: 617 tests pass, exit 0 (6:50)
+- unknown-evidence, prompt allow-list, write-once, report injection, and recurring
+  backlog contracts have dedicated regression tests
+- Wheel and sdist build successfully with uv build
+- git diff --check passes
 
 ## Next action
 
-Review and merge `chad/journal-transaction-lock`. No model, feature, score, or
-report behavior changed.
+Review and merge chad/capability-review-v1. After several independent real
+runs have reviews, inspect the grouped backlog and preregister one recurring
+hypothesis on an unseen dataset; do not treat recurrence itself as acceptance.
 
 ## Blocking gotchas
 
-- `.run-journal.lock` is a durable coordination file, not stale lock state;
-  `flock` attaches to the open descriptor and is released on close or process
-  death, so the file should not be deleted as cleanup
-- readers must stay on the atomically replaced `run_journal.json`; do not make
-  them inspect a temp file or require the write lock
-- new journal mutations must use a decorated mutator or explicitly hold
-  `_write_lock` across load and `_save_unlocked`; calling load and public save as
-  two separate operations does not create a transaction
-- the package already depends on Unix `fcntl` for minimal finalization; this
-  change does not introduce a new platform assumption
+- capability review is deliberately opt-in because it is an additional paid LLM
+  call and transfers sanitized run metadata to the configured provider
+- the internal test score may support retrospective diagnosis, but the reviewer
+  has no fit/score/select/ship action; do not add one
+- do not replace the allow-list with the full journal: it contains transform code
+  and filesystem paths that the reviewer does not need
+- the lock file is durable coordination state; as with the journal lock, flock
+  is attached to the descriptor and is released automatically
+- recurring means “worth an owner-preregistered test,” never “build this tool”
