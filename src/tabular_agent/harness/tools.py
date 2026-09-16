@@ -2650,29 +2650,29 @@ TERMINAL_MODEL_TYPES = (PROBE_MODEL_TYPE, "xgb", "catboost", "elasticnet")
 #: terminal blend beside each family's default (0087). These are **not tuned and
 #: not selected on validation** — they are declared here, once, and every one that
 #: fits is averaged in by the same 0080 fold-spread weighting as the defaults
-#: (0044). Each is deliberately the *opposite* corner of the bias/variance trade
-#: from its default — shallow, slow-learning, row/column-subsampled, more
-#: regularized — so its errors decorrelate from the default's, which is the only
-#: thing that makes a blend member worth adding. It is not the leaderboard-fitting
-#: 0035 forbids: the agent still searches only over features, and the harness ships
-#: a larger *fixed* member set. `elasticnet` gets no partner — it is the linear
-#: diagnostic (0035), and a second penalised linear fit adds cost without a new
-#: error shape. A config whose fit exceeds the time budget is skipped like any
-#: other terminal fit, so this cannot turn a finishing run into a stalled one.
+#: (0044). It is not the leaderboard-fitting 0035 forbids: the agent still searches
+#: only over features; the harness ships a larger *fixed* member set.
+#:
+#: The diversity is **row/column subsampling and a different seed at the default's
+#: full strength** — same depth, rounds and learning rate — not a shallower or more
+#: regularized model. That is deliberate and was measured: a first attempt used
+#: weaker (shallow, slow) partners and it *regressed Rossmann by 0.057 rmspe* while
+#: helping House Prices, because 0080 weights members by fold *stability*, not by
+#: score, so a member that is consistently but stably wrong is not down-weighted
+#: and drags the blend (see 0087). Full-strength members stay competitive, so their
+#: decorrelation is a gain, not a liability. `elasticnet` gets no partner — it is
+#: the linear diagnostic (0035), and a second penalised linear fit adds cost
+#: without a new error shape. A config whose fit exceeds the time budget is skipped
+#: like any other terminal fit, so this cannot turn a finishing run into a stalled one.
 EXTRA_TERMINAL_CONFIGS: tuple[tuple[str, dict], ...] = (
     ("lgbm", {
-        "num_leaves": 15, "learning_rate": 0.05, "n_estimators": 300,
-        "subsample": 0.8, "subsample_freq": 1, "colsample_bytree": 0.8,
-        "min_child_samples": 40, "reg_lambda": 1.0,
+        "subsample": 0.7, "subsample_freq": 1, "colsample_bytree": 0.7,
+        "random_state": 1337,
     }),
     ("xgb", {
-        "max_depth": 3, "learning_rate": 0.05, "n_estimators": 300,
-        "subsample": 0.8, "colsample_bytree": 0.8, "reg_lambda": 1.0,
-        "min_child_weight": 5,
+        "subsample": 0.7, "colsample_bytree": 0.7, "random_state": 1337,
     }),
-    ("catboost", {
-        "depth": 4, "learning_rate": 0.05, "n_estimators": 300, "l2_leaf_reg": 6,
-    }),
+    ("catboost", {"rsm": 0.8, "random_seed": 1337}),
 )
 
 

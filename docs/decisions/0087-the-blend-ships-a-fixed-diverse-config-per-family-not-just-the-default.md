@@ -24,13 +24,14 @@ diversity without the part those systems rely on and this project forbids:
 
 ## The decision
 
-**Add one fixed, pre-declared, deliberately different configuration per boosted
-family to the terminal blend, and average it in with the rest.** The extra
-configs (`EXTRA_TERMINAL_CONFIGS` in `harness/tools.py`) sit at the opposite
-corner of the bias/variance trade from their defaults — shallow, slow-learning,
-row/column-subsampled, more regularized — so their errors decorrelate. `elasticnet`
-gets no partner: it is the linear diagnostic (0035), and a second penalised linear
-fit adds cost without a new error shape.
+**Add one fixed, pre-declared configuration per boosted family to the terminal
+blend, and average it in with the rest.** The extra configs
+(`EXTRA_TERMINAL_CONFIGS` in `harness/tools.py`) keep the default's full strength —
+same depth, rounds and learning rate — and differ only by **row/column subsampling
+and a different seed**. That decorrelates their errors (each sees different rows
+and columns) while keeping every member competitive. `elasticnet` gets no partner:
+it is the linear diagnostic (0035), and a second penalised linear fit adds cost
+without a new error shape.
 
 The load-bearing distinction from what 0035/0022 forbid:
 
@@ -50,6 +51,15 @@ never turn a finishing run into a stalled one.
 
 ## What was rejected
 
+- **Weaker (shallow, slow-learning, more-regularized) partner configs.** The first
+  attempt, and it was measured against exactly the A/B below. It *helped* House
+  Prices (rmsle 0.1357 → 0.1334) but *regressed* Rossmann badly (rmspe 0.2958 →
+  0.3530, +0.057), because the shallow depth-3/4 partners underfit Rossmann (xgb
+  partner 0.450 vs the default's 0.191) and 0080 weights members by fold
+  *stability*, not score — so a member that is consistently but stably wrong is
+  not down-weighted and drags the blend. Full-strength subsampled members avoid
+  this: they stay competitive on every dataset, so their decorrelation is only a
+  gain. This is why the shipped configs vary the sampling, not the capacity.
 - **Tuning hyperparameters on validation and selecting the best.** The direct
   0022/0068 failure — it fits the validation sample rather than finding structure
   that transfers, and it is unbounded and non-reproducible (0035). The whole point
