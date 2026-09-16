@@ -1244,6 +1244,7 @@ def test_finalize_ships_the_selected_reference_target(tmp_path, monkeypatch):
         run, baseline_column="baseline", scale_column="scale"
     )
     monkeypatch.setattr(tools, "TERMINAL_MODEL_TYPES", ("baseline",))
+    monkeypatch.setattr(tools, "EXTRA_TERMINAL_CONFIGS", ())
     out = finalize_run(run)
 
     bundle = load_bundle(os.path.join(run.run_dir, out["bundle_dir"]))

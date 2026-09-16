@@ -111,12 +111,45 @@ def test_the_bundle_holds_every_terminal_fit_weighted_by_inverse_fold_spread(run
     assert int(np.argmax(spreads)) == int(np.argmin(bundle["weights"]))
 
 
+def test_blend_includes_a_second_fixed_config_per_boosted_family(run):
+    """0087: each boosted family contributes its default and one fixed diverse
+    config to the blend; elasticnet stays single. No tuning, no val-selection —
+    just a larger fixed member set for error diversity."""
+    from collections import Counter
+
+    inspect_data(run)
+    fit_encoding(run, ["city"], "frequency")
+    out = finalize_run(run)
+
+    families = []
+    for exp_id in out["blend_members"]:
+        with open(os.path.join(run.run_dir, "experiments", exp_id, "meta.json")) as f:
+            families.append(json.load(f)["model_type"])
+    counts = Counter(families)
+    assert counts["lgbm"] == 2
+    assert counts["xgb"] == 2
+    assert counts["catboost"] == 2
+    assert counts["elasticnet"] == 1
+    assert len(out["blend_members"]) == 7
+    # The two configs of a family are genuinely different fits, not a duplicate.
+    lgbm_params = []
+    for exp_id in out["blend_members"]:
+        with open(os.path.join(run.run_dir, "experiments", exp_id, "meta.json")) as f:
+            meta = json.load(f)
+            if meta["model_type"] == "lgbm":
+                lgbm_params.append(meta.get("params") or {})
+    assert lgbm_params[0] != lgbm_params[1]
+
+
 def test_a_failed_family_is_left_out_rather_than_ending_the_run(run, monkeypatch):
     """Three families exist so one can be wrong for the data. The blend averages
     whatever survived — it does not require the full ballot."""
     import tabular_agent.harness.tools as tools
 
     monkeypatch.setattr(tools, "TERMINAL_MODEL_TYPES", (tools.PROBE_MODEL_TYPE, "nonsense"))
+    # Also clear the fixed diverse configs (0087) so this exercises the genuine
+    # single-survivor path rather than blending in the extra boosted members.
+    monkeypatch.setattr(tools, "EXTRA_TERMINAL_CONFIGS", ())
     inspect_data(run)
     out = finalize_run(run)
 

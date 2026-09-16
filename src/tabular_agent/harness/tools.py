@@ -2646,6 +2646,35 @@ def explore_table(
 #: design and a record, not a constant picked off this table.
 TERMINAL_MODEL_TYPES = (PROBE_MODEL_TYPE, "xgb", "catboost", "elasticnet")
 
+#: A second, fixed configuration per gradient-boosted family, added to the
+#: terminal blend beside each family's default (0087). These are **not tuned and
+#: not selected on validation** — they are declared here, once, and every one that
+#: fits is averaged in by the same 0080 fold-spread weighting as the defaults
+#: (0044). Each is deliberately the *opposite* corner of the bias/variance trade
+#: from its default — shallow, slow-learning, row/column-subsampled, more
+#: regularized — so its errors decorrelate from the default's, which is the only
+#: thing that makes a blend member worth adding. It is not the leaderboard-fitting
+#: 0035 forbids: the agent still searches only over features, and the harness ships
+#: a larger *fixed* member set. `elasticnet` gets no partner — it is the linear
+#: diagnostic (0035), and a second penalised linear fit adds cost without a new
+#: error shape. A config whose fit exceeds the time budget is skipped like any
+#: other terminal fit, so this cannot turn a finishing run into a stalled one.
+EXTRA_TERMINAL_CONFIGS: tuple[tuple[str, dict], ...] = (
+    ("lgbm", {
+        "num_leaves": 15, "learning_rate": 0.05, "n_estimators": 300,
+        "subsample": 0.8, "subsample_freq": 1, "colsample_bytree": 0.8,
+        "min_child_samples": 40, "reg_lambda": 1.0,
+    }),
+    ("xgb", {
+        "max_depth": 3, "learning_rate": 0.05, "n_estimators": 300,
+        "subsample": 0.8, "colsample_bytree": 0.8, "reg_lambda": 1.0,
+        "min_child_weight": 5,
+    }),
+    ("catboost", {
+        "depth": 4, "learning_rate": 0.05, "n_estimators": 300, "l2_leaf_reg": 6,
+    }),
+)
+
 
 def _best_table_path(session: RunSession, run_journal: dict) -> str:
     """The raw or derived table with the best fixed evaluation score."""
@@ -2710,6 +2739,22 @@ def _terminal_fits(session: RunSession) -> list[dict]:
                 reference_target=reference_target,
             )
         except Exception as e:  # noqa: BLE001 - one bad family must not end the run
+            done.append({"model_type": model_type, "trained": False, "error": str(e)})
+            continue
+        done.append(out)
+
+    # A second fixed config per boosted family (0087), same table/transform, added
+    # to the blend for error diversity. Never the probe fit, so no special seed;
+    # a failure or a budget overrun is skipped exactly like a default family above.
+    for model_type, extra_params in EXTRA_TERMINAL_CONFIGS:
+        try:
+            out = train_tabular_model(
+                session, table=table, model_type=model_type, enforce_stop=False,
+                params=dict(extra_params),
+                target_transform=target_transform,
+                reference_target=reference_target,
+            )
+        except Exception as e:  # noqa: BLE001 - one bad config must not end the run
             done.append({"model_type": model_type, "trained": False, "error": str(e)})
             continue
         done.append(out)
