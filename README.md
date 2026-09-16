@@ -337,6 +337,27 @@ decision records ([`docs/decisions/`](docs/decisions/), 0024–0027).
 - a claim that one internal score estimates a distant external population — the
   report tells you exactly how far it can and cannot see
 
+## How this differs from classic AutoML (AutoGluon, …)
+
+Classic AutoML (AutoGluon, H2O, …) maximizes a score by training a large zoo of
+models and stacking them. This project is a deliberately different bet:
+
+- **An LLM reasons about your data.** It reads your column names and data
+  description and writes bespoke, *semantic* features — not just generic
+  preprocessing. The search is over features, not a model/hyperparameter grid.
+- **Trustworthy numbers over raw score.** Three splits, an honest report that
+  separates the search winner from what actually ships, leakage-safe out-of-fold
+  encoders, and refusal to train on columns that won't exist at prediction time.
+  Aggressive stacking can quietly flatter its own validation; this is built not to.
+- **Auditable and portable.** A replayable bundle, a readable report,
+  per-prediction explanations, reusable feature tables, and a confirmed serving
+  contract — runnable fully local (your infra, local models), so data never
+  leaves the machine.
+
+Honestly: on a pure leaderboard, a mature AutoML like AutoGluon will often score
+higher. Reach for this when you need a model you can **trust, explain, and run on
+your own terms** — not only a number.
+
 ## Contributing
 
 Development setup, the test suite, and the design decisions that shape the code:
