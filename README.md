@@ -100,7 +100,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 import tabular_agent as ta
 
 llm = OpenAIChatModel(
-    "qwen2.5-coder:32b",
+    "your-local-model",  # the name your server exposes
     provider=OpenAIProvider(
         base_url="http://localhost:11434/v1",  # Ollama; vLLM :8000, llama-server :8080, …
         api_key="-",                            # local servers ignore it; any placeholder works
