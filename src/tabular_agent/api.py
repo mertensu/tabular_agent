@@ -14,6 +14,7 @@ from uuid import uuid4
 import pandas as pd
 
 from .dashboard import update_dashboard_contract
+from .capability_review import REVIEW_FILENAME, review_capabilities
 from .harness.agent import gateway_model, run as run_agent
 from .harness.session import RunSession
 from .harness.tools import finalize_run
@@ -514,6 +515,15 @@ class Run:
         with open(Path(self.run_dir) / "run_journal.json") as handle:
             return json.load(handle)
 
+    @property
+    def capability_review(self) -> dict | None:
+        """The write-once postmortem, or None before one is requested."""
+        path = Path(self.run_dir) / REVIEW_FILENAME
+        if not path.exists():
+            return None
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+
     def report_path(self, format: str = "html") -> Path:
         """Path to the HTML dashboard, Markdown fallback, or sanitized JSON."""
         suffixes = {"html": "html", "markdown": "md", "json": "json"}
@@ -620,6 +630,15 @@ class Agent:
         if isinstance(self.model, str) and "/" in self.model and ":" not in self.model:
             return gateway_model(self.model)
         return self.model
+
+    def review_capabilities(self, run: Run | str | os.PathLike) -> dict:
+        """Run one tool-less, read-only postmortem over a finalized run.
+
+        The result is persisted and returned unchanged on later calls. It may
+        propose a backlog hypothesis, but cannot fit, score, select, or ship.
+        """
+        run_dir = run.run_dir if isinstance(run, Run) else run
+        return review_capabilities(run_dir, model=self._resolved_model())
 
     def run(self, plan: DataPlan, prompt: str | None = None) -> Run:
         plan.validate()

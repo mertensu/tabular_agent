@@ -263,6 +263,7 @@ def test_public_exports():
     assert ta.Agent is public_api.Agent
     assert ta.DataPlan is public_api.DataPlan
     assert ta.Bundle is public_api.Bundle
+    assert ta.capability_backlog is not None
 
 
 def test_facade_minimal_run_finalizes_and_predicts_end_to_end(tmp_path):

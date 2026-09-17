@@ -288,6 +288,37 @@ def _feature_steps(data: dict) -> str:
     return "".join(out) or "<li><span>No derived feature steps were recorded.</span></li>"
 
 
+def _capability_review(data: dict) -> str:
+    review = data.get("capability_review")
+    if not review:
+        return ""
+    findings = []
+    for row in review.get("findings") or []:
+        category = str(row.get("category") or "finding").replace("_", " ")
+        evidence = ", ".join(map(str, row.get("evidence_refs") or [])) or "none"
+        findings.append(
+            '<article class="capability-finding">'
+            f'<p><span class="pill">{escape(category)}</span> '
+            f'<small>{escape(str(row.get("confidence") or "unknown"))} confidence</small></p>'
+            f'<h3>{escape(str(row.get("title") or "Run limitation"))}</h3>'
+            f'<p>{escape(str(row.get("generic_capability") or ""))}</p>'
+            '<details><summary>Evidence and falsification</summary><dl>'
+            f'<dt>Evidence</dt><dd>{escape(evidence)}</dd>'
+            f'<dt>Current tools</dt><dd>{escape(str(row.get("why_existing_tools_insufficient") or ""))}</dd>'
+            f'<dt>Alternative</dt><dd>{escape(str(row.get("alternative_explanation") or ""))}</dd>'
+            f'<dt>Risk</dt><dd>{escape(str(row.get("leakage_or_serving_risk") or ""))}</dd>'
+            f'<dt>Test</dt><dd>{escape(str(row.get("testable_hypothesis") or ""))}</dd>'
+            '</dl></details></article>'
+        )
+    return (
+        '<section id="capability-review"><h2>What limited this run?</h2>'
+        f'<p>{escape(str(review.get("overall_assessment") or ""))}</p>'
+        + "".join(findings)
+        + '<p class="subtle">These are owner-reviewable hypotheses, not product '
+        'decisions. The internal test ranked nothing.</p></section>'
+    )
+
+
 def render_dashboard_html(data: dict[str, Any]) -> str:
     """Render one dependency-free, offline, keyboard-accessible HTML document."""
     summary = data["summary"]
@@ -320,6 +351,7 @@ def render_dashboard_html(data: dict[str, Any]) -> str:
         f"<dt>{escape(label)}</dt><dd>{escape(str(value or 'none'))}</dd>"
         for label, value in contract_rows
     )
+    capability_html = _capability_review(data)
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -339,6 +371,7 @@ main{{max-width:1120px;margin:auto;padding:32px 20px 64px}} h1{{margin:.2rem 0}}
 .journey{{display:grid;gap:8px;padding-left:20px}} .journey li{{padding:10px;border-left:4px solid var(--green)}} .journey li.unmeasured{{border-color:var(--amber)}} .journey span,.journey small{{display:block}}
 .toolbar{{display:flex;gap:10px;margin-bottom:12px}} input{{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font:inherit}} details.feature{{border-top:1px solid var(--line);padding:10px 0}} details.feature[hidden]{{display:none}} summary{{display:grid;grid-template-columns:minmax(140px,1fr) auto 2fr;gap:10px;cursor:pointer;align-items:center}} code,pre{{font-family:ui-monospace,SFMono-Regular,monospace}} .pill{{background:#eef2ff;color:#3346a8;border-radius:999px;padding:2px 8px;font-size:.8rem}} dl{{display:grid;grid-template-columns:180px 1fr;gap:8px 16px}} dt{{font-weight:700}} dd{{margin:0}} pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f5f7;padding:10px;border-radius:8px}}
 .notice{{border-left:5px solid var(--green);padding:12px 14px;margin:8px 0;background:var(--card)}} .notice.warning{{border-color:var(--amber)}} .notice.danger{{border-color:var(--red)}} .notice p{{margin:.2rem 0 0}} footer{{color:var(--muted);margin-top:28px}}
+.capability-finding{{border-top:1px solid var(--line);padding:10px 0}} .capability-finding h3{{margin:.25rem 0}} .capability-finding details{{margin-top:8px}}
 @media(max-width:760px){{.grid{{grid-template-columns:1fr 1fr}}summary{{grid-template-columns:1fr}}.split{{display:grid}}dl{{grid-template-columns:1fr}}}}
 @media print{{body{{background:white}}section,.card{{box-shadow:none;break-inside:avoid}}input{{display:none}}}}
 @media(prefers-color-scheme:dark){{:root{{--ink:#f2f4f7;--muted:#aeb8c4;--paper:#101828;--card:#182230;--line:#344054}}.split li,pre{{background:#202b3c}}}}
@@ -364,6 +397,7 @@ main{{max-width:1120px;margin:auto;padding:32px 20px 64px}} h1{{margin:.2rem 0}}
 <details><summary>Use these learned features in your own model</summary><pre>train = run.training_features()
 test = run.bundle.feature_table(new_rows)
 # train[run.bundle.feature_names] and test now share the same ordered columns</pre></details></section>
+{capability_html}
 <section><h2>Warnings and limits</h2>{warning_html}</section>
 <footer>Generated from finalized run facts. This report never recomputes scores or selects a model. See run_report.json for the same sanitized data.</footer>
 </main>

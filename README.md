@@ -212,8 +212,32 @@ no training rows, target values, fitted lookup values, or other raw data.
 The bundle takes the same raw rows you started with and replays the exact feature
 lineage — no separate preprocessing to reproduce. The report is written to be read
 without insider knowledge: it separates the search winner from what actually
-ships, and flags where a score is optimistic. An excerpt from a real House Prices
-run:
+ships, and flags where a score is optimistic.
+
+### Learn from limitations across runs
+
+After a run is finalized, you can request a separate evidence-bound postmortem:
+
+    review = agent.review_capabilities(run)
+    print(review["overall_assessment"])
+
+    backlog = ta.capability_backlog([run, another_run])
+
+This is an explicit additional LLM call, not a hidden part of training. The
+reviewer receives sanitized aggregate evidence, has no tools, and cannot fit,
+score, re-rank, or ship a model. It classifies findings such as a missing generic
+capability, an agent miss, a tool defect, a model/selection limitation, or a
+data-contract problem. Every finding cites recorded evidence and includes a
+falsifiable hypothesis plus an alternative explanation.
+
+The result is written once to capability_review.json and added to the Markdown,
+JSON, and HTML reports under **What limited this run?**. Repeated reviews return
+that artifact rather than calling the model again. Across runs, matching
+fingerprints become proposed or recurring; they never become accepted product
+changes automatically. Acceptance still requires an owner-preregistered test on
+an unseen run.
+
+An excerpt from a real House Prices run:
 
 ```text
 # Run Report
