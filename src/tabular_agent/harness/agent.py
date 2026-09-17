@@ -761,6 +761,32 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
     return agent
 
 
+#: Requests one agent run may make before PydanticAI stops it. Its default is 50,
+#: which a rich dataset exhausts on feature experiments *before* it can finalize —
+#: the run then raised `UsageLimitExceeded` and shipped nothing (Rossmann,
+#: 2026-09-16, ~900k rows). Raised to a generous ceiling, and the ceiling is caught
+#: below so hitting it finalizes whatever the search built rather than throwing —
+#: the same "an interrupted search still ships" stance as the episode stop (0024).
+REQUEST_LIMIT = 300
+
+
 def run(session: RunSession, prompt: str, model=DEFAULT_MODEL):
-    """Drive one agent run against ``session``. Returns the PydanticAI result."""
-    return build_agent(model, profile=session.profile).run_sync(prompt, deps=Deps(session=session))
+    """Drive one agent run against ``session``.
+
+    Returns the PydanticAI result, or ``None`` if the request ceiling was hit. The
+    caller finalizes what the search built either way (see `Agent.run`), so a long
+    search that runs out of requests degrades to "ship what we have" instead of
+    crashing with no bundle.
+    """
+    from pydantic_ai.exceptions import UsageLimitExceeded
+    from pydantic_ai.usage import UsageLimits
+
+    agent = build_agent(model, profile=session.profile)
+    try:
+        return agent.run_sync(
+            prompt,
+            deps=Deps(session=session),
+            usage_limits=UsageLimits(request_limit=REQUEST_LIMIT),
+        )
+    except UsageLimitExceeded:
+        return None

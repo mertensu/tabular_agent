@@ -326,3 +326,22 @@ def test_a_real_bug_still_stops_the_run():
 
     with pytest.raises(KeyError):
         _retryable(boom)
+
+
+def test_run_returns_none_when_request_ceiling_hit(monkeypatch):
+    """A long feature search that exhausts the request ceiling must not crash the
+    run: run() catches UsageLimitExceeded and returns None so the caller finalizes
+    whatever was built (Rossmann 2026-09-16)."""
+    from pydantic_ai.exceptions import UsageLimitExceeded
+
+    from tabular_agent.harness import agent as agent_mod
+
+    class _Stub:
+        def run_sync(self, *a, **k):
+            raise UsageLimitExceeded("ceiling")
+
+    class _Session:
+        profile = "minimal"
+
+    monkeypatch.setattr(agent_mod, "build_agent", lambda *a, **k: _Stub())
+    assert agent_mod.run(_Session(), "build the best table") is None
