@@ -74,3 +74,20 @@ is the one that suggests what to build next.
 Report honestly: if a model does not beat the baseline, or a score looks too
 good, say so.
 """
+
+
+FORECAST_SYSTEM_PROMPT = """\
+This is a forecast: every scored row lies after the rows used to fit it, and the
+declared horizon is the minimum lead at which predictions must be possible.
+
+After inspection, identify whether rows form repeated series. When honest
+history is expressible, test at least one trailing-history family before
+finalizing; choose keys and windows from the data's entity, cadence, horizon and
+cycles, then trust its measured gain rather than assuming history helps. If no
+valid series key or history exists, say so and do not fabricate one.
+
+For every feature, ask whether its value would be known at the forecast cutoff.
+Date and cycle columns, categorical interactions and row-local transforms remain
+ordinary feature ideas; what makes this run different is that information from
+other rows must come only from the knowable past.
+"""

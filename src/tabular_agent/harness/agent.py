@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from . import tools
 from .brief import render_brief
-from .instructions import SYSTEM_PROMPT
+from .instructions import FORECAST_SYSTEM_PROMPT, SYSTEM_PROMPT
 from .session import RunSession
 
 #: Default model. Any PydanticAI model string works — `openai:gpt-...`,
@@ -176,6 +176,10 @@ def _build_minimal_agent(model):
     )
 
     @agent.system_prompt(dynamic=True)
+    def workflow_contract(ctx: RunContext[Deps]) -> str:
+        return FORECAST_SYSTEM_PROMPT if ctx.deps.session.workflow == "forecast" else ""
+
+    @agent.system_prompt(dynamic=True)
     def run_state(ctx: RunContext[Deps]) -> str:
         return render_brief(ctx.deps.session) or ""
 
@@ -228,8 +232,8 @@ def _build_minimal_agent(model):
     return agent
 
 
-def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
-    """An agent whose *entire* tool surface is the ten functions below.
+def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "general"):
+    """An agent whose entire tool surface is selected by profile and workflow.
 
     ``model`` is either a PydanticAI model string (``"anthropic:..."``,
     ``"openai:..."``, ``"google:..."``) or a ``Model`` object — e.g. from
@@ -238,7 +242,13 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
     """
     if profile not in {"full", "minimal"}:
         raise ValueError(f"unknown agent profile {profile!r}; use 'full' or 'minimal'")
+    if workflow not in {"general", "iid", "forecast"}:
+        raise ValueError(
+            f"unknown agent workflow {workflow!r}; use 'general', 'iid', or 'forecast'"
+        )
     if profile == "minimal":
+        if workflow == "forecast":
+            raise ValueError("the forecast workflow requires the full profile")
         return _build_minimal_agent(model)
 
     from pydantic_ai import Agent, RunContext
@@ -274,6 +284,10 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
     # A driver that wants ordering as well can wrap its run in
     # `agent.parallel_tool_call_execution_mode("sequential")`; nothing depends on
     # it for correctness.
+
+    @agent.system_prompt(dynamic=True)
+    def workflow_contract(ctx: RunContext[Deps]) -> str:
+        return FORECAST_SYSTEM_PROMPT if ctx.deps.session.workflow == "forecast" else ""
 
     @agent.system_prompt(dynamic=True)
     def run_state(ctx: RunContext[Deps]) -> str:
@@ -388,7 +402,6 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
             ctx,
         )
 
-    @agent.tool
     def fit_history(
         ctx: RunContext[Deps],
         by: list[str],
@@ -463,7 +476,9 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
             ctx,
         )
 
-    @agent.tool
+    if workflow != "iid":
+        agent.tool(fit_history)
+
     def fit_stream_aggregate(
         ctx: RunContext[Deps],
         stream: str,
@@ -519,6 +534,9 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
             ),
             ctx,
         )
+
+    if workflow != "iid":
+        agent.tool(fit_stream_aggregate)
 
     @agent.tool
     def filter_rows(
@@ -781,7 +799,9 @@ def run(session: RunSession, prompt: str, model=DEFAULT_MODEL):
     from pydantic_ai.exceptions import UsageLimitExceeded
     from pydantic_ai.usage import UsageLimits
 
-    agent = build_agent(model, profile=session.profile)
+    agent = build_agent(
+        model, profile=session.profile, workflow=getattr(session, "workflow", "general")
+    )
     try:
         return agent.run_sync(
             prompt,

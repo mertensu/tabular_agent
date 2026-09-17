@@ -345,3 +345,53 @@ def test_run_returns_none_when_request_ceiling_hit(monkeypatch):
 
     monkeypatch.setattr(agent_mod, "build_agent", lambda *a, **k: _Stub())
     assert agent_mod.run(_Session(), "build the best table") is None
+
+
+def test_iid_and_forecast_workflows_expose_distinct_temporal_tools():
+    iid_tools = set(build_agent(workflow="iid")._function_toolset.tools)
+    forecast_tools = set(build_agent(workflow="forecast")._function_toolset.tools)
+
+    assert iid_tools == EXPECTED_TOOLS - {"fit_history", "fit_stream_aggregate"}
+    assert forecast_tools == EXPECTED_TOOLS
+
+
+def test_forecast_contract_reaches_only_forecast_runs(tmp_path):
+    import pandas as pd
+    from pydantic_ai.models.test import TestModel
+
+    from tabular_agent.harness.agent import Deps
+    from tabular_agent.harness.session import RunSession
+    from tabular_agent.taskspec import TaskSpec
+
+    path = tmp_path / "d.csv"
+    pd.DataFrame({
+        "Date": pd.date_range("2024-01-01", periods=40),
+        "Store": [1, 2] * 20,
+        "y": range(40),
+    }).to_csv(path, index=False)
+
+    def system_text(session, workflow):
+        agent = build_agent(TestModel(call_tools=[]), workflow=workflow)
+        result = agent.run_sync("go", deps=Deps(session=session))
+        return "\n".join(
+            part.content
+            for message in result.all_messages()
+            for part in message.parts
+            if part.__class__.__name__ == "SystemPromptPart"
+        )
+
+    iid = RunSession(
+        str(tmp_path / "iid"), str(path), TaskSpec(target="y"),
+        workflow="iid",
+    )
+    forecast = RunSession(
+        str(tmp_path / "forecast"), str(path),
+        TaskSpec(target="y", forecast_horizon=7),
+        split_on="Date", workflow="forecast",
+    )
+
+    assert "This is a forecast" not in system_text(iid, "iid")
+    text = system_text(forecast, "forecast")
+    assert "This is a forecast" in text
+    assert "categorical interactions" in text
+    assert "trailing-history family" in text

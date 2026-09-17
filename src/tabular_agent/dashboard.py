@@ -330,11 +330,17 @@ def render_dashboard_html(data: dict[str, Any]) -> str:
         f'{escape(item["title"])}</strong><p>{escape(item["message"])}</p></article>'
         for item in data["warnings"]
     ) or '<article class="notice ok"><strong>No report warnings</strong><p>The recorded checks passed.</p></article>'
-    split_mode = (
-        f"ordered by {split.get('split_on')}"
-        if split.get("split_on")
-        else "random, stratified" if split.get("stratified") else "random"
-    )
+    if split.get("workflow") == "forecast":
+        split_mode = (
+            f"forecast ordered by {split.get('split_on')}, "
+            f"horizon {split.get('forecast_horizon')}"
+        )
+    else:
+        split_mode = (
+            f"ordered by {split.get('split_on')}"
+            if split.get("split_on")
+            else "random, stratified" if split.get("stratified") else "random"
+        )
     split_cards = "".join(
         f"<li><strong>{escape(label)}</strong><span>{escape(str(split.get(key, 0)))} rows</span></li>"
         for label, key in (("Work", "n_work"), ("Validation", "n_val"), ("Test", "n_holdout"))

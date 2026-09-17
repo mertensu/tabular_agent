@@ -126,3 +126,15 @@ def test_metric_direction_controls_baseline_gain():
     assert rmse["summary"]["gain_vs_baseline"] == pytest.approx(0.1)
     assert accuracy["summary"]["beats_baseline"] is True
     assert rmse["summary"]["beats_baseline"] is True
+
+
+def test_dashboard_names_the_forecast_cutoff_contract():
+    html = render_dashboard_html(_data(split={
+        "workflow": "forecast",
+        "n_work": 80,
+        "n_val": 10,
+        "n_holdout": 10,
+        "split_on": "Date",
+        "forecast_horizon": 42,
+    }))
+    assert "forecast ordered by Date, horizon 42" in html

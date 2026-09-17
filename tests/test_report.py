@@ -158,3 +158,24 @@ def test_ordered_accuracy_report_does_not_claim_binomial_uncertainty():
         split={"n_work": 80, "n_val": 20, "n_holdout": 0, "split_on": "date"},
     )
     assert "row-level 95% interval" not in text
+
+
+def test_report_names_the_forecast_cutoff_contract():
+    text = build_report(
+        task_type="regression",
+        metric="rmse",
+        selection_score=0.2,
+        fold_metrics=[0.2],
+        baseline_score=0.5,
+        model_types=["lgbm"],
+        feature_names=["x"],
+        split={
+            "workflow": "forecast",
+            "n_work": 80,
+            "n_val": 10,
+            "n_holdout": 10,
+            "split_on": "Date",
+            "forecast_horizon": 42,
+        },
+    )
+    assert "forecast ordered by `Date`, horizon 42" in text

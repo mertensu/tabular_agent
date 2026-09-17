@@ -245,11 +245,17 @@ def build_report(
         # what it was worth, and the reader needs both to read the third.
         lines.insert(score_insert, f"- **Shipped test score (scored once):** {sealed}")
     if split:
-        where = (
-            f"ordered by `{split['split_on']}`"
-            if split.get("split_on")
-            else "random, stratified" if split.get("stratified") else "random"
-        )
+        if split.get("workflow") == "forecast":
+            where = (
+                f"forecast ordered by `{split['split_on']}`, "
+                f"horizon {split.get('forecast_horizon')}"
+            )
+        else:
+            where = (
+                f"ordered by `{split['split_on']}`"
+                if split.get("split_on")
+                else "random, stratified" if split.get("stratified") else "random"
+            )
         sealed_rows = (
             f" / {split['n_holdout']} test" if split.get("n_holdout") else ""
         )

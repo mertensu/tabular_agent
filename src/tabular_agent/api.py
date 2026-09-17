@@ -185,6 +185,15 @@ class DataPlan:
                 f"date/time candidates: {_preview(self.ordering_candidates)}",
                 "set: plan.split_on = '<column>' (ordered) or False (random)")),
         )
+        if isinstance(self.split_on, str):
+            _row(
+                self.forecast_horizon is not None and self.forecast_horizon > 0,
+                "forecast_horizon",
+                str(self.forecast_horizon) if self.forecast_horizon else "not set",
+                *(() if self.forecast_horizon else (
+                    "set: plan.forecast_horizon = <positive lead>",
+                )),
+            )
         _row(
             self.identifier_columns is not None,
             "identifier_columns",
@@ -578,7 +587,9 @@ class Run:
 
 
 class Agent:
-    """Thin public facade; every safety decision remains enforced by RunSession."""
+    """Agent for row-wise tabular problems whose rows may be split at random."""
+
+    workflow = "iid"
 
     def __init__(
         self,
@@ -640,11 +651,21 @@ class Agent:
         run_dir = run.run_dir if isinstance(run, Run) else run
         return review_capabilities(run_dir, model=self._resolved_model())
 
+    def _validate_workflow(self, plan: DataPlan) -> None:
+        if plan.split_on is not False or plan.forecast_horizon is not None:
+            raise ValueError(
+                "Agent is for independent rows and requires plan.split_on = False; "
+                "use ForecastingAgent for predictions into the future"
+            )
+
     def run(self, plan: DataPlan, prompt: str | None = None) -> Run:
         plan.validate()
+        self._validate_workflow(plan)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         run_dir = self.run_root / f"{stamp}-{uuid4().hex[:8]}"
         data_path, manifest = plan.materialize(run_dir)
+        manifest["workflow"] = self.workflow
+        manifest["forecast_horizon"] = plan.forecast_horizon
         spec = TaskSpec(
             target=str(plan.target),
             task_type=plan.task_type,
@@ -666,6 +687,7 @@ class Agent:
             serving_columns=plan.serving_columns,
             fit_time_budget_s=self.fit_time_budget_s,
             profile=self.profile,
+            workflow=self.workflow,
         )
         run_agent(
             session,
@@ -685,3 +707,42 @@ class Agent:
             json.dump(manifest, handle, indent=2)
         update_dashboard_contract(str(run_dir), manifest)
         return Run(run_dir)
+
+
+class ForecastingAgent(Agent):
+    """Agent for future prediction under an explicit time and horizon contract.
+
+    It shares the complete execution engine with Agent, but exposes the
+    time-aware tool vocabulary and refuses to run until both the ordering column
+    and minimum forecast horizon are confirmed.
+    """
+
+    workflow = "forecast"
+
+    def __init__(
+        self,
+        model: Any = "anthropic:claude-opus-5",
+        *,
+        run_root: str | os.PathLike = "runs",
+        val_fraction: float = 0.2,
+        holdout_fraction: float | None = None,
+        fit_time_budget_s: float | None = None,
+    ):
+        super().__init__(
+            model,
+            profile="full",
+            run_root=run_root,
+            val_fraction=val_fraction,
+            holdout_fraction=holdout_fraction,
+            fit_time_budget_s=fit_time_budget_s,
+        )
+
+    def _validate_workflow(self, plan: DataPlan) -> None:
+        if not isinstance(plan.split_on, str):
+            raise ValueError(
+                "ForecastingAgent requires plan.split_on to name the confirmed time column"
+            )
+        if plan.forecast_horizon is None or plan.forecast_horizon <= 0:
+            raise ValueError(
+                "ForecastingAgent requires a positive plan.forecast_horizon"
+            )

@@ -133,7 +133,7 @@ passed through verbatim; the agent structures the free text itself.
 ```python
 import tabular_agent as ta
 
-agent = ta.Agent()                      # uses the default Anthropic provider
+agent = ta.ForecastingAgent()           # use ta.Agent() for independent rows
 plan = agent.inspect("path/to/folder")  # profiles every file, proposes nothing final
 ```
 
@@ -173,12 +173,21 @@ Confirm the handful of facts only you know, then run:
 ```python
 plan.target = "Sales"                    # what to predict
 plan.serving_columns = ["Store", "Date", "Promo"]  # what exists at predict time
-plan.split_on = "Date"                   # ordered split for a forecast; or False for a random split
+plan.split_on = "Date"                   # confirmed ordering column
+plan.forecast_horizon = 42               # minimum lead predictions must support
 plan.accept_identifier_proposals()       # or reject_identifier_proposals()
 plan.reject_joins()                      # or accept_joins()
 
 run = agent.run(plan)                     # builds features, evaluates, finalizes
 ```
+
+Choose the public contract explicitly: `ta.Agent()` is for independent rows and
+requires `plan.split_on = False`; it does not expose history or time-aware
+stream tools. `ta.ForecastingAgent()` is for prediction into the future and
+requires both a time column and a positive horizon. It uses the same engine,
+encoders, sandbox, models, bundle and reports, while adding the temporal contract
+and tools. Categorical interactions and row-local transforms remain available in
+both.
 
 You confirm by setting these attributes on the plan — plain Python, no wizard. If
 you forget one, `agent.run(plan)` refuses before doing any work and names exactly
@@ -186,7 +195,8 @@ what is still unconfirmed, so you cannot start a run on an unstated assumption.
 
 Working from a single DataFrame in a notebook works too — pass it to `inspect(df)`,
 set `serving_columns` to the columns you'll have at prediction time, and choose
-`split_on`.
+the matching agent contract. For independent rows set `split_on = False`; for a
+forecast use `ForecastingAgent`, an ordering column, and `forecast_horizon`.
 
 ## What you get back
 
