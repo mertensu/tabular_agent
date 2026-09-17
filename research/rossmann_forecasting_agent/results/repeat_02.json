@@ -1,0 +1,216 @@
+{
+  "acceptance": "forecasting_agent_repeat",
+  "repeat": 2,
+  "created_at": "2026-09-17T12:16:33.884829+00:00",
+  "git_commit": "f1ae4651cf8ccd236c00eb23af4f016c74f8e6a7",
+  "model": "deepseek-v4-flash-0731@eu",
+  "run_dir": "/opt/data/workspace/tabular_agent_fc/_runs/rossmann_forecasting_agent/repeat_02/20260917T113458Z-b566a5c9",
+  "elapsed_minutes": 41.02,
+  "workflow": "forecast",
+  "forecast_horizon": 48.0,
+  "history_attempted": true,
+  "history_tables": [
+    {
+      "id": "t6",
+      "source_table": "tables/t5.parquet",
+      "new_columns": [
+        "Store_Sales_60_mean",
+        "Store_Sales_90_mean",
+        "Store_Sales_180_mean",
+        "Store_Sales_365_mean",
+        "Store_Sales_90_median",
+        "Store_Sales_180_std",
+        "Store_Sales_60_count",
+        "Store_Sales_90_count",
+        "Store_Sales_180_count",
+        "Store_Sales_365_count"
+      ],
+      "probe_score": 0.159567,
+      "probe_vs_source_table": 0.013641
+    },
+    {
+      "id": "t7",
+      "source_table": "tables/t6.parquet",
+      "new_columns": [
+        "Store_Sales_730_mean",
+        "Store_Sales_730_median",
+        "Store_Sales_730_count"
+      ],
+      "probe_score": 0.216476,
+      "probe_vs_source_table": -0.056909
+    },
+    {
+      "id": "t9",
+      "source_table": "tables/t6.parquet",
+      "new_columns": [
+        "Store_DayOfWeek_Sales_90_mean",
+        "Store_DayOfWeek_Sales_180_mean",
+        "Store_DayOfWeek_Sales_365_mean",
+        "Store_DayOfWeek_Sales_90_count",
+        "Store_DayOfWeek_Sales_180_count",
+        "Store_DayOfWeek_Sales_365_count"
+      ],
+      "probe_score": 0.14153,
+      "probe_vs_source_table": 0.018037
+    },
+    {
+      "id": "t10",
+      "source_table": "tables/t9.parquet",
+      "new_columns": [
+        "Store_DayOfWeek_Sales_60_mean",
+        "Store_DayOfWeek_Sales_60_median",
+        "Store_DayOfWeek_Sales_60_count"
+      ],
+      "probe_score": 0.141476,
+      "probe_vs_source_table": 5.4e-05
+    },
+    {
+      "id": "t14",
+      "source_table": "tables/t11.parquet",
+      "new_columns": [
+        "Store_DayOfWeek_Sales_540_mean",
+        "Store_DayOfWeek_Sales_540_count"
+      ],
+      "probe_score": 0.13643,
+      "probe_vs_source_table": 0.002212
+    },
+    {
+      "id": "t15",
+      "source_table": "tables/t14.parquet",
+      "new_columns": [
+        "Store_DayOfWeek_Promo_Sales_90_mean",
+        "Store_DayOfWeek_Promo_Sales_180_mean",
+        "Store_DayOfWeek_Promo_Sales_365_mean",
+        "Store_DayOfWeek_Promo_Sales_90_count",
+        "Store_DayOfWeek_Promo_Sales_180_count",
+        "Store_DayOfWeek_Promo_Sales_365_count"
+      ],
+      "probe_score": 0.145071,
+      "probe_vs_source_table": -0.008641
+    }
+  ],
+  "n_tables": 20,
+  "shipped_feature_count": 51,
+  "summary": {
+    "task_type": "regression",
+    "metric": "rmspe",
+    "direction": "lower",
+    "validation_score": 0.179528,
+    "validation_se": null,
+    "test_score": 0.148029,
+    "baseline_score": 0.7786564623476767,
+    "gain_vs_baseline": 0.5991284623476767,
+    "beats_baseline": true,
+    "cv_score": null
+  },
+  "models": [
+    {
+      "experiment_id": "e2",
+      "model_type": "lgbm",
+      "selected": true,
+      "shipped": false,
+      "val_score": 0.13642964280084371,
+      "holdout_score": 0.157944,
+      "optimism": 0.021515
+    },
+    {
+      "experiment_id": "e3",
+      "model_type": "xgb",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.16286746951294784,
+      "holdout_score": 0.20809,
+      "optimism": 0.045223
+    },
+    {
+      "experiment_id": "e4",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.21896978570034717,
+      "holdout_score": 0.202125,
+      "optimism": -0.016844
+    },
+    {
+      "experiment_id": "e5",
+      "model_type": "elasticnet",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.20228671567293693,
+      "holdout_score": 0.198851,
+      "optimism": -0.003436
+    },
+    {
+      "experiment_id": "e6",
+      "model_type": "lgbm",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.33879186282383256,
+      "holdout_score": 0.323859,
+      "optimism": -0.014933
+    },
+    {
+      "experiment_id": "e7",
+      "model_type": "xgb",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.3564767737911609,
+      "holdout_score": 0.345694,
+      "optimism": -0.010783
+    },
+    {
+      "experiment_id": "e8",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.2925755251197118,
+      "holdout_score": 0.249402,
+      "optimism": -0.043173
+    },
+    {
+      "experiment_id": "blend",
+      "model_type": "blend(lgbm+xgb+catboost+elasticnet+lgbm+xgb+catboost)",
+      "selected": false,
+      "shipped": true,
+      "val_score": 0.179528,
+      "holdout_score": 0.148029,
+      "optimism": -0.031499
+    }
+  ],
+  "predictions": {
+    "rows": 41088,
+    "finite": true,
+    "minimum": 0.0,
+    "maximum": 28893.717589963235
+  },
+  "capability_review": {
+    "schema_version": 1,
+    "status": "proposed",
+    "scope": "post-finalization diagnosis; no model or tool decision",
+    "overall_assessment": "Time-forecast regression (RMSPE) beats baseline substantially (validation 0.1795 vs 0.7787) via a long feature-engineering chain: calendar transforms, frequency/target encodings, and store and store\u00d7day-of-week lag-history steps. That pathway appears fully expressible \u2014 every feature attempt was produced and measured; a feature-attribution warning (step 1 never measured individually) is a measurement caveat, not a capability or tool gap. The dominant limitation is ensemble selection: the shipped weighted blend (0.1795 validation) is materially worse than its best evaluated member (LGBM, 0.1364), yet carries ~0.41 weight on members scoring 0.29\u20130.36. The only basis on which the blend beats its members is the internal holdout (0.148 vs 0.158), which is retrospective-only and not a valid selection criterion. The model-selection step cannot be relied upon without re-validation on the same split used to judge members.",
+    "findings": [
+      {
+        "category": "model_selection_gap",
+        "title": "Shipped blend underperforms its best member on the reporting split; selection appears conditioned on internal holdout",
+        "generic_capability_key": "ensemble_weight_selection_on_valid_split",
+        "generic_capability": "Choosing and weighting an ensemble of heterogeneous tabular models so that the shipped ensemble is not worse than its best individual member on the same evaluation split used to report quality, and so that member/weight selection never conditions on internal test outcomes.",
+        "evidence_refs": [
+          "model:blend",
+          "model:e2",
+          "model:e6",
+          "model:e7",
+          "model:e8",
+          "shipped",
+          "summary"
+        ],
+        "existing_tools_considered": [],
+        "why_existing_tools_insufficient": "Ensemble tooling was available and used (weighted blend across LGBM/XGB/CatBoost/ElasticNet plus variants), so this is not a missing-capability limitation. The limitation is in how outputs are combined and selected: the shipped blend reaches 0.1795 validation RMSPE while a single member (e2, LGBM) reaches 0.1364, and the blend carries ~0.41 total weight on members (e6/e7/e8) with validation scores of 0.29\u20130.36. A validation-aligned weighting would place little or no weight on those members. The only basis on which the shipped blend beats its members is the internal holdout (0.148 vs 0.158), i.e., selection was driven by test-side evidence. No tool exposes a selection objective that judges the blend and its members on the same valid split, so the existing tools were insufficient to make this choice defensibly.",
+        "alternative_explanation": "Weights might have been chosen deliberately for diversity/correlation to hedge regime shifts, so the individually weak members could add robustness on future data. But the shipped weights are still not demonstrated to beat the best member on the reporting split, and that rationale is not evidenced from validation alone.",
+        "leakage_or_serving_risk": "If the shipped weights were fit or checked against the internal holdout, the reported test score is optimism-inflated and must not be reused to justify the shipment. Serving uses target-encoded and lag/history features that must be recomputed from past periods only; using in-period target values or validation labels would inflate validation and the CV-vs-validation mismatch (member CV ~0.26 vs validation ~0.136).",
+        "testable_hypothesis": "On a nested time-based split, refit blend weights on validation only \u2014 excluding members that do not improve validation RMSPE and never consulting the internal holdout \u2014 then the resulting ensemble has validation RMSPE at or below the best individual member (~0.136), and any apparent holdout advantage of the current weight vector disappears when weights are refit to validation.",
+        "confidence": "medium",
+        "fingerprint": "3a4b864268a792b9"
+      }
+    ]
+  }
+}

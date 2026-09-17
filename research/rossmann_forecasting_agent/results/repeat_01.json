@@ -1,0 +1,212 @@
+{
+  "acceptance": "forecasting_agent_repeat",
+  "repeat": 1,
+  "created_at": "2026-09-17T11:34:38.304856+00:00",
+  "git_commit": "f1ae4651cf8ccd236c00eb23af4f016c74f8e6a7",
+  "model": "deepseek-v4-flash-0731@eu",
+  "run_dir": "/opt/data/workspace/tabular_agent_fc/_runs/rossmann_forecasting_agent/repeat_01/20260917T110517Z-2ab9c666",
+  "elapsed_minutes": 28.21,
+  "workflow": "forecast",
+  "forecast_horizon": 48.0,
+  "history_attempted": true,
+  "history_tables": [
+    {
+      "id": "t4",
+      "source_table": "tables/t2.parquet",
+      "new_columns": [
+        "Store_Sales_90_mean",
+        "Store_Sales_180_mean",
+        "Store_Sales_365_mean",
+        "Store_Sales_90_count",
+        "Store_Sales_180_count",
+        "Store_Sales_365_count"
+      ],
+      "probe_score": 0.166124,
+      "probe_vs_source_table": 0.059011
+    },
+    {
+      "id": "t5",
+      "source_table": "tables/t2.parquet",
+      "new_columns": [
+        "Store_DayOfWeek_Sales_84_mean",
+        "Store_DayOfWeek_Sales_180_mean",
+        "Store_DayOfWeek_Sales_84_count",
+        "Store_DayOfWeek_Sales_180_count"
+      ],
+      "probe_score": 0.141246,
+      "probe_vs_source_table": 0.083889
+    },
+    {
+      "id": "t6",
+      "source_table": "tables/t5.parquet",
+      "new_columns": [
+        "Store_Sales_90_mean",
+        "Store_Sales_180_mean",
+        "Store_Sales_365_mean",
+        "Store_Sales_90_count",
+        "Store_Sales_180_count",
+        "Store_Sales_365_count"
+      ],
+      "probe_score": 0.139182,
+      "probe_vs_source_table": 0.002064
+    },
+    {
+      "id": "t7",
+      "source_table": "tables/t6.parquet",
+      "new_columns": [
+        "Store_DayOfWeek_Promo_Sales_180_mean",
+        "Store_DayOfWeek_Promo_Sales_365_mean",
+        "Store_DayOfWeek_Promo_Sales_180_count",
+        "Store_DayOfWeek_Promo_Sales_365_count"
+      ],
+      "probe_score": 0.129071,
+      "probe_vs_source_table": 0.010111
+    }
+  ],
+  "n_tables": 15,
+  "shipped_feature_count": 38,
+  "summary": {
+    "task_type": "regression",
+    "metric": "rmspe",
+    "direction": "lower",
+    "validation_score": 0.128791,
+    "validation_se": null,
+    "test_score": 0.130706,
+    "baseline_score": 0.7786564623476767,
+    "gain_vs_baseline": 0.6498654623476767,
+    "beats_baseline": true,
+    "cv_score": null
+  },
+  "models": [
+    {
+      "experiment_id": "e3",
+      "model_type": "xgb",
+      "selected": true,
+      "shipped": false,
+      "val_score": 0.12453323708174588,
+      "holdout_score": 0.130179,
+      "optimism": 0.005645
+    },
+    {
+      "experiment_id": "e2",
+      "model_type": "lgbm",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.12649969899413788,
+      "holdout_score": 0.134372,
+      "optimism": 0.007873
+    },
+    {
+      "experiment_id": "e4",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.13776945931635734,
+      "holdout_score": 0.130501,
+      "optimism": -0.007269
+    },
+    {
+      "experiment_id": "e5",
+      "model_type": "elasticnet",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.20815453400185743,
+      "holdout_score": 0.213737,
+      "optimism": 0.005583
+    },
+    {
+      "experiment_id": "e6",
+      "model_type": "lgbm",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.1396601243743961,
+      "holdout_score": 0.134574,
+      "optimism": -0.005086
+    },
+    {
+      "experiment_id": "e7",
+      "model_type": "xgb",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.13641863713984875,
+      "holdout_score": 0.13439,
+      "optimism": -0.002028
+    },
+    {
+      "experiment_id": "e8",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.139139652458044,
+      "holdout_score": 0.144124,
+      "optimism": 0.004984
+    },
+    {
+      "experiment_id": "blend",
+      "model_type": "blend(lgbm+xgb+catboost+elasticnet+lgbm+xgb+catboost)",
+      "selected": false,
+      "shipped": true,
+      "val_score": 0.128791,
+      "holdout_score": 0.130706,
+      "optimism": 0.001915
+    }
+  ],
+  "predictions": {
+    "rows": 41088,
+    "finite": true,
+    "minimum": 0.0,
+    "maximum": 32183.22794751713
+  },
+  "capability_review": {
+    "schema_version": 1,
+    "status": "proposed",
+    "scope": "post-finalization diagnosis; no model or tool decision",
+    "overall_assessment": "The run finalized a forecast regression artifact that beats baseline substantially (validation RMSPE 0.1288 vs baseline 0.7787). Feature engineering plateaued near 0.127 after calendar transforms and several history/target-encoding steps; later probes gave no improvement, so there is no evidence of a missing feature tool. The evidenced shortcoming is in model selection/blending: the shipped weighted blend (val 0.1288, holdout 0.1307) is worse than the best single fitted candidate (xgb val 0.1245, holdout 0.1302) which was marked selected but not shipped, and the blend gives weight to a linear candidate that is far worse on the same objective (0.2082). This is a model_selection_gap in the blending/commitment decision, not a tool-expressibility failure. A second, lower-confidence data-contract concern: the shipped artifact relies on past-target aggregates and target encodings, yet the serving contract declares no required outcome stream and only a static store join; serving reproducibility of those features is unverified. Both are hypotheses for owner review, not grounds to refit or re-ship on retrospective scores.",
+    "findings": [
+      {
+        "category": "model_selection_gap",
+        "title": "Shipped blend underperforms the best validated single model on the selection objective",
+        "generic_capability_key": "ship_best_validated_forecast_artifact",
+        "generic_capability": "Producing the final forecast artifact (a single model or blend) whose validation error is no worse than the best individual candidate that was fitted on the same feature table.",
+        "evidence_refs": [
+          "model:e3",
+          "model:blend",
+          "model:e2",
+          "model:e5",
+          "summary",
+          "shipped"
+        ],
+        "existing_tools_considered": [],
+        "why_existing_tools_insufficient": "The fitting and finalize/blend tools were sufficient to construct a candidate with lower validation error; the shipped weighted blend (val 0.1288) is worse than the best single fitted model (val 0.1245) and assigns non-trivial weight to a regularized-linear candidate that scores 0.2082 on the same objective. No expressibility tool was missing; the limitation is in the blend-weighting and artifact-commit decision, which selected a strictly worse artifact than an available fitted candidate.",
+        "alternative_explanation": "The blend may have been chosen deliberately for temporal robustness or fold stability rather than point validation, or weights were tuned on a different objective/window; the single-model edge could fail to persist outside the sampled window, and the blend's small optimism (~0.002) suggests any re-weighting was not strongly over-fit.",
+        "leakage_or_serving_risk": "Blend weights appear tuned against the validation window, so re-using that window for selection decisions risks selection optimism. All candidates depend on target-encoding and past-outcome aggregates that must be reproducible from a forecast origin at serving time (see data-contract finding); none of the evaluated alternatives removes that dependency.",
+        "testable_hypothesis": "Rerunning an owner-approved finalization that ships the best validated single candidate (or a blend restricted to the top two candidates) achieves validation RMSPE <= 0.1245 and holdout RMSPE not worse than the shipped artifact when searched over a fresh time split.",
+        "confidence": "medium",
+        "fingerprint": "720032a92322436f"
+      },
+      {
+        "category": "data_contract_gap",
+        "title": "Forecast artifact depends on past-target aggregates and encodings not declared as a serving stream",
+        "generic_capability_key": "serve_artifact_with_target_derived_features",
+        "generic_capability": "Serving a forecast artifact whose features are derived from recent historical outcomes, so the serving contract must guarantee those observations are available at prediction time (or explicitly specify their recomputation source).",
+        "evidence_refs": [
+          "serving_contract",
+          "feature_step:3",
+          "feature_step:4",
+          "feature_step:5",
+          "feature_step:6",
+          "feature_step:7",
+          "shipped",
+          "split"
+        ],
+        "existing_tools_considered": [],
+        "why_existing_tools_insufficient": "The history and target-encoding feature tools could express these columns, so expressibility was not the issue. The gap is that the declared serving contract lists no required outcome stream and only a static store join, so it does not guarantee that the recent-outcome inputs (rolling means/counts, target encodings) used to build the shipped artifact are present, or state how they are derived, for a live multi-horizon forecast.",
+        "alternative_explanation": "The serving pipeline may recompute aggregates from an offline warehouse or store-specific history that simply is not captured in this contract, in which case the issue is documentation/completeness of the contract rather than an actual inability to serve.",
+        "leakage_or_serving_risk": "The split-on-Date workflow limits but does not fully rule out target-encoding/history features being computed over the full post-hoc table including the future validation window; if any feature used future outcomes, scores would be optimistically biased. Independently, live serving reproduction of these features is unverified, which is a deployment risk even if the offline score is valid.",
+        "testable_hypothesis": "An independent pipeline computing the shipped artifact's historical and target-encoding features from only the outcome prefix available at each forecast origin (never future rows) reproduces equivalent scores, and the serving contract explicitly lists that outcome stream as required.",
+        "confidence": "medium",
+        "fingerprint": "02aec76c6477b386"
+      }
+    ]
+  }
+}

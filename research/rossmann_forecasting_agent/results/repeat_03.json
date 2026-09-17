@@ -1,0 +1,244 @@
+{
+  "acceptance": "forecasting_agent_repeat",
+  "repeat": 3,
+  "created_at": "2026-09-17T12:40:30.202348+00:00",
+  "git_commit": "f1ae4651cf8ccd236c00eb23af4f016c74f8e6a7",
+  "model": "deepseek-v4-flash-0731@eu",
+  "run_dir": "/opt/data/workspace/tabular_agent_fc/_runs/rossmann_forecasting_agent/repeat_03/20260917T122323Z-75dfb3b0",
+  "elapsed_minutes": 16.48,
+  "workflow": "forecast",
+  "forecast_horizon": 48.0,
+  "history_attempted": true,
+  "history_tables": [
+    {
+      "id": "t8",
+      "source_table": "tables/t7.parquet",
+      "new_columns": [
+        "Store_Sales_90_mean",
+        "Store_Sales_180_mean",
+        "Store_Sales_365_mean",
+        "Store_Sales_90_count",
+        "Store_Sales_180_count",
+        "Store_Sales_365_count"
+      ],
+      "probe_score": 0.166088,
+      "probe_vs_source_table": 0.061948
+    },
+    {
+      "id": "t9",
+      "source_table": "tables/t7.parquet",
+      "new_columns": [
+        "Store_DayOfWeek_Sales_60_mean",
+        "Store_DayOfWeek_Sales_120_mean",
+        "Store_DayOfWeek_Sales_365_mean",
+        "Store_DayOfWeek_Sales_60_count",
+        "Store_DayOfWeek_Sales_120_count",
+        "Store_DayOfWeek_Sales_365_count"
+      ],
+      "probe_score": 0.133848,
+      "probe_vs_source_table": 0.094188
+    },
+    {
+      "id": "t10",
+      "source_table": "tables/t8.parquet",
+      "new_columns": [
+        "Store_DayOfWeek_Sales_120_mean",
+        "Store_DayOfWeek_Sales_365_mean",
+        "Store_DayOfWeek_Sales_120_count",
+        "Store_DayOfWeek_Sales_365_count"
+      ],
+      "probe_score": 0.13371,
+      "probe_vs_source_table": 0.032378
+    },
+    {
+      "id": "t20",
+      "source_table": "tables/t19.parquet",
+      "new_columns": [
+        "Store_Sales_90_mean",
+        "Store_Sales_180_mean",
+        "Store_Sales_365_mean",
+        "Store_Sales_90_count",
+        "Store_Sales_180_count",
+        "Store_Sales_365_count"
+      ],
+      "probe_score": 0.167616,
+      "probe_vs_source_table": 0.056767
+    },
+    {
+      "id": "t21",
+      "source_table": "tables/t19.parquet",
+      "new_columns": [
+        "Store_DayOfWeek_Sales_120_mean",
+        "Store_DayOfWeek_Sales_365_mean",
+        "Store_DayOfWeek_Sales_120_count",
+        "Store_DayOfWeek_Sales_365_count"
+      ],
+      "probe_score": 0.135446,
+      "probe_vs_source_table": 0.088937
+    }
+  ],
+  "n_tables": 21,
+  "shipped_feature_count": 36,
+  "summary": {
+    "task_type": "regression",
+    "metric": "rmspe",
+    "direction": "lower",
+    "validation_score": 0.134063,
+    "validation_se": null,
+    "test_score": 0.131516,
+    "baseline_score": 0.7786564623476767,
+    "gain_vs_baseline": 0.6445934623476768,
+    "beats_baseline": true,
+    "cv_score": null
+  },
+  "models": [
+    {
+      "experiment_id": "e2",
+      "model_type": "lgbm",
+      "selected": true,
+      "shipped": false,
+      "val_score": 0.13209411466072024,
+      "holdout_score": 0.138645,
+      "optimism": 0.00655
+    },
+    {
+      "experiment_id": "e3",
+      "model_type": "xgb",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.13566346358859196,
+      "holdout_score": 0.136212,
+      "optimism": 0.000549
+    },
+    {
+      "experiment_id": "e4",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.1426207277928053,
+      "holdout_score": 0.145575,
+      "optimism": 0.002954
+    },
+    {
+      "experiment_id": "e5",
+      "model_type": "elasticnet",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.20751775927606642,
+      "holdout_score": 0.209409,
+      "optimism": 0.001891
+    },
+    {
+      "experiment_id": "e6",
+      "model_type": "lgbm",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.14501620434078988,
+      "holdout_score": 0.135007,
+      "optimism": -0.010009
+    },
+    {
+      "experiment_id": "e7",
+      "model_type": "xgb",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.14397262541191008,
+      "holdout_score": 0.135552,
+      "optimism": -0.008421
+    },
+    {
+      "experiment_id": "e8",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.13877443484875704,
+      "holdout_score": 0.136947,
+      "optimism": -0.001827
+    },
+    {
+      "experiment_id": "blend",
+      "model_type": "blend(lgbm+xgb+catboost+elasticnet+lgbm+xgb+catboost)",
+      "selected": false,
+      "shipped": true,
+      "val_score": 0.134063,
+      "holdout_score": 0.131516,
+      "optimism": -0.002547
+    }
+  ],
+  "predictions": {
+    "rows": 41088,
+    "finite": true,
+    "minimum": 0.0,
+    "maximum": 32159.977492154947
+  },
+  "capability_review": {
+    "schema_version": 1,
+    "status": "proposed",
+    "scope": "post-finalization diagnosis; no model or tool decision",
+    "overall_assessment": "This finalized forecast run shipped a weighted blend of seven GBDT-family estimators (plus one linear baseline) on a time-ordered train/validation split, achieving validation RMSpe ~0.134 and held-out ~0.1315 versus a ~0.779 baseline\u2014a large, real gain with the available tools; no useful generic operation was inexpressible. Two methodology concerns (not capability gaps) could mislead later decisions: (1) internal CV scores (~0.25\u20130.29) disagree with the temporal validation (~0.132) by ~2x, indicating the CV fold sampler does not honor the forecast split's temporal ordering, making CV unsafe for tuning or selection; and (2) the serving contract declares no required input streams even though the shipped model depends on rolling target aggregates and target-encoded categoricals, raising serving-availability and target-leakage risk. Because features are computed lazily at fit time and the final test score is retrospective evidence only, neither finding licenses re-selection, refitting, or shipment without owner review.",
+    "findings": [
+      {
+        "category": "tool_defect",
+        "title": "Internal CV ignores the forecast split's temporal ordering, giving estimates ~2x off from the deployed temporal validation",
+        "generic_capability_key": "temporal_cv_split_semantics",
+        "generic_capability": "Estimate model generalization in a forecasting workflow using cross-validation that preserves temporal ordering, so internal CV scores are consistent with the time-ordered train/validation split used for deployment decisions.",
+        "evidence_refs": [
+          "split",
+          "experiment:e2",
+          "experiment:e3",
+          "model:e2",
+          "model:blend"
+        ],
+        "existing_tools_considered": [],
+        "why_existing_tools_insufficient": "The generic fold sampler used by model fitting produced CV scores of ~0.25\u20130.29 on the same feature set where the temporal validation reports ~0.132\u20130.14. The folds are not aligned with the split_on-time ordering, so the CV mechanism cannot be used to trust, tune, or choose the forecast model; only the temporal split is interpretable for this workflow.",
+        "alternative_explanation": "The single contiguous validation window may be an easier or more representative regime than the average of all temporal folds; the large fold spread (0.06\u20130.13) shows cross-regime heterogeneity, so part of the CV-vs-validation gap could be regime noise rather than fold semantics.",
+        "leakage_or_serving_risk": "A CV that can place future rows into training does not respect prediction-time causality and can silently over- or under-state generalization; it must not be used as a proxy for deployment quality, and no selection or refit decision should hinge on it.",
+        "testable_hypothesis": "Re-run quality estimation with an expanding time-ordered CV on an identical feature set; if its score converges toward the ~0.132 temporal validation rather than ~0.26, the tool emission was the non-temporal fold sampler.",
+        "confidence": "medium",
+        "fingerprint": "7b4bfcb7d2fb083e"
+      },
+      {
+        "category": "data_contract_gap",
+        "title": "Serving contract omits the historical target streams required to reconstruct rolling and target-encoded features at inference",
+        "generic_capability_key": "serving_required_history_streams",
+        "generic_capability": "Declare and guarantee availability of the lagged target aggregates and out-of-fold target-encoding statistics that an exported forecast model requires at inference time, computed without any future information and reproducible from declared inputs.",
+        "evidence_refs": [
+          "serving_contract",
+          "feature_step:3",
+          "feature_step:4",
+          "feature_step:5",
+          "shipped"
+        ],
+        "existing_tools_considered": [],
+        "why_existing_tools_insufficient": "The shipped blend depends on rolling means/counts of the target over multiple lag windows and on target-encoded categoricals, yet the serving contract lists zero required input streams. The feature tools compute these aggregates lazily at fit time and expose no mechanism to declare them as mandatory serving inputs, so the contract cannot be reconstructed from its declared surface.",
+        "alternative_explanation": "An inference pipeline may recompute those aggregates from a separately maintained history store that is simply not captured in the contract; in that case there is no functional serving gap, only an under-specified declaration.",
+        "leakage_or_serving_risk": "If rolling or target-encoding features were computed over the full sample including rows later in time than each prediction timestamp, future target values could leak into training; conversely, at serving time unavailable or stale history would silently degrade forecasts. This must be verified before any deployment is relied upon.",
+        "testable_hypothesis": "Rebuild the shipped model using only the declared serving inputs (no hidden re-derivation of history or target statistics) and confirm the features, scores, and runtime reference encoding are reproducible; additionally confirm target encodings use out-of-fold statistics with the current row's target excluded.",
+        "confidence": "medium",
+        "fingerprint": "121b8c8bcfc2c553"
+      },
+      {
+        "category": "no_demonstrated_gap",
+        "title": "No generic operation was inexpressible; the shipped forecast model substantially beats baseline with available tools",
+        "generic_capability_key": "no_demonstrated_gap",
+        "generic_capability": "Baseline tabular forecasting capability (feature transforms, rolling history aggregates, target encoding, multiple model families, and weighted blending) was fully expressible and delivered a large gain over the baseline forecast.",
+        "evidence_refs": [
+          "summary",
+          "split",
+          "feature_step:3",
+          "feature_step:4",
+          "feature_step:5",
+          "shipped",
+          "model:blend"
+        ],
+        "existing_tools_considered": [],
+        "why_existing_tools_insufficient": "Existing tools were sufficient: every attempted operation\u2014calendar/competition transforms, rolling history aggregates, target encoding, model fitting, and blending\u2014executed without refusal (the run finalized), and each successive measured feature step improved the validation score. The shipped blend's held-out RMSpe (~0.1315) versus baseline (~0.779) indicates the tool surface expressed the full intended prediction workflow.",
+        "alternative_explanation": "Residual error is more plausibly intrinsic to the forecast horizon/regime or to unexplored model families, hyperparameters, or calibration choices beyond the demonstrated tool surface, rather than to a missing generic operation.",
+        "leakage_or_serving_risk": "No new demonstrated leakage beyond the CV-semantics and serving-stream concerns above; the final test score is retrospective evidence only and must not be used to re-select, refit, or ship any model.",
+        "testable_hypothesis": "To establish a capability gap, one would need a controlled benchmark task in which a clearly useful generic operation (e.g., temporal CV, declared serving history stream, or out-of-fold-safe target encoding) is required and is demonstrably impossible with the available tools; absent that demonstration the correct classification is no_demonstrated_gap.",
+        "confidence": "high",
+        "fingerprint": "d350aabed2955033"
+      }
+    ]
+  }
+}
