@@ -99,7 +99,10 @@ def render_brief(session: RunSession) -> str | None:
     # built on top of whatever is currently winning. `best` on the journal points
     # at an experiment and only exists after finalize, so it is not what a
     # mid-run agent needs.
-    winner = stop.best_table(tables, metric)
+    # 0090 gates only the terminal selection event. Search guidance stays on
+    # the fixed-ruler argmax so a noise-level intermediate step may still lead
+    # to a later demonstrated gain.
+    winner = stop.best_probe_table(tables, metric)
     if winner:
         lines.append(
             f"Best table so far: {winner['path']} at probe_score "

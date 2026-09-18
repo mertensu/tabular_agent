@@ -28,6 +28,15 @@ from tabular_agent.taskspec import TaskSpec
 RAW = "the work table"
 
 
+def mark_demonstrated(state: dict, index: int) -> None:
+    """Make a fixture's synthetic score eligible for 0090 terminal selection."""
+    state["tables"][index]["probe_vs_source_interval"] = {
+        "gain": 0.2,
+        "block_sd": 0.01,
+        "mode": "ordered_blocks",
+    }
+
+
 @pytest.fixture
 def session(tmp_path):
     rng = np.random.default_rng(0)
@@ -200,6 +209,9 @@ def test_encoder_reaches_the_bundle_and_predicts_from_raw_rows(session):
     """The point of the lineage sidecar: raw strings in, prediction out."""
     inspect_data(session)
     enc = fit_encoding(session, ["city"], "frequency")
+    state = journal.load(session.run_dir)
+    mark_demonstrated(state, 0)
+    journal.save(session.run_dir, state)
     train_tabular_model(session, table=enc["table"], model_type="lgbm")
     out = finalize_run(session)
 
@@ -304,6 +316,7 @@ def test_transformed_features_reach_the_bundle_and_predict_from_raw_rows(session
     state = journal.load(session.run_dir)
     state["work_probe"]["probe_score"] = 1.0
     state["tables"][0]["probe_score"] = 0.0
+    mark_demonstrated(state, 0)
     journal.save(session.run_dir, state)
     final = finalize_run(session)
 
@@ -838,6 +851,7 @@ def test_a_table_the_ruler_could_not_score_still_leaves_a_gap(session):
     j["work_probe"]["probe_score"] = 1.0
     j["tables"][0]["probe_score"] = None
     j["tables"][1]["probe_score"] = 0.0
+    mark_demonstrated(j, 1)
     journal.save(session.run_dir, j)
 
     out = finalize_run(session)
@@ -857,6 +871,7 @@ def test_a_fully_measured_chain_has_no_gap(session):
     state["work_probe"]["probe_score"] = 1.0
     state["tables"][0]["probe_score"] = 0.5
     state["tables"][1]["probe_score"] = 0.0
+    mark_demonstrated(state, 1)
     journal.save(session.run_dir, state)
 
     out = finalize_run(session)

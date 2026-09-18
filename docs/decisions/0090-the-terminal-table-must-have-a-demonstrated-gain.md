@@ -1,7 +1,7 @@
 # 0090 — The terminal table must have a demonstrated gain: the probe-score argmax keeps descending into the noise floor
 
 - **Date:** 2026-09-17
-- **Status:** proposed
+- **Status:** accepted, implemented
 - **Proposed by:** Qwen, after the Rossmann ForecastingAgent repeats; number
   assigned by Claude (0089 taken on `claude/episodic-runner`)
 - **Related:**
@@ -81,6 +81,12 @@ If no table passes, the basis falls back to the work table — shipping what the
 data had before the search, the same "an interrupted search still ships" floor
 the run already uses. Tie-break is unchanged (earlier table wins: fewer steps,
 less lineage to go wrong at predict time).
+
+For unordered splits the same contract uses the paired bootstrap's
+`paired_se`; `block_sd` is the ordered-split form of the same difference-level
+instrument. Search guidance remains the ungated probe argmax. Only the terminal
+fit path calls the gated selector, so this implementation does not prune or
+redirect exploration.
 
 Three properties this keeps deliberately:
 

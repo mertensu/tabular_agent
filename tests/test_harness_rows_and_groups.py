@@ -238,6 +238,17 @@ def test_the_stored_statistics_replay_on_rows_that_never_had_the_value(session):
         table=stats["table"],
     )
     train_tabular_model(session, table=dropped["table"], model_type="lgbm")
+    # This test is about replaying the terminal lineage, not whether the
+    # synthetic group statistic earns selection. State that precondition under
+    # the 0090 terminal contract.
+    state = journal.load(session.run_dir)
+    terminal = next(row for row in state["tables"] if row["path"] == dropped["table"])
+    terminal["probe_vs_source_interval"] = {
+        "gain": 1.0,
+        "paired_se": 0.01,
+        "mode": "paired_bootstrap",
+    }
+    journal.save(session.run_dir, state)
     out = finalize_run(session)
 
     bundle = load_bundle(os.path.join(session.run_dir, out["bundle_dir"]))

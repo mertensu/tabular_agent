@@ -88,6 +88,11 @@ def shipped(tmp_path, table_path, stream_file):
     j = journal.load(session.run_dir)
     row = next(t for t in j["tables"] if t["path"] == stream_table["table"])
     row["probe_score"] = j["work_probe"]["probe_score"] - 1.0  # rmsle: lower is better
+    row["probe_vs_source_interval"] = {
+        "gain": 1.0,
+        "block_sd": 0.01,
+        "mode": "ordered_blocks",
+    }
     journal.save(session.run_dir, j)
     out = finalize_run(session)
     return session, out

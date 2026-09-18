@@ -181,15 +181,44 @@ def _latest_gain_inside_one_se(rows: list[dict], higher_better: bool) -> dict | 
     return {"id": latest.get("id"), "gain": float(gain), "probe_se": float(se)}
 
 
-def best_table(tables: list[dict], metric: str) -> dict | None:
-    """The table the terminal fit should be run on: highest `probe_score`.
+def best_probe_table(tables: list[dict], metric: str) -> dict | None:
+    """The highest fixed-ruler score, for search guidance only.
 
     One ruler over every table, so this is a comparison between tables and
-    nothing else — which is the whole reason the ruler is fixed. Ties go to the
-    earlier table, which is the one with fewer steps and therefore the one whose
-    lineage has less to go wrong at predict time.
+    nothing else. This deliberately remains ungated: 0090 changes the one
+    terminal selection event, not which intermediate table the agent may build
+    on while searching.
     """
     rows = _attempts(tables)
+    if not rows:
+        return None
+    higher = greater_is_better(metric)
+    return max(rows, key=lambda r: r["probe_score"] if higher else -r["probe_score"])
+
+
+def _has_demonstrated_gain(row: dict) -> bool:
+    """Whether the table beat its source beyond the paired noise bar (0090)."""
+    interval = row.get("probe_vs_source_interval") or {}
+    gain = interval.get("gain")
+    if interval.get("mode") == "paired_bootstrap":
+        spread = interval.get("paired_se")
+    else:
+        spread = interval.get("block_sd")
+    if gain is None or spread is None:
+        return False
+    # A zero-width interval carries no demonstrated variation. Requiring a
+    # positive spread also keeps no-op rows (gain=0, spread=0) out explicitly.
+    return float(spread) > 0.0 and float(gain) > float(spread)
+
+
+def best_table(tables: list[dict], metric: str) -> dict | None:
+    """The terminal table: fixed-ruler argmax among demonstrated gains (0090).
+
+    A scored table without a paired-difference interval cannot win. If none
+    clears its own one-standard-deviation bar the caller falls back to the raw
+    work table. Ties retain input order, hence the earlier/shorter lineage.
+    """
+    rows = [row for row in _attempts(tables) if _has_demonstrated_gain(row)]
     if not rows:
         return None
     higher = greater_is_better(metric)

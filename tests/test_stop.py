@@ -13,6 +13,7 @@ from tabular_agent.harness.stop import (
     StopPolicy,
     advisory,
     best_table,
+    best_probe_table,
     evaluate,
 )
 
@@ -162,8 +163,17 @@ def test_a_no_op_table_no_longer_buys_anything():
     assert status["should_stop"]
 
 
-def test_the_best_table_is_the_one_the_terminal_fit_runs_on():
-    tables = [row("t1", 0.30), row("t2", 0.20), row("t3", 0.25)]
+def interval(gain, spread, mode="ordered_blocks"):
+    key = "block_sd" if mode == "ordered_blocks" else "paired_se"
+    return {"gain": gain, key: spread, "mode": mode}
+
+
+def test_the_terminal_table_is_best_among_demonstrated_gains():
+    tables = [
+        {**row("t1", 0.30), "probe_vs_source_interval": interval(0.02, 0.01)},
+        {**row("t2", 0.20), "probe_vs_source_interval": interval(0.03, 0.01)},
+        {**row("t3", 0.25), "probe_vs_source_interval": interval(0.001, 0.01)},
+    ]
     assert best_table(tables, "logloss")["id"] == "t2"
     assert best_table(tables, "auc")["id"] == "t1"
     assert best_table([], "auc") is None
@@ -171,7 +181,32 @@ def test_the_best_table_is_the_one_the_terminal_fit_runs_on():
     assert best_table([{"id": "t9", "probe_score": None}], "auc") is None
 
 
+def test_terminal_gate_rejects_noise_no_ops_and_missing_intervals():
+    tables = [
+        {**row("noise", 0.10), "probe_vs_source_interval": interval(0.009, 0.01)},
+        {**row("noop", 0.09), "probe_vs_source_interval": interval(0.0, 0.0)},
+        row("missing", 0.08),
+    ]
+    assert best_table(tables, "logloss") is None
+
+
+def test_random_split_uses_the_paired_standard_error():
+    tables = [
+        {**row("weak", 0.10), "probe_vs_source_interval": interval(0.01, 0.02, "paired_bootstrap")},
+        {**row("strong", 0.20), "probe_vs_source_interval": interval(0.03, 0.02, "paired_bootstrap")},
+    ]
+    assert best_table(tables, "auc")["id"] == "strong"
+
+
+def test_search_guidance_remains_the_ungated_probe_argmax():
+    tables = [row("t1", 0.30), row("t2", 0.20), row("t3", 0.25)]
+    assert best_probe_table(tables, "logloss")["id"] == "t2"
+
+
 def test_ties_go_to_the_earlier_table():
     """Fewer steps, so less lineage to go wrong at predict time."""
-    tables = [row("t1", 0.30), row("t2", 0.30)]
+    tables = [
+        {**row("t1", 0.30), "probe_vs_source_interval": interval(0.02, 0.01)},
+        {**row("t2", 0.30), "probe_vs_source_interval": interval(0.02, 0.01)},
+    ]
     assert best_table(tables, "logloss")["id"] == "t1"
