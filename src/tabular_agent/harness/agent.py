@@ -87,20 +87,47 @@ def load_api_key(env_var: str = "REQUESTY_API_KEY", key_path: str = DEFAULT_KEY_
     )
 
 
-def gateway_model(model_name: str, *, base_url: str = REQUESTY_BASE_URL, api_key: str | None = None):
+#: Completion-token ceiling per model turn on the gateway path. PydanticAI only
+#: defaults `max_tokens` on the *Anthropic* path (to 4096 — pydantic/pydantic-ai
+#: #2553); on the OpenAI-compatible path it leaves it unset, so the gateway
+#: applies its own small completion default. A reasoning model (deepseek-v4.x
+#: -flash) can spend that whole default on hidden reasoning — billed as output —
+#: before emitting a visible token, which PydanticAI raises as
+#: `UnexpectedModelBehavior("Model token limit (provider default) exceeded before
+#: any response was generated")`: the 0089 episodic crash. Set it explicitly, as
+#: that error and the maintainers both advise. 32768 reserves ample room for
+#: reasoning plus the tool-call response and stays well under the model's ~384k
+#: output ceiling; the OpenAI path carries no Anthropic-style non-streaming
+#: timeout, so a generous value is safe. `_run_one_episode` still degrades the
+#: ceiling gracefully if a turn ever exceeds even this.
+GATEWAY_MAX_OUTPUT_TOKENS = 32768
+
+
+def gateway_model(
+    model_name: str,
+    *,
+    base_url: str = REQUESTY_BASE_URL,
+    api_key: str | None = None,
+    max_tokens: int = GATEWAY_MAX_OUTPUT_TOKENS,
+):
     """A model served by an OpenAI-compatible gateway (Requesty by default).
 
     Returns a PydanticAI ``Model`` rather than a string, which is the whole
     point of `build_agent` accepting either: the harness stays provider-agnostic
     (§13) and the choice of who actually serves the tokens is made at the call
     site, not baked into the agent.
+
+    ``max_tokens`` is set explicitly (never left to the provider default) so a
+    reasoning model cannot exhaust the completion budget before it answers; see
+    :data:`GATEWAY_MAX_OUTPUT_TOKENS`.
     """
-    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
     from pydantic_ai.providers.openai import OpenAIProvider
 
     return OpenAIChatModel(
         model_name,
         provider=OpenAIProvider(base_url=base_url, api_key=api_key or load_api_key()),
+        settings=OpenAIChatModelSettings(max_tokens=max_tokens),
     )
 
 

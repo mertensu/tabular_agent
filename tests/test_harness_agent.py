@@ -345,3 +345,21 @@ def test_run_returns_none_when_request_ceiling_hit(monkeypatch):
 
     monkeypatch.setattr(agent_mod, "build_agent", lambda *a, **k: _Stub())
     assert agent_mod.run(_Session(), "build the best table") is None
+
+
+def test_gateway_model_sets_an_explicit_output_ceiling():
+    """max_tokens must be set, never left to the provider default.
+
+    On the OpenAI-compatible path PydanticAI leaves max_tokens unset, so the
+    gateway's own small completion default applies and a reasoning model can burn
+    it entirely on hidden reasoning before answering — the 0089 crash
+    (UnexpectedModelBehavior "Model token limit (provider default) exceeded").
+    """
+    from tabular_agent.harness.agent import GATEWAY_MAX_OUTPUT_TOKENS, gateway_model
+
+    model = gateway_model("deepseek-v4.1-flash@eu", api_key="unit-test")
+    assert model.settings["max_tokens"] == GATEWAY_MAX_OUTPUT_TOKENS
+    assert model.settings["max_tokens"] > 0
+
+    override = gateway_model("deepseek-v4.1-flash@eu", api_key="unit-test", max_tokens=1234)
+    assert override.settings["max_tokens"] == 1234
