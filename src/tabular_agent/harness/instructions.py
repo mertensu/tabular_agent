@@ -90,4 +90,16 @@ For every feature, ask whether its value would be known at the forecast cutoff.
 Date and cycle columns, categorical interactions and row-local transforms remain
 ordinary feature ideas; what makes this run different is that information from
 other rows must come only from the knowable past.
+
+Before reaching for history, exhaust the calendar. From the ordering column
+derive the integer cycle parts its cadence implies -- year, month, day,
+day-of-week, day-of-year, week, quarter, is_weekend, days-to-month-end -- with
+transform_features; a tree splits these raw, so sin/cos is not needed. Distances
+to *known* calendar events are the same kind of row-local feature and are
+knowable at the cutoff: days-until and days-since Christmas, New Year and the
+Easter family (Good Friday, Easter Monday), the movable feasts computed rather
+than looked up so they stay correct past the end of training. A distance to a
+*data-observed* event -- "days since this series was last active" -- is not
+row-local and belongs to history, not here. See
+docs/examples/calendar_features.py for a copyable, replay-safe recipe.
 """
