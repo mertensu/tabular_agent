@@ -1,0 +1,214 @@
+{
+  "acceptance": "forecasting_agent_repeat",
+  "repeat": 3,
+  "created_at": "2026-09-20T13:23:48.129056+00:00",
+  "git_commit": "eb6b2bb271cf545819007b2244f4235ec73b8aef",
+  "model": "deepseek-v4-flash-0731@eu",
+  "run_dir": "/opt/data/REPOS/tabular_agent-calfeat/_runs/rossmann_forecasting_agent/repeat_03/20260920T124955Z-3588ff6d",
+  "elapsed_minutes": 33.29,
+  "workflow": "forecast",
+  "forecast_horizon": 48.0,
+  "history_attempted": true,
+  "history_tables": [
+    {
+      "id": "t4",
+      "source_table": "tables/t3.parquet",
+      "new_columns": [
+        "Store_Sales_60_mean",
+        "Store_Sales_120_mean",
+        "Store_Sales_364_mean",
+        "Store_Sales_60_count",
+        "Store_Sales_120_count",
+        "Store_Sales_364_count"
+      ],
+      "probe_score": 0.1591,
+      "probe_vs_source_table": 0.052103
+    },
+    {
+      "id": "t16",
+      "source_table": "tables/t9.parquet",
+      "new_columns": [
+        "Store_DayOfWeek_Sales_60_mean",
+        "Store_DayOfWeek_Sales_180_mean",
+        "Store_DayOfWeek_Sales_60_count",
+        "Store_DayOfWeek_Sales_180_count"
+      ],
+      "probe_score": 0.138857,
+      "probe_vs_source_table": 0.001017
+    },
+    {
+      "id": "t17",
+      "source_table": "tables/t16.parquet",
+      "new_columns": [
+        "Store_DayOfWeek_Promo_Sales_100_mean",
+        "Store_DayOfWeek_Promo_Sales_250_mean",
+        "Store_DayOfWeek_Promo_Sales_100_count",
+        "Store_DayOfWeek_Promo_Sales_250_count"
+      ],
+      "probe_score": 0.136679,
+      "probe_vs_source_table": 0.002178
+    },
+    {
+      "id": "t20",
+      "source_table": "tables/t17.parquet",
+      "new_columns": [
+        "Store_Promo2_Sales_100_mean",
+        "Store_Promo2_Sales_250_mean",
+        "Store_Promo2_Sales_100_count",
+        "Store_Promo2_Sales_250_count"
+      ],
+      "probe_score": 0.13983,
+      "probe_vs_source_table": -0.003151
+    },
+    {
+      "id": "t22",
+      "source_table": "tables/t17.parquet",
+      "new_columns": [
+        "Store_Promo_100_mean",
+        "Store_Promo_200_mean",
+        "Store_Promo_100_count",
+        "Store_Promo_200_count"
+      ],
+      "probe_score": 0.137311,
+      "probe_vs_source_table": -0.000632
+    },
+    {
+      "id": "t23",
+      "source_table": "tables/t17.parquet",
+      "new_columns": [
+        "Store_DayOfWeek_Promo_120_mean",
+        "Store_DayOfWeek_Promo_120_count"
+      ],
+      "probe_score": 0.138625,
+      "probe_vs_source_table": -0.001946
+    }
+  ],
+  "n_tables": 23,
+  "shipped_feature_count": 52,
+  "summary": {
+    "task_type": "regression",
+    "metric": "rmspe",
+    "direction": "lower",
+    "validation_score": 0.137819,
+    "validation_se": null,
+    "test_score": 0.129747,
+    "baseline_score": 0.7786564623476767,
+    "gain_vs_baseline": 0.6408374623476767,
+    "beats_baseline": true,
+    "cv_score": null
+  },
+  "models": [
+    {
+      "experiment_id": "e2",
+      "model_type": "lgbm",
+      "selected": true,
+      "shipped": false,
+      "val_score": 0.136679046763181,
+      "holdout_score": 0.139165,
+      "optimism": 0.002486
+    },
+    {
+      "experiment_id": "e3",
+      "model_type": "xgb",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.14608601317831119,
+      "holdout_score": 0.139688,
+      "optimism": -0.006398
+    },
+    {
+      "experiment_id": "e4",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.13703814955535185,
+      "holdout_score": 0.130702,
+      "optimism": -0.006336
+    },
+    {
+      "experiment_id": "e5",
+      "model_type": "elasticnet",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.2061764012127033,
+      "holdout_score": 0.206782,
+      "optimism": 0.000606
+    },
+    {
+      "experiment_id": "e6",
+      "model_type": "lgbm",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.15384006926218402,
+      "holdout_score": 0.146912,
+      "optimism": -0.006928
+    },
+    {
+      "experiment_id": "e7",
+      "model_type": "xgb",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.14792764852116985,
+      "holdout_score": 0.150755,
+      "optimism": 0.002828
+    },
+    {
+      "experiment_id": "e8",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.15353054839883562,
+      "holdout_score": 0.128284,
+      "optimism": -0.025247
+    },
+    {
+      "experiment_id": "blend",
+      "model_type": "blend(lgbm+xgb+catboost+elasticnet+lgbm+xgb+catboost)",
+      "selected": false,
+      "shipped": true,
+      "val_score": 0.137819,
+      "holdout_score": 0.129747,
+      "optimism": -0.008072
+    }
+  ],
+  "predictions": {
+    "rows": 41088,
+    "finite": true,
+    "minimum": 0.0,
+    "maximum": 38125.34237449683
+  },
+  "capability_review": {
+    "schema_version": 1,
+    "status": "proposed",
+    "scope": "post-finalization diagnosis; no model or tool decision",
+    "overall_assessment": "This finalized forecast run moved from a 0.779 baseline to 0.138 validation / 0.130 holdout via a measured feature-engineering sequence (date/time decomposition, categorical frequency, rolling history aggregates, target and keyed target encodings) and a weighted blend of three GBM families plus a linear model. Every feature step was measured (transform 0.230 \u2192 frequency 0.211 \u2192 history 0.159 \u2192 target encoding 0.141 \u2192 grouped history 0.137), and further attempts (interaction transforms at 0.395, trend/dev at 0.149, several history variants) did not help. Because the plateau is consistent across both feature and model-family dimensions, and the shipped blend's validation score is not better than the best single model, the evidence does not establish any tool, agent, contract, or model-selection shortcoming. The limiting factor appears to be the task's inherent predictability ceiling plus diminishing returns of feature engineering \u2014 no demonstrated generic gap. Main risks for owner review remain retroactive selection via the internal holdout (not a basis for shipping) and serve-time recomputation of lag/target-derived aggregates to avoid out-of-time leakage.",
+    "findings": [
+      {
+        "category": "no_demonstrated_gap",
+        "title": "Feature/model plateau reflects diminishing returns; no tool or contract gap demonstrated",
+        "generic_capability_key": "no_demonstrated_gap",
+        "generic_capability": "The run already expressed and measured the generic operations needed to reach baseline-to-competitive gains: date/time decomposition and calendar transforms, categorical frequency encoding, rolling history aggregates over configurable windows, target encoding (global and keyed/interaction), and blending multiple gradient-boosting families plus a linear model.",
+        "evidence_refs": [
+          "summary",
+          "feature_step:1",
+          "feature_step:3",
+          "feature_step:4",
+          "feature_step:6",
+          "feature_step:9",
+          "feature_step:10",
+          "table:t17",
+          "model:e2",
+          "model:blend",
+          "shipped"
+        ],
+        "existing_tools_considered": [],
+        "why_existing_tools_insufficient": "The available tools were sufficient: the shipped configuration and all competitive models were produced entirely by the existing transform, frequency, history, target-encoding, and blending tools, and the measuring scaffold recorded scores after every step. No useful generic operation was shown to be unexpressible; failed probes (interaction transform at 0.395, trend/dev at 0.149, several grouped-history variants above 0.137) were expressible and simply did not help, so they do not prove a capability or tool gap.",
+        "alternative_explanation": "The ~0.137 plateau is best explained by the inherent predictability ceiling of the task (retail demand noise, closed-store regime) and by cold-start effects in the rolling-history features on the earliest temporal window, rather than by any missing primitives. The large gap between internal cross-validation (e.g., e2 CV 0.244) and the time-split validation (0.137) reflects rolling-history features degrading on early folds, not a tool defect.",
+        "leakage_or_serving_risk": "Target-encoding and rolling-aggregate features must be computed strictly on past training data and recomputed identically at serving time; a leak would inflate validation, but the slightly negative optimism of the shipped blend and catboost runs is not evidence of such a leak and should be confirmed by an owner review of the feature-lag derivation.",
+        "testable_hypothesis": "A follow-up evaluation with a distinct temporal holdout, using strictly lag-only feature recomputation at serve time, would reproduce a validation metric within a few points of ~0.137 across the same GBM families; if it does, no capability gap exists and remaining gains come only from data/task limits. New evidence (e.g., a live/lagged serving evaluation) is required before any product change.",
+        "confidence": "medium",
+        "fingerprint": "d350aabed2955033"
+      }
+    ]
+  }
+}
