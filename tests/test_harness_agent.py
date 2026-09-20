@@ -58,6 +58,15 @@ EXPECTED_TOOLS = {
     "finalize_run",
 }
 
+#: Forecast-only tools, on top of EXPECTED_TOOLS. Aggregates a *future-known*
+#: covariate forward across the horizon, per series and delivered block (0090).
+#: Forecast-only because it needs a horizon and a declared future-known column,
+#: neither of which the iid or general workflow has — so it is not in
+#: EXPECTED_TOOLS (the general surface) and is added to it only for a forecast.
+FORECAST_ONLY_TOOLS = {
+    "fit_future_covariate_window",
+}
+
 
 def test_the_agent_has_exactly_the_leakage_safe_tools():
     agent = build_agent()
@@ -70,7 +79,7 @@ def test_every_tool_returns_a_summary_not_a_table():
 
     from tabular_agent.harness import tools
 
-    for name in EXPECTED_TOOLS:
+    for name in EXPECTED_TOOLS | FORECAST_ONLY_TOOLS:
         sig = _inspect.signature(getattr(tools, name))
         assert sig.return_annotation is dict, f"{name} must return a compact dict"
 
@@ -352,7 +361,7 @@ def test_iid_and_forecast_workflows_expose_distinct_temporal_tools():
     forecast_tools = set(build_agent(workflow="forecast")._function_toolset.tools)
 
     assert iid_tools == EXPECTED_TOOLS - {"fit_history", "fit_stream_aggregate"}
-    assert forecast_tools == EXPECTED_TOOLS
+    assert forecast_tools == EXPECTED_TOOLS | FORECAST_ONLY_TOOLS
 
 
 def test_forecast_contract_reaches_only_forecast_runs(tmp_path):

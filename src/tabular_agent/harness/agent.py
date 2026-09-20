@@ -538,6 +538,66 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "
     if workflow != "iid":
         agent.tool(fit_stream_aggregate)
 
+    def fit_future_covariate_window(
+        ctx: RunContext[Deps],
+        value: str,
+        aggregates: list,
+        by: list[str] | None = None,
+        table: str | None = None,
+    ) -> dict:
+        """Summarise a *future-known* covariate over each series and delivered block.
+
+        The exogenous counterpart to `fit_history`. History gives a row a trailing
+        average of its own group's *target* past. This gives it aggregates of a
+        covariate whose values over the forecast horizon are **known at issue
+        time** — a weather forecast, a planned promotion, a published price — so it
+        may look *forward* across the horizon, which history cannot: the target is
+        unknown there, a future-known covariate is not.
+
+        Only a column the run declared `future_known` is eligible; the target and
+        any undeclared column are refused, because a value merely *present* over
+        the horizon in your data (a realised future weather column in a test file)
+        is not the same as one *known* at issue time in production, and only the
+        run's owner can assert which it is.
+
+        Every aggregate is keyed within one series and one delivered serving block
+        (one forecast horizon long) and resets at the block start. At serving you
+        are handed exactly one such block per series, so the same block-local
+        statistic is recomputed from the delivered rows alone — no target, no
+        stored freeze.
+
+        Args:
+            value: The future-known covariate to aggregate. Must be a column the
+                plan declared in `future_known`.
+            aggregates: The windows to build, as a list of objects. Families:
+                - {"family": "period", "unit": "day", "stat": "sum"} — a whole
+                  calendar unit ("hour"/"day"/"week"/"month", or "block" for the
+                  whole delivered block), which may look forward *within the
+                  delivered block*, e.g. total irradiance this day.
+                - {"family": "trailing", "window": 4, "stat": "mean"} — a causal
+                  rolling window of `window` rows that resets at the block start.
+                - {"family": "forward", "window": 12, "stat": "mean"} — a window of
+                  `window` rows starting at the row and running ahead, clipped at
+                  the block end, e.g. mean forecast temperature over the next 3h.
+                Statistics: mean, sum, min, max, std, count. Unlike a history
+                window, sum/min/max are allowed — the covariate is a known fact
+                over the block, not a single draw of the target.
+            by: Column(s) forming the series key — read at predict time, so they
+                must be serving columns. Omit for a single series. An aggregate
+                never crosses a series or a block boundary.
+            table: Path to the source table. Omit to use the run's work table.
+        """
+        return _retryable(
+            lambda: tools.fit_future_covariate_window(
+                ctx.deps.session, value=value, aggregates=aggregates,
+                by=by, table=table,
+            ),
+            ctx,
+        )
+
+    if workflow == "forecast":
+        agent.tool(fit_future_covariate_window)
+
     @agent.tool
     def filter_rows(
         ctx: RunContext[Deps],

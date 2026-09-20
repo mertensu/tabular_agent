@@ -102,4 +102,15 @@ than looked up so they stay correct past the end of training. A distance to a
 *data-observed* event -- "days since this series was last active" -- is not
 row-local and belongs to history, not here. See
 docs/examples/calendar_features.py for a copyable, replay-safe recipe.
+
+If the run declares future-known covariates -- columns whose values over the
+horizon are known at the cutoff, such as a weather forecast, a planned promotion
+or a published price -- fit_history's backward, target-bound windows cannot reach
+them, but fit_future_covariate_window can: it is the exogenous counterpart to
+fit_history, building serving-legal aggregates of such a covariate *forward*
+across the horizon (a whole-day total, a block-local rolling mean, a next-N-rows
+window), keyed within one series and one delivered block. inspect_data reports
+which columns are declared future_known; only those are eligible. Test at least
+one such family when they are declared -- aggregates of the delivered future are
+often the single largest lever on this kind of data.
 """

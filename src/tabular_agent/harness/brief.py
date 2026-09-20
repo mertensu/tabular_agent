@@ -146,6 +146,19 @@ def render_brief(session: RunSession) -> str | None:
             "`inspect_data` describes what each holds."
         )
 
+    # Read off the session like streams and for the same reason: future_known is
+    # declared on the run and true from the first call, but no tool other than
+    # `inspect_data` mentions it, and the prompt tells a resumed agent to skip
+    # that. Without this line an episode never learns the run has forward-legal
+    # covariates at all (0090).
+    if getattr(session, "future_known", None):
+        names = ", ".join(session.future_known)
+        lines.append(
+            f"Future-known covariates declared: {names}. Their horizon values are "
+            "known at issue time, so aggregate them forward with "
+            "fit_future_covariate_window (the exogenous counterpart to fit_history)."
+        )
+
     idle = _never_trained(j)
     if idle:
         shown = ", ".join(idle[:MAX_LISTED_TABLES])

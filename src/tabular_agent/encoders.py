@@ -558,6 +558,39 @@ def to_periods(values) -> np.ndarray:
     )
 
 
+def _as_datetime(values) -> pd.Series:
+    """The ordering column as real datetimes, for calendar-unit grouping.
+
+    :func:`to_periods` reduces the ordering column to subtractable floats, which is
+    all a distance needs; a calendar-unit aggregate needs the timestamp itself so
+    it can be floored to a day or a week. A numeric ordering column is refused
+    here — "the third Tuesday" has no meaning for a plain integer index — rather
+    than silently reinterpreted as an epoch offset.
+    """
+    s = pd.Series(values)
+    if pd.api.types.is_datetime64_any_dtype(s):
+        return s
+    if pd.api.types.is_string_dtype(s) or s.dtype == object:
+        # ISO 8601 only, for `to_periods`' reason: a guessed format transposes days
+        # and months silently, and a whole-day aggregate on the wrong day is exactly
+        # the plausible wrong number this refusal exists to avoid.
+        try:
+            return pd.to_datetime(s, format="ISO8601")
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"a calendar-unit aggregate needs a real date/datetime ordering "
+                f"column, and this one is text that is not ISO 8601 ({exc}). Convert "
+                "it to a datetime, or use a window family (trailing/forward) that "
+                "counts rows instead of calendar units."
+            ) from exc
+    raise ValueError(
+        "a calendar-unit aggregate (period family) needs a date/datetime ordering "
+        f"column; this one is {s.dtype}. A numeric order has no calendar, so group "
+        "with a trailing or forward window of rows instead, or set the whole-block "
+        "unit 'block'."
+    )
+
+
 class HistoryEncoder:
     """A group's own recent past, frozen at fit time and replayed as trailing windows.
 
@@ -1470,6 +1503,304 @@ class StreamAggregateEncoder:
         return enc
 
 
+#: What may be asked of a future-known covariate over a window (0090). Broader
+#: than :data:`WINDOW_STATS` because there is no leakage tightrope here. Those
+#: statistics summarise the *target's* past, where an extreme or a sum over a
+#: short stretch is one draw of the thing being predicted wearing a summary's
+#: name — the failure 0049 and 0072 are about. A future covariate is declared
+#: *known* across the horizon, so an extreme or a total of it over the delivered
+#: block is a fact the served model is handed, not a peek at the target. ``count``
+#: is offered for the same honesty the hidden ``_count`` buys a history window: a
+#: statistic over two observations and one over ninety are the same number under
+#: the same name until the count separates them.
+FUTURE_STATS = ("mean", "sum", "min", "max", "std", "count")
+
+#: Calendar units a whole-period aggregate may key on. ``"block"`` is the whole
+#: delivered serving block; the others floor the ordering timestamp so the group
+#: is one calendar unit that never straddles a block boundary — the invariant
+#: that keeps a forward-looking aggregate serving-legal (0090).
+FUTURE_UNITS = ("hour", "day", "week", "month", "block")
+
+#: Window families for :class:`FutureWindowEncoder`. ``period`` groups a whole
+#: calendar unit (may look forward *within the delivered block*); ``trailing`` is
+#: a block-local causal rolling window that resets at the block start; ``forward``
+#: looks ahead of the row, bounded by the block end. All three are keyed within
+#: one series and one block and never reach across either.
+FUTURE_FAMILIES = ("period", "trailing", "forward")
+
+
+def _clean_future_aggregates(aggregates) -> list[dict]:
+    """Validate and de-duplicate the aggregate specs, order preserved.
+
+    Accepts what JSON hands back, so a tool call's ``{"family": "period", ...}``
+    dicts arrive here and are normalised into a canonical shape: ``period`` keeps
+    ``unit`` + ``stat``, ``trailing``/``forward`` keep an integer ``window`` +
+    ``stat``. Everything else is refused here, loudly, rather than producing a
+    column named for a window it never took.
+    """
+    cleaned: list[dict] = []
+    for item in aggregates or ():
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"each aggregate is an object, got {item!r}. Write e.g. "
+                "{'family': 'period', 'unit': 'day', 'stat': 'sum'} or "
+                "{'family': 'trailing', 'window': 4, 'stat': 'mean'}."
+            )
+        family = str(item.get("family", "")).lower()
+        if family not in FUTURE_FAMILIES:
+            raise ValueError(
+                f"unknown aggregate family {family!r}; pick from "
+                f"{list(FUTURE_FAMILIES)}."
+            )
+        stat = str(item.get("stat", "mean")).lower()
+        if stat not in FUTURE_STATS:
+            raise ValueError(
+                f"unknown statistic {stat!r}; pick from {list(FUTURE_STATS)}."
+            )
+        if family == "period":
+            unit = str(item.get("unit", "")).lower()
+            if unit not in FUTURE_UNITS:
+                raise ValueError(
+                    f"a 'period' aggregate needs a calendar unit; pick from "
+                    f"{list(FUTURE_UNITS)}, got {unit!r}."
+                )
+            spec = {"family": "period", "unit": unit, "stat": stat}
+        else:
+            window = item.get("window")
+            if window is None:
+                raise ValueError(
+                    f"a {family!r} aggregate needs a positive integer 'window' "
+                    "(a number of rows within the delivered block)."
+                )
+            window = int(window)
+            if window < 1:
+                raise ValueError(
+                    f"window must be a positive integer number of rows, got {window}."
+                )
+            spec = {"family": family, "window": window, "stat": stat}
+        if spec not in cleaned:
+            cleaned.append(spec)
+    return cleaned
+
+
+def _calendar_key(dt: pd.Series, unit: str) -> np.ndarray:
+    """The ordering timestamp reduced to the calendar unit a period aggregate groups on."""
+    if unit == "hour":
+        return dt.dt.floor("h").to_numpy()
+    if unit == "day":
+        return dt.dt.floor("D").to_numpy()
+    if unit == "week":
+        return dt.dt.to_period("W").astype(str).to_numpy()
+    if unit == "month":
+        return dt.dt.to_period("M").astype(str).to_numpy()
+    raise ValueError(f"no calendar key for unit {unit!r}")  # pragma: no cover
+
+
+class FutureWindowEncoder:
+    """Serving-legal windowed aggregates of a *future-known* covariate (0090).
+
+    The exogenous counterpart to :class:`HistoryEncoder`, and the one it cannot
+    reach. History aggregates the **target backward** — trailing windows frozen in
+    the past, gated to be at least one horizon old, because the target is unknown
+    across the horizon and a served row may read only its own past. A *future
+    covariate* is the opposite case: the run's owner has declared (``future_known``,
+    0090) that this column's values over the forecast horizon are available at
+    issue time — a weather forecast, a planned promotion, a published price. So a
+    statistic that looks **forward across the horizon** is not a leak; it is the
+    standard, high-value forecasting family (M5, the Rossmann winner, Darts
+    ``future_covariates``) that a purely backward tool structurally cannot express.
+
+    **The block boundary is the invariant.** Every aggregate is keyed within one
+    series and one *delivered serving block* and resets at the block start, never
+    crossing a series or a block boundary. A block is one stretch of the ordering
+    column of length ``block_length`` (the forecast horizon), tiled backward from
+    each series' end — because at serving the model is handed exactly one such
+    block per series and must compute the same block-local statistic it computed
+    in training. That, and nothing about the target, is what makes a forward-
+    looking aggregate serving-legal: the target, and every training-only column,
+    never enter the computation — only the declared covariate, the series key and
+    the ordering column are read.
+
+    **No freeze, so no fold loop.** :class:`HistoryEncoder` iterates folds to
+    reproduce a serving freeze — a validation row must see only what a served row
+    the same distance ahead would. This encoder has no freeze: the covariate is
+    known across the block in training and at serving alike, so a block-local
+    statistic is the *same computation* either side and carries no target
+    information. It is fitted once and recomputed at predict time from the
+    delivered frame — batch-dependent by construction, which is exactly why it is
+    a lineage step and not a row-local ``transform_features`` (0011).
+
+    Three families (:data:`FUTURE_FAMILIES`):
+
+    * **period** — a whole calendar unit (``day``/``week``/…, or ``block`` for the
+      whole delivered block), which *may look forward within the delivered block*.
+      ``day_irr_sum``, ``day_t2m_max``, ``day_daylight_frac``.
+    * **trailing** — a causal rolling window of ``window`` rows that resets at the
+      block start (``roll4_t2m``, ``roll16_irr``).
+    * **forward** — a window of ``window`` rows starting at the row and running
+      ahead, clipped at the block end (``next_3h_temp_mean``).
+
+    **The realism caveat (0090), recorded so it is not forgotten.** Serving-legal
+    under a contract that *delivers realised* future covariates (as a Kaggle test
+    file does) is not the same as production-realistic: in operation a future
+    covariate is a forecast issued at the cutoff whose quality decays with lead.
+    Training honestly then needs the covariate *as it was known at each historical
+    issue time*, not the realised values. This encoder builds the aggregates it is
+    given; whether its inputs are realised or as-of-issue is a property of the data
+    the owner supplied, and ``future_known`` is the owner asserting they are
+    legitimately known.
+    """
+
+    kind = "future_window"
+
+    def __init__(self, by, value: str, order: str, block_length: float,
+                 aggregates=()):
+        self.by = [str(c) for c in by]
+        self.value = str(value)
+        self.order = str(order)
+        self.block_length = float(block_length)
+        self.aggregates = _clean_future_aggregates(aggregates)
+        if self.block_length <= 0:
+            raise ValueError(
+                f"block_length must be positive, got {self.block_length:g}; it is "
+                "the forecast horizon, the length of one delivered serving block."
+            )
+        if not self.aggregates:
+            raise ValueError(
+                "nothing to build: pass at least one aggregate, e.g. "
+                "[{'family': 'period', 'unit': 'day', 'stat': 'sum'}]."
+            )
+        if self.value in self.by:
+            raise ValueError(
+                f"by={self.by} may not contain the covariate column {self.value!r}."
+            )
+        if self.value == self.order:
+            raise ValueError(
+                f"value and order are both {self.value!r}; a covariate cannot be its "
+                "own ordering column."
+            )
+
+    @property
+    def base_name(self) -> str:
+        return "_".join([*self.by, self.value])
+
+    @staticmethod
+    def _column_name(base: str, spec: dict) -> str:
+        if spec["family"] == "period":
+            return f"{base}_{spec['unit']}_{spec['stat']}"
+        tag = "roll" if spec["family"] == "trailing" else "fwd"
+        return f"{base}_{tag}{spec['window']}_{spec['stat']}"
+
+    @property
+    def output_columns(self) -> list[str]:
+        return [self._column_name(self.base_name, spec) for spec in self.aggregates]
+
+    def _keys(self, df: pd.DataFrame) -> np.ndarray:
+        """The series key per row, or a single constant series when ``by`` is empty."""
+        if not self.by:
+            return np.zeros(len(df), dtype=object)
+        keys = df[self.by[0]].astype(str)
+        for col in self.by[1:]:
+            keys = keys + _KEY_SEP + df[col].astype(str)
+        return keys.to_numpy()
+
+    def _needs_calendar(self) -> bool:
+        return any(
+            s["family"] == "period" and s["unit"] != "block" for s in self.aggregates
+        )
+
+    def fit(self, df: pd.DataFrame, y=None) -> "FutureWindowEncoder":
+        # Nothing is stored: every aggregate is recomputed from the delivered frame
+        # at predict time. fit exists for parity with the encoder protocol and to
+        # fail early on a frame that is missing the columns the recipe reads.
+        missing = [c for c in [*self.by, self.order, self.value] if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"cannot build future-covariate windows: {missing} are not in this "
+                "frame. The series key, the ordering column and the covariate are "
+                "all read at fit and at predict time, so they have to exist in both."
+            )
+        return self
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        out = df.copy()
+        missing = [c for c in [*self.by, self.order, self.value] if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"cannot look up future-covariate windows: {missing} are not in this "
+                "frame. The series key, the ordering column and the covariate all "
+                "have to exist at predict time as well as at fit time."
+            )
+        n = len(df)
+        periods = to_periods(df[self.order])
+        work = pd.DataFrame({
+            "_src": np.arange(n),
+            "_key": self._keys(df),
+            "_p": periods,
+            "_v": pd.to_numeric(df[self.value], errors="coerce").to_numpy().astype(float),
+        }, index=np.arange(n))
+        if self._needs_calendar():
+            dt = _as_datetime(df[self.order])
+            work["_dt"] = dt.to_numpy()
+        # Stable sort by (series, ordering, source position). The source-position
+        # tiebreaker keeps rows that share an ordering value — DST-fallback
+        # duplicates, sub-unit ties — in the order they arrived rather than trusting
+        # the timestamp to be unique, the same care `make_folds` and the research
+        # builder take.
+        work = work.sort_values(["_key", "_p", "_src"], kind="stable")
+
+        # Block index within each series, tiled backward from the series end so the
+        # newest block is 0 and matches the single block delivered at serving. A row
+        # with no ordering value gets NaN and drops out of every group below.
+        gmax = work.groupby("_key")["_p"].transform("max").to_numpy()
+        with np.errstate(invalid="ignore"):
+            block = np.floor((gmax - work["_p"].to_numpy()) / self.block_length + 1e-9)
+        work["_block"] = block
+
+        results: dict[str, pd.Series] = {}
+        for spec in self.aggregates:
+            name = self._column_name(self.base_name, spec)
+            if spec["family"] == "period":
+                if spec["unit"] == "block":
+                    gkey = [work["_key"], work["_block"]]
+                else:
+                    gkey = [work["_key"], work["_block"],
+                            _calendar_key(work["_dt"], spec["unit"])]
+                results[name] = work["_v"].groupby(gkey, dropna=True).transform(spec["stat"])
+            else:
+                bkey = [work["_key"], work["_block"]]
+                w, stat = spec["window"], spec["stat"]
+                if spec["family"] == "trailing":
+                    fn = lambda s, w=w, stat=stat: getattr(
+                        s.rolling(w, min_periods=1), stat)()
+                else:  # forward: reverse, take a causal window, reverse back
+                    fn = lambda s, w=w, stat=stat: getattr(
+                        s[::-1].rolling(w, min_periods=1), stat)()[::-1]
+                results[name] = work["_v"].groupby(bkey, dropna=True).transform(fn)
+
+        # Restore the caller's row order: results are indexed by `_src` (the
+        # original position), so sorting the index back to 0..n-1 realigns every
+        # column with `df` before it is written out.
+        for name, series in results.items():
+            out[name] = series.sort_index().to_numpy()
+        return out
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": self.kind,
+            "by": self.by,
+            "value": self.value,
+            "order": self.order,
+            "block_length": self.block_length,
+            "aggregates": [dict(spec) for spec in self.aggregates],
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "FutureWindowEncoder":
+        return cls(d["by"], d["value"], d["order"], d["block_length"],
+                   d.get("aggregates", ()))
+
+
 ENCODER_CLASSES: dict[str, type] = {
     "target": TargetEncoder,
     "frequency": FrequencyEncoder,
@@ -1477,6 +1808,7 @@ ENCODER_CLASSES: dict[str, type] = {
     "group_stats": GroupStatsEncoder,
     "history": HistoryEncoder,
     "stream_aggregate": StreamAggregateEncoder,
+    "future_window": FutureWindowEncoder,
 }
 
 
@@ -1722,3 +2054,31 @@ def fit_history(df, by, value, order, *, folds, keep=None,
         for name in names:
             oof.iloc[va, positions[name]] = transformed[name].to_numpy()
     return oof, template.fit(df)
+
+
+def fit_future_covariate_window(df, by, value, order, block_length, aggregates):
+    """Serving-legal windowed aggregates of a future-known covariate (the tool entry).
+
+    Returns ``(train_features, encoder)`` on the same contract as
+    :func:`fit_history`: the frame is what the model may **train** on, the encoder
+    is what runs at **predict**.
+
+    **No fold loop, and that is the design rather than an omission** — the one
+    place this departs from :func:`fit_history`. History iterates folds to freeze
+    the target at each training prefix, because a validation row may see only the
+    target's past. A future covariate is declared *known across the horizon*, so a
+    block-local aggregate of it is the *same computation* in a training block and
+    in the delivered serving block, reads no target, and leaks nothing. The
+    training features are therefore just the encoder applied once to the whole
+    frame — identical, column for column, to what replay produces at serving.
+    """
+    aggregates = _clean_future_aggregates(aggregates)
+    if not aggregates:
+        raise ValueError(
+            "fit_future_covariate_window needs at least one aggregate, e.g. "
+            "aggregates=[{'family': 'period', 'unit': 'day', 'stat': 'sum'}]."
+        )
+    encoder = FutureWindowEncoder(by, value, order, block_length, aggregates).fit(df)
+    transformed = encoder.transform(df)
+    features = transformed[encoder.output_columns]
+    return features, encoder

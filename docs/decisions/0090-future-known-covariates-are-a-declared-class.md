@@ -1,7 +1,13 @@
 # 0090  Future-known covariates are a declared class, and their windowed aggregates are a tool
 
 - **Date:** 2026-09-20
-- **Status:** accepted, not yet implemented
+- **Status:** accepted, implemented (`DataPlan.future_known`,
+  `FutureWindowEncoder` + `future_window` lineage step,
+  `fit_future_covariate_window` tool, forecast-only). Acceptance met: on the
+  Energy Challenge, a fixed-LGBM feature ablation over the research builder's own
+  four folds moved mean RMSE 55.94 → 52.96 (−2.98) with the tool, against the
+  research builder's own 52.76 (−3.19) — the same gain family, ~93% of the gap
+  closed. Tests in `tests/test_future_window.py`.
 - **Related:** [0089](0089-forecasting-is-an-explicit-public-contract.md) (the
   forecast contract), [0047](0047-the-forecast-horizon-is-a-column-not-a-constant.md)
   (the horizon gates history), [0011](0011-stability-check.md) (row-local

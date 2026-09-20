@@ -66,6 +66,7 @@ class RunSession:
         holdout_fraction: float | None = None,
         split_on: str | None = None,
         serving_columns: list[str] | None = None,
+        future_known: list[str] | None = None,
         fit_time_budget_s: float | None = None,
         streams: dict[str, dict] | None = None,
         profile: str = "full",
@@ -156,6 +157,17 @@ class RunSession:
         # catching it.
         self.serving_columns = (
             None if serving_columns is None else list(serving_columns)
+        )
+        # Serving columns whose values over the forecast horizon are known at issue
+        # time (0090): a weather forecast, a planned promotion, a published price.
+        # Declared, for `serving_columns`' reason — presence is not permission, and
+        # nothing in a run can tell a realised future weather column (present in a
+        # test file, unknown in production) from a legitimately-known one. It is the
+        # owner's assertion about the data, and it is what makes a *forward* window
+        # aggregate legal where `fit_history`'s backward one is all the target
+        # allows. Only `fit_future_covariate_window` reads it.
+        self.future_known = (
+            [] if future_known is None else list(future_known)
         )
         # Wall-clock ceiling on one cross-validated fit. `None` means no ceiling,
         # which is right for a library that cannot know how big the data is or what
@@ -515,6 +527,7 @@ class RunSession:
             ),
             "split_on": self.split_on,
             "forecast_horizon": self.spec.forecast_horizon,
+            "future_known": list(self.future_known),
             "seed": self.spec.seed,
             "val_fraction": self.val_fraction,
             "holdout_fraction": self.holdout_fraction,
