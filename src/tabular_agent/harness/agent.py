@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from . import tools
 from .brief import render_brief
-from .instructions import SYSTEM_PROMPT
+from .instructions import FORECAST_SYSTEM_PROMPT, SYSTEM_PROMPT
 from .session import RunSession
 
 #: Default model. Any PydanticAI model string works — `openai:gpt-...`,
@@ -203,6 +203,10 @@ def _build_minimal_agent(model):
     )
 
     @agent.system_prompt(dynamic=True)
+    def workflow_contract(ctx: RunContext[Deps]) -> str:
+        return FORECAST_SYSTEM_PROMPT if ctx.deps.session.workflow == "forecast" else ""
+
+    @agent.system_prompt(dynamic=True)
     def run_state(ctx: RunContext[Deps]) -> str:
         return render_brief(ctx.deps.session) or ""
 
@@ -255,8 +259,8 @@ def _build_minimal_agent(model):
     return agent
 
 
-def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
-    """An agent whose *entire* tool surface is the ten functions below.
+def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "general"):
+    """An agent whose entire tool surface is selected by profile and workflow.
 
     ``model`` is either a PydanticAI model string (``"anthropic:..."``,
     ``"openai:..."``, ``"google:..."``) or a ``Model`` object — e.g. from
@@ -265,7 +269,13 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
     """
     if profile not in {"full", "minimal"}:
         raise ValueError(f"unknown agent profile {profile!r}; use 'full' or 'minimal'")
+    if workflow not in {"general", "iid", "forecast"}:
+        raise ValueError(
+            f"unknown agent workflow {workflow!r}; use 'general', 'iid', or 'forecast'"
+        )
     if profile == "minimal":
+        if workflow == "forecast":
+            raise ValueError("the forecast workflow requires the full profile")
         return _build_minimal_agent(model)
 
     from pydantic_ai import Agent, RunContext
@@ -301,6 +311,10 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
     # A driver that wants ordering as well can wrap its run in
     # `agent.parallel_tool_call_execution_mode("sequential")`; nothing depends on
     # it for correctness.
+
+    @agent.system_prompt(dynamic=True)
+    def workflow_contract(ctx: RunContext[Deps]) -> str:
+        return FORECAST_SYSTEM_PROMPT if ctx.deps.session.workflow == "forecast" else ""
 
     @agent.system_prompt(dynamic=True)
     def run_state(ctx: RunContext[Deps]) -> str:
@@ -415,7 +429,6 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
             ctx,
         )
 
-    @agent.tool
     def fit_history(
         ctx: RunContext[Deps],
         by: list[str],
@@ -490,7 +503,9 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
             ctx,
         )
 
-    @agent.tool
+    if workflow != "iid":
+        agent.tool(fit_history)
+
     def fit_stream_aggregate(
         ctx: RunContext[Deps],
         stream: str,
@@ -546,6 +561,69 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full"):
             ),
             ctx,
         )
+
+    if workflow != "iid":
+        agent.tool(fit_stream_aggregate)
+
+    def fit_future_covariate_window(
+        ctx: RunContext[Deps],
+        value: str,
+        aggregates: list,
+        by: list[str] | None = None,
+        table: str | None = None,
+    ) -> dict:
+        """Summarise a *future-known* covariate over each series and delivered block.
+
+        The exogenous counterpart to `fit_history`. History gives a row a trailing
+        average of its own group's *target* past. This gives it aggregates of a
+        covariate whose values over the forecast horizon are **known at issue
+        time** — a weather forecast, a planned promotion, a published price — so it
+        may look *forward* across the horizon, which history cannot: the target is
+        unknown there, a future-known covariate is not.
+
+        Only a column the run declared `future_known` is eligible; the target and
+        any undeclared column are refused, because a value merely *present* over
+        the horizon in your data (a realised future weather column in a test file)
+        is not the same as one *known* at issue time in production, and only the
+        run's owner can assert which it is.
+
+        Every aggregate is keyed within one series and one delivered serving block
+        (one forecast horizon long) and resets at the block start. At serving you
+        are handed exactly one such block per series, so the same block-local
+        statistic is recomputed from the delivered rows alone — no target, no
+        stored freeze.
+
+        Args:
+            value: The future-known covariate to aggregate. Must be a column the
+                plan declared in `future_known`.
+            aggregates: The windows to build, as a list of objects. Families:
+                - {"family": "period", "unit": "day", "stat": "sum"} — a whole
+                  calendar unit ("hour"/"day"/"week"/"month", or "block" for the
+                  whole delivered block), which may look forward *within the
+                  delivered block*, e.g. total irradiance this day.
+                - {"family": "trailing", "window": 4, "stat": "mean"} — a causal
+                  rolling window of `window` rows that resets at the block start.
+                - {"family": "forward", "window": 12, "stat": "mean"} — a window of
+                  `window` rows starting at the row and running ahead, clipped at
+                  the block end, e.g. mean forecast temperature over the next 3h.
+                Statistics: mean, sum, min, max, std, count. Unlike a history
+                window, sum/min/max are allowed — the covariate is a known fact
+                over the block, not a single draw of the target.
+            by: Column(s) forming the series key — read at predict time, so they
+                must be serving columns. Omit for a single series. An aggregate
+                never crosses a series or a block boundary.
+            table: Path to the source table. Omit to use the run's work table.
+        """
+        return _retryable(
+            lambda: tools.fit_future_covariate_window(
+                ctx.deps.session, value=value, aggregates=aggregates,
+                by=by, table=table,
+            ),
+            ctx,
+        )
+
+    if workflow == "forecast":
+        agent.tool(fit_future_covariate_window)
 
     @agent.tool
     def filter_rows(
@@ -808,7 +886,9 @@ def run(session: RunSession, prompt: str, model=DEFAULT_MODEL):
     from pydantic_ai.exceptions import UsageLimitExceeded
     from pydantic_ai.usage import UsageLimits
 
-    agent = build_agent(model, profile=session.profile)
+    agent = build_agent(
+        model, profile=session.profile, workflow=getattr(session, "workflow", "general")
+    )
     try:
         return agent.run_sync(
             prompt,

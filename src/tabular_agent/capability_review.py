@@ -146,8 +146,8 @@ def build_review_context(run_dir: str | os.PathLike) -> dict[str, Any]:
     add("split", "data_contract", {
         key: (report.get("split") or {}).get(key)
         for key in (
-            "profile", "n_work", "n_val", "n_holdout", "split_on",
-            "stratified", "val_is_thin", "holdout_is_thin",
+            "profile", "workflow", "n_work", "n_val", "n_holdout", "split_on",
+            "forecast_horizon", "stratified", "val_is_thin", "holdout_is_thin",
         )
     })
     add("shipped", "shipment", dict(report.get("shipped") or {}))

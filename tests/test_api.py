@@ -127,6 +127,8 @@ def test_plan_summary_tracks_open_decisions(tmp_path):
     plan.target = "Sales"
     plan.serving_columns = list(plan.proposed_serving_columns)
     plan.split_on = "Date"
+    assert "[ ] forecast_horizon" in plan.summary()
+    plan.forecast_horizon = 42
     plan.accept_joins()
 
     done = plan.summary()
@@ -392,3 +394,76 @@ def test_run_training_features_reads_oof_table_instead_of_replaying(monkeypatch,
 
     pd.testing.assert_frame_equal(exported, fitted)
     assert run.training_features(include_target=False).columns.tolist() == ["x", "group_te"]
+
+
+def test_agent_and_forecasting_agent_enforce_distinct_public_contracts(tmp_path):
+    frame = pd.DataFrame({
+        "Date": pd.date_range("2024-01-01", periods=40),
+        "Store": [1, 2] * 20,
+        "target": np.arange(40, dtype=float),
+    })
+
+    iid = ta.Agent(model=object(), run_root=tmp_path / "iid")
+    iid_plan = iid.inspect(frame)
+    iid_plan.target = "target"
+    iid_plan.serving_columns = ["Date", "Store"]
+    iid_plan.split_on = "Date"
+    iid_plan.forecast_horizon = 7
+    with pytest.raises(ValueError, match="use ForecastingAgent"):
+        iid.run(iid_plan)
+
+    forecast = ta.ForecastingAgent(model=object(), run_root=tmp_path / "forecast")
+    forecast_plan = forecast.inspect(frame)
+    forecast_plan.target = "target"
+    forecast_plan.serving_columns = ["Date", "Store"]
+    forecast_plan.split_on = False
+    with pytest.raises(ValueError, match="time column"):
+        forecast.run(forecast_plan)
+
+    forecast_plan.split_on = "Date"
+    with pytest.raises(ValueError, match="positive plan.forecast_horizon"):
+        forecast.run(forecast_plan)
+
+
+def test_forecasting_agent_passes_explicit_workflow_to_shared_engine(monkeypatch, tmp_path):
+    frame = pd.DataFrame({
+        "Date": pd.date_range("2024-01-01", periods=40),
+        "Store": [1, 2] * 20,
+        "target": np.arange(40, dtype=float),
+    })
+    agent = ta.ForecastingAgent(model=object(), run_root=tmp_path, holdout_fraction=0.2)
+    plan = agent.inspect(frame)
+    plan.target = "target"
+    plan.serving_columns = ["Date", "Store"]
+    plan.split_on = "Date"
+    plan.forecast_horizon = 7
+    called = {}
+
+    def fake_run(session, prompt, model):
+        called["session"] = session
+
+    def fake_finalize(session):
+        bundle = Path(session.run_dir) / "bundle"
+        bundle.mkdir()
+        (bundle / "pipeline.json").write_text("{}")
+        return {"bundle_dir": "bundle"}
+
+    class FakeRun:
+        def __init__(self, run_dir):
+            self.run_dir = str(run_dir)
+
+    monkeypatch.setattr(public_api, "run_agent", fake_run)
+    monkeypatch.setattr(public_api, "finalize_run", fake_finalize)
+    monkeypatch.setattr(public_api, "Run", FakeRun)
+
+    agent.run(plan)
+    session = called["session"]
+    assert session.workflow == "forecast"
+    assert session.profile == "full"
+    assert session.split_on == "Date"
+    assert session.split_record()["forecast_horizon"] == 7
+    assert session.split_record()["workflow"] == "forecast"
+
+
+def test_forecasting_agent_is_public():
+    assert ta.ForecastingAgent is public_api.ForecastingAgent

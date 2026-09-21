@@ -30,6 +30,7 @@ from ..encoders import STREAM_STATS, TARGET_STATS, StreamAggregateEncoder
 from ..encoders import fit_encoding as _fit_encoding
 from ..encoders import fit_group_stats as _fit_group_stats
 from ..encoders import fit_history as _fit_history
+from ..encoders import fit_future_covariate_window as _fit_future_covariate_window
 from ..encoders import to_periods as _to_periods
 from ..inspect import profile_dataframe, profile_stream
 from ..io import load_table, save_parquet
@@ -737,6 +738,22 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
         # about — the note says so, so the refusal is not a surprise.
         **({"columns_not_available_at_predict_time": unavailable}
            if unavailable else {}),
+        # Only when the run declares them (0090). Serving columns whose values over
+        # the forecast horizon are known at issue time, so a *forward* aggregate of
+        # them is legal where the target's is not. Named here because no other tool
+        # reports the declaration and the agent otherwise cannot know which columns
+        # fit_future_covariate_window will accept.
+        **({"future_known_columns": list(session.future_known),
+            "future_known_note": (
+                "These serving columns' values over the forecast horizon are "
+                "declared known at issue time. Aggregate them forward across the "
+                "horizon with fit_future_covariate_window (whole-day totals, "
+                "block-local rolling means, next-N-rows windows) — fit_history "
+                "cannot, being backward and target-bound. CAVEAT: if these are the "
+                "realised future rather than a forecast as known at each historical "
+                "issue time, a model trained on them leans on information a "
+                "production forecast issued at the cutoff would not have."
+            )} if getattr(session, "future_known", None) else {}),
         # Only when the run declares one. A stream is a *second input* — a related
         # file at a finer grain, whose records say both what they are about and
         # when they became knowable — and it is invisible to every other tool, so
@@ -1519,6 +1536,151 @@ def fit_stream_aggregate(
         # rather than restating how sparse the feed is.
         "records_per_row": records_per_row,
         "block_span": block_span,
+        "note": note,
+    }
+
+
+def fit_future_covariate_window(
+    session: RunSession,
+    value: str,
+    aggregates: list,
+    by: list[str] | None = None,
+    table: str | None = None,
+) -> dict:
+    """Windowed aggregates of a declared future-known covariate, per series and block.
+
+    The exogenous counterpart to `fit_history`. History summarises the target's
+    own *past*; this summarises a covariate whose values over the forecast horizon
+    are **known at issue time** — declared `future_known` on the run — so it may
+    look *forward* across the horizon, which a backward, target-bound tool cannot.
+
+    Only a column the run declared `future_known` is eligible; anything else is
+    refused with the reason (the target, an undeclared covariate). Every aggregate
+    is keyed within one series and one delivered serving block and resets at the
+    block start, so at serving — where the model is handed exactly one block per
+    series — it computes the same block-local statistic it did in training.
+    """
+    refusal = _refuse_if_finished(session)
+    if refusal is not None:
+        return refusal
+
+    path = session.resolve_table(table)
+    spec = session.resolved()
+    df = load_table(path)
+    by = list(by or [])
+
+    if session.split_on is None:
+        raise ValueError(
+            "this run is not split on an ordering column, so there is no horizon a "
+            "covariate could be known across: future-covariate windows are for a "
+            "forecast, where a block of future rows is delivered together."
+        )
+    if spec.forecast_horizon is None or spec.forecast_horizon <= 0:
+        raise ValueError(
+            "future-covariate windows need the task to declare its forecast horizon; "
+            "it is the length of one delivered serving block, the unit each aggregate "
+            "resets on. Set TaskSpec.forecast_horizon to a positive lead."
+        )
+    order = session.split_on
+
+    # Presence is not permission (0090): only a column the owner declared known
+    # across the horizon may be aggregated forward. The refusal names why, because
+    # the whole point of the class is that a realised future column looks identical
+    # to a legal one from inside the run.
+    if value not in session.future_known:
+        if value == spec.target:
+            raise ValueError(
+                f"refusing to build a forward window of the target {value!r}: the "
+                "target is unknown across the horizon by definition — that is what "
+                "makes it the target. Its past is reachable with fit_history."
+            )
+        raise ValueError(
+            f"{value!r} is not declared future_known, so a forward-looking aggregate "
+            "of it would assume information the served model will not have. Declared "
+            f"future-known columns are {session.future_known or '(none)'}. If this "
+            "column's values over the horizon really are known at issue time, the "
+            "run's owner declares it on the plan (plan.future_known = [...]); the "
+            "harness never infers it, because a value present in a test file is not "
+            "the same as a value known in production."
+        )
+
+    missing = [c for c in [*by, value, order] if c not in df.columns]
+    if missing:
+        raise ValueError(f"columns not in {session.rel(path)}: {missing}")
+    unavailable = [
+        c for c in [*by, value, order] if c in _unavailable_at_predict_time(session, df)
+    ]
+    if unavailable:
+        raise ValueError(
+            f"cannot build future-covariate windows on {unavailable}: these columns "
+            "will not exist when a prediction is asked for, so the aggregate could "
+            "never be recomputed. The series key, the ordering column and the "
+            "covariate all have to be serving columns."
+        )
+
+    train_features, encoder = _fit_future_covariate_window(
+        df, by, value, order, spec.forecast_horizon, aggregates,
+    )
+
+    out = df.join(train_features)
+    table_id = journal.next_table_id(session.run_dir)
+    out_path = session.ctx.path("tables", f"{table_id}.parquet")
+    save_parquet(out, out_path)
+
+    lineage = _load_lineage(path, spec.task_type)
+    lineage.add_encoder(encoder)
+    with open(_lineage_path(out_path), "w") as f:
+        json.dump(lineage.to_dict(), f, indent=2)
+
+    new_columns = list(train_features.columns)
+    scored = _probe_and_compare(session, out_path, session.rel(path))
+    journal.append_table(session.run_dir, {
+        "id": table_id,
+        "path": session.rel(out_path),
+        "source_table": session.rel(path),
+        "method": "future_window",
+        "group_by": by,
+        "value_column": value,
+        "order_column": order,
+        "block_length": spec.forecast_horizon,
+        "aggregates": [dict(s) for s in encoder.aggregates],
+        "new_columns": new_columns,
+        "n_steps": len(lineage.steps),
+        **scored,
+    })
+
+    # How many rows each new column actually filled — a period unit that never
+    # straddles a block always fills, but a row with no ordering value drops out of
+    # every group, so a column full of NaN is the sign the ordering column did not
+    # parse.
+    filled = {c: int(out[c].notna().sum()) for c in new_columns}
+    n_series = int(pd.unique(encoder._keys(df)).size)
+
+    note = (
+        "This table is scored above; build on it to keep the new columns. Every "
+        "aggregate is keyed within one series and one delivered serving block "
+        f"(one forecast horizon, {spec.forecast_horizon:g} in {order!r}) and resets "
+        "at the block start, so at serving — where you are handed exactly one block "
+        "per series — it recomputes the same block-local statistic. No fold freeze "
+        "is involved: a future covariate is known across the horizon, so a forward "
+        "or whole-block aggregate of it is the same number in training and at "
+        "serving and reads no target. REALISM CAVEAT: if these covariate values are "
+        "the *realised* future (as a competition test file delivers) rather than a "
+        "forecast as it was known at each issue time, a model trained on them learns "
+        "on information a production forecast issued at the cutoff would not have."
+    )
+
+    return {
+        "table": session.rel(out_path),
+        "new_columns": new_columns,
+        "n_series": n_series,
+        "n_rows": int(len(out)),
+        "source_table": session.rel(path),
+        **_agent_score_fields(session, scored),
+        # {column: rows filled}. A column all-NaN means the ordering column did not
+        # parse for those rows, not that the covariate was empty.
+        "rows_filled": filled,
+        "block_length": spec.forecast_horizon,
         "note": note,
     }
 

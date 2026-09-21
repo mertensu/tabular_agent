@@ -1,54 +1,53 @@
 # Handoff
 
-## Latest session (2026-09-16)
+## Latest session (2026-09-17)
 
-Built an evidence-bound capability-review V1 on branch
-chad/capability-review-v1, based on origin/master at 8bcf0e3.
+Merged capability-review V1 to master first, then built the explicit forecasting
+surface on branch `chad/forecasting-agent`.
 
-- Agent.review_capabilities(run) performs one explicit post-finalization LLM
-  review with structured output and no tools
-- the reviewer receives allow-listed aggregate run evidence, never raw rows,
-  target values, fitted lookups, transform code, artifact paths, or transcripts
-- findings distinguish capability, agent, tool, model/selection, and data-contract
-  gaps from a run that demonstrates no generic gap
-- every finding must cite real evidence IDs, name a generic capability, state an
-  alternative cause and leakage/serving risk, and propose a falsifiable test
-- unknown evidence references are rejected before persistence
-- capability_review.json is write-once under a cross-process lock; repeat calls
-  return the persisted result instead of spending another model call
-- Markdown, sanitized JSON, and offline HTML all gain a “What limited this run?”
-  section; dynamic prose is escaped in rendered surfaces
-- tabular_agent.capability_backlog(runs) groups deterministic fingerprints as
-  proposed or recurring; it can never accept a product change
+- `Agent` is now the public IID contract: it requires `split_on = False` and
+  cannot call `fit_history` or `fit_stream_aggregate`
+- `ForecastingAgent` is a separate public surface over the same engine: it
+  requires a confirmed ordering column and positive `forecast_horizon`
+- forecast runs receive a focused temporal brief which asks them to test honest
+  history when a repeated series is expressible, while ordinary interactions
+  and row-local transforms remain common to both workflows
+- workflow and horizon are persisted in the split contract, checked on resume,
+  visible in Markdown/JSON/HTML, and available to capability review
+- the guided DataPlan summary now surfaces the horizon when an ordered split is
+  selected
+- the Quickstart documents the explicit choice; no automatic mode switching was
+  added
 
-The architectural boundary and rejected alternatives are recorded in
-docs/decisions/0088-a-run-may-propose-a-capability-gap-but-not-change-the-product.md.
-The previous handoff is archived verbatim under
-research/archive/handoffs/2026-09-15--2026-09-16.md.
+Decision 0089 records why these are two product contracts but one implementation,
+and preregisters the repeated Rossmann acceptance test as a variance test rather
+than a best-score contest.
 
 ## Verification so far
 
-- focused reviewer/dashboard/API suite: 21 tests pass
-- full repository suite: 617 tests pass, exit 0 (6:50)
-- unknown-evidence, prompt allow-list, write-once, report injection, and recurring
-  backlog contracts have dedicated regression tests
-- Wheel and sdist build successfully with uv build
-- git diff --check passes
+- focused API/tool-surface/prompt/report/reviewer suite passes
+- full repository suite: 626 tests collected and all pass
+- Wheel and sdist build successfully with `uv build`
+- `git diff --check` and compile checks pass
+- the real-run acceptance is intentionally still pending: three predeclared
+  Rossmann runs with Requesty `deepseek-v4-flash-0731@eu`
 
 ## Next action
 
-Review and merge chad/capability-review-v1. After several independent real
-runs have reviews, inspect the grouped backlog and preregister one recurring
-hypothesis on an unseen dataset; do not treat recurrence itself as acceptance.
+Commit and push the implementation, then run exactly three Rossmann repetitions.
+For each, report whether at least one valid history family was attempted, its
+best internal validation/test score, feature count, and failure/refusal state.
+Report the distribution; do not select the best run.
 
 ## Blocking gotchas
 
-- capability review is deliberately opt-in because it is an additional paid LLM
-  call and transfers sanitized run metadata to the configured provider
-- the internal test score may support retrospective diagnosis, but the reviewer
-  has no fit/score/select/ship action; do not add one
-- do not replace the allow-list with the full journal: it contains transform code
-  and filesystem paths that the reviewer does not need
-- the lock file is durable coordination state; as with the journal lock, flock
-  is attached to the descriptor and is released automatically
-- recurring means “worth an owner-preregistered test,” never “build this tool”
+- Requesty model strings used as public API strings normally need a provider/model
+  slash to trigger gateway routing; for the exact requested bare model ID, pass a
+  preconfigured `gateway_model("deepseek-v4-flash-0731@eu")`
+- the forecast brief requires a history attempt only when an honest repeated
+  series is expressible; it must not fabricate an entity key on a single-series
+  or non-repeated dataset
+- low-level `RunSession(workflow="general")` remains backward compatible for
+  research scripts; do not weaken the strict public facade contracts to remove it
+- do not interpret a single improved repeat as acceptance: the motivating defect
+  was run-to-run omission of history

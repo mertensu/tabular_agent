@@ -1,0 +1,1890 @@
+{
+  "schema_version": 1,
+  "task": {
+    "target": "Sales",
+    "task_type": "regression",
+    "metric": "rmspe"
+  },
+  "baseline": {
+    "experiment_id": "e1",
+    "val_score": 0.7786564623476767,
+    "cv_score": 0.7690749950463383
+  },
+  "best": {
+    "experiment_id": "e2",
+    "val_score": 0.12615016035403087,
+    "cv_score": 0.2652196833973836,
+    "artifact_path": "experiments/e2"
+  },
+  "tables": [
+    {
+      "id": "t1",
+      "path": "tables/t1.parquet",
+      "source_table": "data/work.parquet",
+      "method": "transform",
+      "code": "import numpy as np\n\ndef transform_features(df):\n    df = df.copy()\n    df = df.drop(columns=[\"Customers\"], errors=\"ignore\")\n\n    d = df[\"Date\"].dt\n    df[\"Year\"] = d.year\n    df[\"Month\"] = d.month\n    df[\"Day\"] = d.day\n    df[\"WeekOfYear\"] = d.isocalendar().week.astype(int)\n    df[\"DayOfYear\"] = d.dayofyear\n    df[\"Quarter\"] = d.quarter\n    df[\"IsWeekend\"] = (df[\"DayOfWeek\"] >= 6).astype(int)\n    df[\"DaysToMonthEnd\"] = d.days_in_month - df[\"Day\"]\n\n    # leap-year helpers (pure row-local arithmetic)\n    y = df[\"Year\"]\n    is_leap = (((y % 4 == 0) & (y % 100 != 0)) | (y % 400 == 0)).astype(int)\n    days_in_year = 365 + is_leap\n    df[\"DaysInYear\"] = days_in_year\n    doy = df[\"DayOfYear\"]\n\n    # days to next New Year (Jan 1 of year+1)\n    df[\"DaysToNewYear\"] = days_in_year - doy + 1\n\n    # days to next Christmas (Dec 25)\n    # Dec 25 day-of-year depends on leapness of the target year\n    dec25 = 359 + is_leap\n    df[\"DaysToXmas\"] = np.where(doy <= dec25,\n                                dec25 - doy,\n                                (days_in_year - doy) + (359 + is_leap + 1 - 1))\n\n    # months since competition opened\n    df[\"CompAgeMonths\"] = (y - df[\"CompetitionOpenSinceYear\"]) * 12 + \\\n                          (df[\"Month\"] - df[\"CompetitionOpenSinceMonth\"])\n    df[\"CompAgeMonths\"] = df[\"CompAgeMonths\"].clip(lower=0)\n\n    df[\"IsPromo2\"] = (df[\"Promo2\"] == 1).astype(int)\n    df[\"Promo2Active\"] = 0\n    for col, mlist in [(\"Feb,May,Aug,Nov\",{2,5,8,11}),\n                       (\"Jan,Apr,Jul,Oct\",{1,4,7,10}),\n                       (\"Mar,Jun,Sept,Dec\",{3,6,9,12})]:\n        active = (df[\"PromoInterval\"].fillna(\"\") == col) & df[\"Month\"].isin(mlist)\n        df.loc[active, \"Promo2Active\"] = 1\n    df[\"Promo2Active\"] = df[\"IsPromo2\"] * df[\"Promo2Active\"]\n\n    df[\"Promo2SinceYear\"] = df[\"Promo2SinceYear\"].fillna(y)\n    df[\"Promo2SinceWeek\"] = df[\"Promo2SinceWeek\"].fillna(0)\n    promo2_months = (y - df[\"Promo2SinceYear\"]) * 12\n    df[\"Promo2Months\"] = (df[\"IsPromo2\"] * promo2_months).clip(lower=0)\n\n    return df",
+      "new_columns": [
+        "Year",
+        "Month",
+        "Day",
+        "WeekOfYear",
+        "DayOfYear",
+        "Quarter",
+        "IsWeekend",
+        "DaysToMonthEnd",
+        "DaysInYear",
+        "DaysToNewYear",
+        "DaysToXmas",
+        "CompAgeMonths",
+        "IsPromo2",
+        "Promo2Active",
+        "Promo2Months"
+      ],
+      "n_steps": 1,
+      "probe_score": 0.238574,
+      "probe_fit_seconds": 4.73,
+      "probe_target_transform": "log1p",
+      "probe_se": null
+    },
+    {
+      "id": "t2",
+      "path": "tables/t2.parquet",
+      "source_table": "tables/t1.parquet",
+      "method": "target",
+      "encoded_columns": [
+        "StoreType",
+        "Assortment",
+        "StateHoliday",
+        "PromoInterval"
+      ],
+      "new_columns": [
+        "StoreType_te",
+        "StoreType_te_count",
+        "Assortment_te",
+        "Assortment_te_count",
+        "StateHoliday_te",
+        "StateHoliday_te_count",
+        "PromoInterval_te",
+        "PromoInterval_te_count"
+      ],
+      "n_steps": 2,
+      "target_stats": [
+        "mean",
+        "count"
+      ],
+      "probe_score": 0.230046,
+      "probe_fit_seconds": 6.8,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": 0.008528,
+      "probe_vs_source_interval": {
+        "gain": 0.008528,
+        "block_gains": [
+          0.004785,
+          0.006152,
+          0.008929,
+          0.016618,
+          0.004679
+        ],
+        "block_sd": 0.004464,
+        "sign_stable": true,
+        "blocks_favouring_a": 5,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    },
+    {
+      "id": "t3",
+      "path": "tables/t3.parquet",
+      "source_table": "tables/t2.parquet",
+      "method": "history",
+      "group_by": [
+        "Store"
+      ],
+      "value_column": "Sales",
+      "order_column": "Date",
+      "windows": [
+        [
+          56.0,
+          "mean"
+        ],
+        [
+          90.0,
+          "mean"
+        ],
+        [
+          182.0,
+          "mean"
+        ],
+        [
+          364.0,
+          "mean"
+        ]
+      ],
+      "new_columns": [
+        "Store_Sales_56_mean",
+        "Store_Sales_90_mean",
+        "Store_Sales_182_mean",
+        "Store_Sales_364_mean",
+        "Store_Sales_56_count",
+        "Store_Sales_90_count",
+        "Store_Sales_182_count",
+        "Store_Sales_364_count"
+      ],
+      "n_steps": 3,
+      "probe_score": 0.167053,
+      "probe_fit_seconds": 9.2,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": 0.062993,
+      "probe_vs_source_interval": {
+        "gain": 0.062992,
+        "block_gains": [
+          0.062292,
+          0.064492,
+          0.052732,
+          0.068617,
+          0.066489
+        ],
+        "block_sd": 0.005511,
+        "sign_stable": true,
+        "blocks_favouring_a": 5,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    },
+    {
+      "id": "t4",
+      "path": "tables/t4.parquet",
+      "source_table": "tables/t3.parquet",
+      "method": "history",
+      "group_by": [
+        "Store",
+        "DayOfWeek"
+      ],
+      "value_column": "Sales",
+      "order_column": "Date",
+      "windows": [
+        [
+          56.0,
+          "mean"
+        ],
+        [
+          112.0,
+          "mean"
+        ]
+      ],
+      "new_columns": [
+        "Store_DayOfWeek_Sales_56_mean",
+        "Store_DayOfWeek_Sales_112_mean",
+        "Store_DayOfWeek_Sales_56_count",
+        "Store_DayOfWeek_Sales_112_count"
+      ],
+      "n_steps": 4,
+      "probe_score": 0.146243,
+      "probe_fit_seconds": 17.56,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": 0.02081,
+      "probe_vs_source_interval": {
+        "gain": 0.02081,
+        "block_gains": [
+          0.03329,
+          0.011063,
+          0.021625,
+          0.018074,
+          0.022708
+        ],
+        "block_sd": 0.007225,
+        "sign_stable": true,
+        "blocks_favouring_a": 5,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      },
+      "credit_by_table": [
+        {
+          "table": "the work table",
+          "method": null,
+          "n_columns": 11,
+          "contribution": 0.104399
+        },
+        {
+          "table": "tables/t1.parquet",
+          "method": "transform",
+          "n_columns": 15,
+          "contribution": 0.002862
+        },
+        {
+          "table": "tables/t2.parquet",
+          "method": "target",
+          "n_columns": 8,
+          "contribution": 0.008911
+        },
+        {
+          "table": "tables/t3.parquet",
+          "method": "history",
+          "n_columns": 8,
+          "contribution": 0.043835
+        },
+        {
+          "table": "tables/t4.parquet",
+          "method": "history",
+          "n_columns": 4,
+          "contribution": -0.001017
+        }
+      ]
+    },
+    {
+      "id": "t5",
+      "path": "tables/t5.parquet",
+      "source_table": "tables/t4.parquet",
+      "method": "target",
+      "encoded_columns": [
+        "Store"
+      ],
+      "new_columns": [
+        "Store_te",
+        "Store_te_count"
+      ],
+      "n_steps": 5,
+      "target_stats": [
+        "mean",
+        "count"
+      ],
+      "probe_score": 0.14701,
+      "probe_fit_seconds": 16.59,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": -0.000767,
+      "probe_vs_source_interval": {
+        "gain": -0.000766,
+        "block_gains": [
+          0.005699,
+          -0.002352,
+          -0.00029,
+          -0.004095,
+          -0.001359
+        ],
+        "block_sd": 0.003334,
+        "sign_stable": false,
+        "blocks_favouring_a": 1,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    },
+    {
+      "id": "t6",
+      "path": "tables/t6.parquet",
+      "source_table": "tables/t5.parquet",
+      "method": "filter",
+      "code": "def keep_rows(df):\n    return (df[\"Open\"] == 1)",
+      "new_columns": [],
+      "n_rows": 759921,
+      "n_dropped": 155823,
+      "n_steps": 6,
+      "probe_score": 0.145869,
+      "probe_fit_seconds": 7.19,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": 0.001141,
+      "probe_vs_source_interval": {
+        "gain": 0.001141,
+        "block_gains": [
+          -0.005271,
+          0.00678,
+          0.003484,
+          -0.001118,
+          0.001235
+        ],
+        "block_sd": 0.004085,
+        "sign_stable": false,
+        "blocks_favouring_a": 3,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    },
+    {
+      "id": "t7",
+      "path": "tables/t7.parquet",
+      "source_table": "tables/t6.parquet",
+      "method": "history",
+      "group_by": [
+        "Store",
+        "DayOfWeek"
+      ],
+      "value_column": "Sales",
+      "order_column": "Date",
+      "windows": [
+        [
+          224.0,
+          "mean"
+        ],
+        [
+          364.0,
+          "mean"
+        ]
+      ],
+      "new_columns": [
+        "Store_DayOfWeek_Sales_224_mean",
+        "Store_DayOfWeek_Sales_364_mean",
+        "Store_DayOfWeek_Sales_224_count",
+        "Store_DayOfWeek_Sales_364_count"
+      ],
+      "n_steps": 7,
+      "probe_score": 0.135075,
+      "probe_fit_seconds": 8.38,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": 0.010794,
+      "probe_vs_source_interval": {
+        "gain": 0.010794,
+        "block_gains": [
+          0.009127,
+          0.011408,
+          0.000238,
+          0.023572,
+          0.00605
+        ],
+        "block_sd": 0.007717,
+        "sign_stable": true,
+        "blocks_favouring_a": 5,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      },
+      "credit_by_table": [
+        {
+          "table": "the work table",
+          "method": null,
+          "n_columns": 11,
+          "contribution": 0.076862
+        },
+        {
+          "table": "tables/t1.parquet",
+          "method": "transform",
+          "n_columns": 15,
+          "contribution": 0.000809
+        },
+        {
+          "table": "tables/t2.parquet",
+          "method": "target",
+          "n_columns": 8,
+          "contribution": -0.00258
+        },
+        {
+          "table": "tables/t3.parquet",
+          "method": "history",
+          "n_columns": 8,
+          "contribution": -0.003325
+        },
+        {
+          "table": "tables/t4.parquet",
+          "method": "history",
+          "n_columns": 4,
+          "contribution": -0.008493
+        },
+        {
+          "table": "tables/t5.parquet",
+          "method": "target",
+          "n_columns": 2,
+          "contribution": -0.006186
+        },
+        {
+          "table": "tables/t7.parquet",
+          "method": "history",
+          "n_columns": 4,
+          "contribution": 0.01993
+        }
+      ]
+    },
+    {
+      "id": "t8",
+      "path": "tables/t8.parquet",
+      "source_table": "tables/t7.parquet",
+      "method": "history",
+      "group_by": [
+        "Store",
+        "Promo"
+      ],
+      "value_column": "Sales",
+      "order_column": "Date",
+      "windows": [
+        [
+          112.0,
+          "mean"
+        ],
+        [
+          224.0,
+          "mean"
+        ]
+      ],
+      "new_columns": [
+        "Store_Promo_Sales_112_mean",
+        "Store_Promo_Sales_224_mean",
+        "Store_Promo_Sales_112_count",
+        "Store_Promo_Sales_224_count"
+      ],
+      "n_steps": 8,
+      "probe_score": 0.135409,
+      "probe_fit_seconds": 8.19,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": -0.000334,
+      "probe_vs_source_interval": {
+        "gain": -0.000334,
+        "block_gains": [
+          0.006156,
+          -0.010008,
+          0.000975,
+          6.4e-05,
+          0.003813
+        ],
+        "block_sd": 0.005538,
+        "sign_stable": false,
+        "blocks_favouring_a": 4,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    },
+    {
+      "id": "t9",
+      "path": "tables/t9.parquet",
+      "source_table": "tables/t7.parquet",
+      "method": "transform",
+      "code": "import numpy as np\n\ndef transform_features(df):\n    df = df.copy()\n    dt = df[\"Date\"]\n    y = dt.dt.year.astype(int)\n    doy = dt.dt.dayofyear.astype(int)\n    is_leap = (((y % 4 == 0) & (y % 100 != 0)) | (y % 400 == 0)).astype(int)\n    din = 365 + is_leap\n    cum = np.array([0,31,59,90,120,151,181,212,243,273,304,334])\n\n    def month_day_month(m, dd):\n        # doy of month m day dd\n        return ((cum[m-1] + dd) + (is_leap * (m > 2))).astype(int)\n\n    a = y % 19; b = y // 100; c = y % 100\n    d = b // 4; e = b % 4; f = (b + 8) // 25; g = (b - f + 1) // 3\n    h = (19*a + b - d - g + 15) % 30; i = c // 4; k = c % 4\n    l = (32 + 2*e + 2*i - h - k) % 7\n    mm = (h + l - 7*((a + 11*h + 22*l) // 451) + 114) // 31\n    dd = ((h + l - 7*((a + 11*h + 22*l) // 451) + 114) % 31) + 1\n    easter_doy = month_day_month(mm, dd)\n    gf_doy = easter_doy - 2\n    em_doy = easter_doy + 1\n\n    df[\"DaysToGoodFriday\"] = np.where(doy <= gf_doy, gf_doy - doy, (din - doy) + gf_doy)\n    df[\"DaysToEasterMonday\"] = np.where(doy <= em_doy, em_doy - doy, (din - doy) + em_doy)\n    df[\"DaysSinceEaster\"] = np.where(doy >= easter_doy, doy - easter_doy, doy - (easter_doy - din))\n    df[\"NearEaster\"] = (np.abs(doy - easter_doy) <= 15).astype(int)\n    return df",
+      "new_columns": [
+        "DaysToGoodFriday",
+        "DaysToEasterMonday",
+        "DaysSinceEaster",
+        "NearEaster"
+      ],
+      "n_steps": 8,
+      "probe_score": 0.130083,
+      "probe_fit_seconds": 7.66,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": 0.004992,
+      "probe_vs_source_interval": {
+        "gain": 0.004992,
+        "block_gains": [
+          -0.001363,
+          0.019212,
+          0.003879,
+          0.003003,
+          -0.001338
+        ],
+        "block_sd": 0.007581,
+        "sign_stable": false,
+        "blocks_favouring_a": 3,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    },
+    {
+      "id": "t10",
+      "path": "tables/t10.parquet",
+      "source_table": "tables/t9.parquet",
+      "method": "history",
+      "group_by": [
+        "Store",
+        "SchoolHoliday"
+      ],
+      "value_column": "Sales",
+      "order_column": "Date",
+      "windows": [
+        [
+          168.0,
+          "mean"
+        ],
+        [
+          336.0,
+          "mean"
+        ]
+      ],
+      "new_columns": [
+        "Store_SchoolHoliday_Sales_168_mean",
+        "Store_SchoolHoliday_Sales_336_mean",
+        "Store_SchoolHoliday_Sales_168_count",
+        "Store_SchoolHoliday_Sales_336_count"
+      ],
+      "n_steps": 9,
+      "probe_score": 0.12615,
+      "probe_fit_seconds": 9.2,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": 0.003933,
+      "probe_vs_source_interval": {
+        "gain": 0.003933,
+        "block_gains": [
+          0.003333,
+          -0.000685,
+          0.009828,
+          0.005192,
+          0.001932
+        ],
+        "block_sd": 0.003522,
+        "sign_stable": false,
+        "blocks_favouring_a": 4,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    },
+    {
+      "id": "t11",
+      "path": "tables/t11.parquet",
+      "source_table": "tables/t10.parquet",
+      "method": "history",
+      "group_by": [
+        "Store",
+        "DayOfWeek"
+      ],
+      "value_column": "Sales",
+      "order_column": "Date",
+      "windows": [
+        [
+          700.0,
+          "mean"
+        ],
+        [
+          896.0,
+          "mean"
+        ]
+      ],
+      "new_columns": [
+        "Store_DayOfWeek_Sales_700_mean",
+        "Store_DayOfWeek_Sales_896_mean",
+        "Store_DayOfWeek_Sales_700_count",
+        "Store_DayOfWeek_Sales_896_count"
+      ],
+      "n_steps": 10,
+      "probe_score": 0.167449,
+      "probe_fit_seconds": 9.57,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": -0.041299,
+      "probe_vs_source_interval": {
+        "gain": -0.041299,
+        "block_gains": [
+          -0.032994,
+          -0.027875,
+          -0.054821,
+          -0.047455,
+          -0.042452
+        ],
+        "block_sd": 0.009707,
+        "sign_stable": true,
+        "blocks_favouring_a": 0,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    },
+    {
+      "id": "t12",
+      "path": "tables/t12.parquet",
+      "source_table": "tables/t10.parquet",
+      "method": "transform",
+      "code": "import numpy as np\n\ndef transform_features(df):\n    df = df.copy()\n    # recent trailing avg relative to seasonal baseline (recent-vs-seasonal lift)\n    recent = df[\"Store_Sales_56_mean\"]\n    seas = df[\"Store_DayOfWeek_Sales_364_mean\"]\n    df[\"RecentVsSeasonal\"] = np.where((seas > 0) & recent.notna(),\n                                      recent / seas, np.nan)\n    # current week's vs longer trend\n    w56 = df[\"Store_Sales_56_mean\"]\n    w364 = df[\"Store_Sales_364_mean\"]\n    df[\"MomentumShort\"] = np.where((w364 > 0) & w56.notna() & w364.notna(),\n                                   w56 / w364, np.nan)\n    return df",
+      "new_columns": [
+        "RecentVsSeasonal",
+        "MomentumShort"
+      ],
+      "n_steps": 10,
+      "probe_score": 0.134548,
+      "probe_fit_seconds": 13.48,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": -0.008398,
+      "probe_vs_source_interval": {
+        "gain": -0.008398,
+        "block_gains": [
+          0.002646,
+          -0.000334,
+          -0.019036,
+          -0.013442,
+          -0.010778
+        ],
+        "block_sd": 0.008137,
+        "sign_stable": false,
+        "blocks_favouring_a": 1,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    },
+    {
+      "id": "t13",
+      "path": "tables/t13.parquet",
+      "source_table": "tables/t10.parquet",
+      "method": "history",
+      "group_by": [
+        "Store",
+        "StateHoliday"
+      ],
+      "value_column": "Sales",
+      "order_column": "Date",
+      "windows": [
+        [
+          336.0,
+          "mean"
+        ],
+        [
+          672.0,
+          "mean"
+        ]
+      ],
+      "new_columns": [
+        "Store_StateHoliday_Sales_336_mean",
+        "Store_StateHoliday_Sales_672_mean",
+        "Store_StateHoliday_Sales_336_count",
+        "Store_StateHoliday_Sales_672_count"
+      ],
+      "n_steps": 10,
+      "probe_score": 0.126696,
+      "probe_fit_seconds": 10.65,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": -0.000546,
+      "probe_vs_source_interval": {
+        "gain": -0.000546,
+        "block_gains": [
+          0.010691,
+          -0.004613,
+          0.000661,
+          0.000706,
+          -0.009814
+        ],
+        "block_sd": 0.006808,
+        "sign_stable": false,
+        "blocks_favouring_a": 3,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    },
+    {
+      "id": "t14",
+      "path": "tables/t14.parquet",
+      "source_table": "tables/t10.parquet",
+      "method": "history",
+      "group_by": [
+        "Store",
+        "DayOfWeek"
+      ],
+      "value_column": "Sales",
+      "order_column": "Date",
+      "windows": [
+        [
+          420.0,
+          "mean"
+        ]
+      ],
+      "new_columns": [
+        "Store_DayOfWeek_Sales_420_mean",
+        "Store_DayOfWeek_Sales_420_count"
+      ],
+      "n_steps": 10,
+      "probe_score": 0.13218,
+      "probe_fit_seconds": 9.04,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": -0.00603,
+      "probe_vs_source_interval": {
+        "gain": -0.00603,
+        "block_gains": [
+          -0.004128,
+          -0.003298,
+          -0.013781,
+          -0.006912,
+          -0.001739
+        ],
+        "block_sd": 0.004251,
+        "sign_stable": true,
+        "blocks_favouring_a": 0,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    },
+    {
+      "id": "t15",
+      "path": "tables/t15.parquet",
+      "source_table": "tables/t10.parquet",
+      "method": "history",
+      "group_by": [
+        "Store",
+        "DayOfWeek"
+      ],
+      "value_column": "Sales",
+      "order_column": "Date",
+      "windows": [
+        [
+          252.0,
+          "mean"
+        ]
+      ],
+      "new_columns": [
+        "Store_DayOfWeek_Sales_252_mean",
+        "Store_DayOfWeek_Sales_252_count"
+      ],
+      "n_steps": 10,
+      "probe_score": 0.131669,
+      "probe_fit_seconds": 8.9,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": -0.005519,
+      "probe_vs_source_interval": {
+        "gain": -0.005519,
+        "block_gains": [
+          -0.003911,
+          -0.014858,
+          -0.004459,
+          -0.002577,
+          -0.000982
+        ],
+        "block_sd": 0.0049,
+        "sign_stable": true,
+        "blocks_favouring_a": 0,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    },
+    {
+      "id": "t16",
+      "path": "tables/t16.parquet",
+      "source_table": "tables/t10.parquet",
+      "method": "history",
+      "group_by": [
+        "Store",
+        "DayOfWeek",
+        "Promo"
+      ],
+      "value_column": "Sales",
+      "order_column": "Date",
+      "windows": [
+        [
+          168.0,
+          "mean"
+        ],
+        [
+          336.0,
+          "mean"
+        ]
+      ],
+      "new_columns": [
+        "Store_DayOfWeek_Promo_Sales_168_mean",
+        "Store_DayOfWeek_Promo_Sales_336_mean",
+        "Store_DayOfWeek_Promo_Sales_168_count",
+        "Store_DayOfWeek_Promo_Sales_336_count"
+      ],
+      "n_steps": 10,
+      "probe_score": 0.130179,
+      "probe_fit_seconds": 9.35,
+      "probe_target_transform": "log1p",
+      "probe_se": null,
+      "probe_vs_source_table": -0.004029,
+      "probe_vs_source_interval": {
+        "gain": -0.004029,
+        "block_gains": [
+          0.014175,
+          -0.015359,
+          -0.008925,
+          -0.011386,
+          0.006447
+        ],
+        "block_sd": 0.011335,
+        "sign_stable": false,
+        "blocks_favouring_a": 2,
+        "n_blocks": 5,
+        "n_rows": 50175,
+        "mode": "ordered_blocks"
+      }
+    }
+  ],
+  "leaderboard": [
+    {
+      "id": "e1",
+      "model_type": "baseline",
+      "params": {},
+      "target_transform": "log1p",
+      "reference_target": null,
+      "features": [
+        "Store",
+        "DayOfWeek",
+        "Customers",
+        "Open",
+        "Promo",
+        "SchoolHoliday",
+        "CompetitionDistance",
+        "CompetitionOpenSinceMonth",
+        "CompetitionOpenSinceYear",
+        "Promo2",
+        "Promo2SinceWeek",
+        "Promo2SinceYear"
+      ],
+      "source_table": "data/work.parquet",
+      "metric": "rmspe",
+      "val_score": 0.7786564623476767,
+      "val_unavailable": null,
+      "val_se": null,
+      "cv_score": 0.7690749950463383,
+      "fold_spread": 0.004466310263159418,
+      "fit_seconds": 0.1,
+      "vs_baseline": null,
+      "artifact_path": "experiments/e1",
+      "vs_source_table": null,
+      "vs_source_basis": "the work table was not derived from another table",
+      "columns_by_table": [
+        {
+          "table": "the work table",
+          "method": null,
+          "n_columns": 12
+        }
+      ]
+    },
+    {
+      "id": "e2",
+      "model_type": "lgbm",
+      "params": {
+        "n_estimators": 200
+      },
+      "target_transform": "log1p",
+      "reference_target": null,
+      "features": [
+        "Store",
+        "DayOfWeek",
+        "Open",
+        "Promo",
+        "SchoolHoliday",
+        "CompetitionDistance",
+        "CompetitionOpenSinceMonth",
+        "CompetitionOpenSinceYear",
+        "Promo2",
+        "Promo2SinceWeek",
+        "Promo2SinceYear",
+        "Year",
+        "Month",
+        "Day",
+        "WeekOfYear",
+        "DayOfYear",
+        "Quarter",
+        "IsWeekend",
+        "DaysToMonthEnd",
+        "DaysInYear",
+        "DaysToNewYear",
+        "DaysToXmas",
+        "CompAgeMonths",
+        "IsPromo2",
+        "Promo2Active",
+        "Promo2Months",
+        "StoreType_te",
+        "StoreType_te_count",
+        "Assortment_te",
+        "Assortment_te_count",
+        "StateHoliday_te",
+        "StateHoliday_te_count",
+        "PromoInterval_te",
+        "PromoInterval_te_count",
+        "Store_Sales_56_mean",
+        "Store_Sales_90_mean",
+        "Store_Sales_182_mean",
+        "Store_Sales_364_mean",
+        "Store_Sales_56_count",
+        "Store_Sales_90_count",
+        "Store_Sales_182_count",
+        "Store_Sales_364_count",
+        "Store_DayOfWeek_Sales_56_mean",
+        "Store_DayOfWeek_Sales_112_mean",
+        "Store_DayOfWeek_Sales_56_count",
+        "Store_DayOfWeek_Sales_112_count",
+        "Store_te",
+        "Store_te_count",
+        "Store_DayOfWeek_Sales_224_mean",
+        "Store_DayOfWeek_Sales_364_mean",
+        "Store_DayOfWeek_Sales_224_count",
+        "Store_DayOfWeek_Sales_364_count",
+        "DaysToGoodFriday",
+        "DaysToEasterMonday",
+        "DaysSinceEaster",
+        "NearEaster",
+        "Store_SchoolHoliday_Sales_168_mean",
+        "Store_SchoolHoliday_Sales_336_mean",
+        "Store_SchoolHoliday_Sales_168_count",
+        "Store_SchoolHoliday_Sales_336_count"
+      ],
+      "source_table": "tables/t10.parquet",
+      "metric": "rmspe",
+      "val_score": 0.12615016035403087,
+      "val_unavailable": null,
+      "val_se": null,
+      "cv_score": 0.2652196833973836,
+      "fold_spread": 0.08665872559666718,
+      "fit_seconds": 33.2,
+      "vs_baseline": 0.652506,
+      "artifact_path": "experiments/e2",
+      "vs_source_table": null,
+      "vs_source_basis": "no gain available: tables/t9.parquet has never been trained. Train lgbm with these params on tables/t9.parquet to get one, or call explain_table on tables/t10.parquet to measure each table's columns directly.",
+      "columns_by_table": [
+        {
+          "table": "the work table",
+          "method": null,
+          "n_columns": 11
+        },
+        {
+          "table": "tables/t1.parquet",
+          "method": "transform",
+          "n_columns": 15
+        },
+        {
+          "table": "tables/t2.parquet",
+          "method": "target",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t3.parquet",
+          "method": "history",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t4.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t5.parquet",
+          "method": "target",
+          "n_columns": 2
+        },
+        {
+          "table": "tables/t7.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t9.parquet",
+          "method": "transform",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t10.parquet",
+          "method": "history",
+          "n_columns": 4
+        }
+      ]
+    },
+    {
+      "id": "e3",
+      "model_type": "xgb",
+      "params": {},
+      "target_transform": "log1p",
+      "reference_target": null,
+      "features": [
+        "Store",
+        "DayOfWeek",
+        "Open",
+        "Promo",
+        "SchoolHoliday",
+        "CompetitionDistance",
+        "CompetitionOpenSinceMonth",
+        "CompetitionOpenSinceYear",
+        "Promo2",
+        "Promo2SinceWeek",
+        "Promo2SinceYear",
+        "Year",
+        "Month",
+        "Day",
+        "WeekOfYear",
+        "DayOfYear",
+        "Quarter",
+        "IsWeekend",
+        "DaysToMonthEnd",
+        "DaysInYear",
+        "DaysToNewYear",
+        "DaysToXmas",
+        "CompAgeMonths",
+        "IsPromo2",
+        "Promo2Active",
+        "Promo2Months",
+        "StoreType_te",
+        "StoreType_te_count",
+        "Assortment_te",
+        "Assortment_te_count",
+        "StateHoliday_te",
+        "StateHoliday_te_count",
+        "PromoInterval_te",
+        "PromoInterval_te_count",
+        "Store_Sales_56_mean",
+        "Store_Sales_90_mean",
+        "Store_Sales_182_mean",
+        "Store_Sales_364_mean",
+        "Store_Sales_56_count",
+        "Store_Sales_90_count",
+        "Store_Sales_182_count",
+        "Store_Sales_364_count",
+        "Store_DayOfWeek_Sales_56_mean",
+        "Store_DayOfWeek_Sales_112_mean",
+        "Store_DayOfWeek_Sales_56_count",
+        "Store_DayOfWeek_Sales_112_count",
+        "Store_te",
+        "Store_te_count",
+        "Store_DayOfWeek_Sales_224_mean",
+        "Store_DayOfWeek_Sales_364_mean",
+        "Store_DayOfWeek_Sales_224_count",
+        "Store_DayOfWeek_Sales_364_count",
+        "DaysToGoodFriday",
+        "DaysToEasterMonday",
+        "DaysSinceEaster",
+        "NearEaster",
+        "Store_SchoolHoliday_Sales_168_mean",
+        "Store_SchoolHoliday_Sales_336_mean",
+        "Store_SchoolHoliday_Sales_168_count",
+        "Store_SchoolHoliday_Sales_336_count"
+      ],
+      "source_table": "tables/t10.parquet",
+      "metric": "rmspe",
+      "val_score": 0.1380243592902003,
+      "val_unavailable": null,
+      "val_se": null,
+      "cv_score": 0.28400395134427314,
+      "fold_spread": 0.0681008471172979,
+      "fit_seconds": 35.6,
+      "vs_baseline": 0.640632,
+      "artifact_path": "experiments/e3",
+      "vs_source_table": null,
+      "vs_source_basis": "no gain available: tables/t9.parquet has never been trained. Train xgb with these params on tables/t9.parquet to get one, or call explain_table on tables/t10.parquet to measure each table's columns directly.",
+      "columns_by_table": [
+        {
+          "table": "the work table",
+          "method": null,
+          "n_columns": 11
+        },
+        {
+          "table": "tables/t1.parquet",
+          "method": "transform",
+          "n_columns": 15
+        },
+        {
+          "table": "tables/t2.parquet",
+          "method": "target",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t3.parquet",
+          "method": "history",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t4.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t5.parquet",
+          "method": "target",
+          "n_columns": 2
+        },
+        {
+          "table": "tables/t7.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t9.parquet",
+          "method": "transform",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t10.parquet",
+          "method": "history",
+          "n_columns": 4
+        }
+      ]
+    },
+    {
+      "id": "e4",
+      "model_type": "catboost",
+      "params": {},
+      "target_transform": "log1p",
+      "reference_target": null,
+      "features": [
+        "Store",
+        "DayOfWeek",
+        "Open",
+        "Promo",
+        "SchoolHoliday",
+        "CompetitionDistance",
+        "CompetitionOpenSinceMonth",
+        "CompetitionOpenSinceYear",
+        "Promo2",
+        "Promo2SinceWeek",
+        "Promo2SinceYear",
+        "Year",
+        "Month",
+        "Day",
+        "WeekOfYear",
+        "DayOfYear",
+        "Quarter",
+        "IsWeekend",
+        "DaysToMonthEnd",
+        "DaysInYear",
+        "DaysToNewYear",
+        "DaysToXmas",
+        "CompAgeMonths",
+        "IsPromo2",
+        "Promo2Active",
+        "Promo2Months",
+        "StoreType_te",
+        "StoreType_te_count",
+        "Assortment_te",
+        "Assortment_te_count",
+        "StateHoliday_te",
+        "StateHoliday_te_count",
+        "PromoInterval_te",
+        "PromoInterval_te_count",
+        "Store_Sales_56_mean",
+        "Store_Sales_90_mean",
+        "Store_Sales_182_mean",
+        "Store_Sales_364_mean",
+        "Store_Sales_56_count",
+        "Store_Sales_90_count",
+        "Store_Sales_182_count",
+        "Store_Sales_364_count",
+        "Store_DayOfWeek_Sales_56_mean",
+        "Store_DayOfWeek_Sales_112_mean",
+        "Store_DayOfWeek_Sales_56_count",
+        "Store_DayOfWeek_Sales_112_count",
+        "Store_te",
+        "Store_te_count",
+        "Store_DayOfWeek_Sales_224_mean",
+        "Store_DayOfWeek_Sales_364_mean",
+        "Store_DayOfWeek_Sales_224_count",
+        "Store_DayOfWeek_Sales_364_count",
+        "DaysToGoodFriday",
+        "DaysToEasterMonday",
+        "DaysSinceEaster",
+        "NearEaster",
+        "Store_SchoolHoliday_Sales_168_mean",
+        "Store_SchoolHoliday_Sales_336_mean",
+        "Store_SchoolHoliday_Sales_168_count",
+        "Store_SchoolHoliday_Sales_336_count"
+      ],
+      "source_table": "tables/t10.parquet",
+      "metric": "rmspe",
+      "val_score": 0.14221151755009906,
+      "val_unavailable": null,
+      "val_se": null,
+      "cv_score": 0.26956625591302197,
+      "fold_spread": 0.07426753442767393,
+      "fit_seconds": 77.4,
+      "vs_baseline": 0.636445,
+      "artifact_path": "experiments/e4",
+      "vs_source_table": null,
+      "vs_source_basis": "no gain available: tables/t9.parquet has never been trained. Train catboost with these params on tables/t9.parquet to get one, or call explain_table on tables/t10.parquet to measure each table's columns directly.",
+      "columns_by_table": [
+        {
+          "table": "the work table",
+          "method": null,
+          "n_columns": 11
+        },
+        {
+          "table": "tables/t1.parquet",
+          "method": "transform",
+          "n_columns": 15
+        },
+        {
+          "table": "tables/t2.parquet",
+          "method": "target",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t3.parquet",
+          "method": "history",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t4.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t5.parquet",
+          "method": "target",
+          "n_columns": 2
+        },
+        {
+          "table": "tables/t7.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t9.parquet",
+          "method": "transform",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t10.parquet",
+          "method": "history",
+          "n_columns": 4
+        }
+      ]
+    },
+    {
+      "id": "e5",
+      "model_type": "elasticnet",
+      "params": {},
+      "target_transform": "log1p",
+      "reference_target": null,
+      "features": [
+        "Store",
+        "DayOfWeek",
+        "Open",
+        "Promo",
+        "SchoolHoliday",
+        "CompetitionDistance",
+        "CompetitionOpenSinceMonth",
+        "CompetitionOpenSinceYear",
+        "Promo2",
+        "Promo2SinceWeek",
+        "Promo2SinceYear",
+        "Year",
+        "Month",
+        "Day",
+        "WeekOfYear",
+        "DayOfYear",
+        "Quarter",
+        "IsWeekend",
+        "DaysToMonthEnd",
+        "DaysInYear",
+        "DaysToNewYear",
+        "DaysToXmas",
+        "CompAgeMonths",
+        "IsPromo2",
+        "Promo2Active",
+        "Promo2Months",
+        "StoreType_te",
+        "StoreType_te_count",
+        "Assortment_te",
+        "Assortment_te_count",
+        "StateHoliday_te",
+        "StateHoliday_te_count",
+        "PromoInterval_te",
+        "PromoInterval_te_count",
+        "Store_Sales_56_mean",
+        "Store_Sales_90_mean",
+        "Store_Sales_182_mean",
+        "Store_Sales_364_mean",
+        "Store_Sales_56_count",
+        "Store_Sales_90_count",
+        "Store_Sales_182_count",
+        "Store_Sales_364_count",
+        "Store_DayOfWeek_Sales_56_mean",
+        "Store_DayOfWeek_Sales_112_mean",
+        "Store_DayOfWeek_Sales_56_count",
+        "Store_DayOfWeek_Sales_112_count",
+        "Store_te",
+        "Store_te_count",
+        "Store_DayOfWeek_Sales_224_mean",
+        "Store_DayOfWeek_Sales_364_mean",
+        "Store_DayOfWeek_Sales_224_count",
+        "Store_DayOfWeek_Sales_364_count",
+        "DaysToGoodFriday",
+        "DaysToEasterMonday",
+        "DaysSinceEaster",
+        "NearEaster",
+        "Store_SchoolHoliday_Sales_168_mean",
+        "Store_SchoolHoliday_Sales_336_mean",
+        "Store_SchoolHoliday_Sales_168_count",
+        "Store_SchoolHoliday_Sales_336_count"
+      ],
+      "source_table": "tables/t10.parquet",
+      "metric": "rmspe",
+      "val_score": 0.1991376530504054,
+      "val_unavailable": null,
+      "val_se": null,
+      "cv_score": 0.33610723319604285,
+      "fold_spread": 0.12682300245582304,
+      "fit_seconds": 29.8,
+      "vs_baseline": 0.579519,
+      "artifact_path": "experiments/e5",
+      "vs_source_table": null,
+      "vs_source_basis": "no gain available: tables/t9.parquet has never been trained. Train elasticnet with these params on tables/t9.parquet to get one, or call explain_table on tables/t10.parquet to measure each table's columns directly.",
+      "columns_by_table": [
+        {
+          "table": "the work table",
+          "method": null,
+          "n_columns": 11
+        },
+        {
+          "table": "tables/t1.parquet",
+          "method": "transform",
+          "n_columns": 15
+        },
+        {
+          "table": "tables/t2.parquet",
+          "method": "target",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t3.parquet",
+          "method": "history",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t4.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t5.parquet",
+          "method": "target",
+          "n_columns": 2
+        },
+        {
+          "table": "tables/t7.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t9.parquet",
+          "method": "transform",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t10.parquet",
+          "method": "history",
+          "n_columns": 4
+        }
+      ]
+    },
+    {
+      "id": "e6",
+      "model_type": "lgbm",
+      "params": {
+        "subsample": 0.7,
+        "subsample_freq": 1,
+        "colsample_bytree": 0.7,
+        "random_state": 1337
+      },
+      "target_transform": "log1p",
+      "reference_target": null,
+      "features": [
+        "Store",
+        "DayOfWeek",
+        "Open",
+        "Promo",
+        "SchoolHoliday",
+        "CompetitionDistance",
+        "CompetitionOpenSinceMonth",
+        "CompetitionOpenSinceYear",
+        "Promo2",
+        "Promo2SinceWeek",
+        "Promo2SinceYear",
+        "Year",
+        "Month",
+        "Day",
+        "WeekOfYear",
+        "DayOfYear",
+        "Quarter",
+        "IsWeekend",
+        "DaysToMonthEnd",
+        "DaysInYear",
+        "DaysToNewYear",
+        "DaysToXmas",
+        "CompAgeMonths",
+        "IsPromo2",
+        "Promo2Active",
+        "Promo2Months",
+        "StoreType_te",
+        "StoreType_te_count",
+        "Assortment_te",
+        "Assortment_te_count",
+        "StateHoliday_te",
+        "StateHoliday_te_count",
+        "PromoInterval_te",
+        "PromoInterval_te_count",
+        "Store_Sales_56_mean",
+        "Store_Sales_90_mean",
+        "Store_Sales_182_mean",
+        "Store_Sales_364_mean",
+        "Store_Sales_56_count",
+        "Store_Sales_90_count",
+        "Store_Sales_182_count",
+        "Store_Sales_364_count",
+        "Store_DayOfWeek_Sales_56_mean",
+        "Store_DayOfWeek_Sales_112_mean",
+        "Store_DayOfWeek_Sales_56_count",
+        "Store_DayOfWeek_Sales_112_count",
+        "Store_te",
+        "Store_te_count",
+        "Store_DayOfWeek_Sales_224_mean",
+        "Store_DayOfWeek_Sales_364_mean",
+        "Store_DayOfWeek_Sales_224_count",
+        "Store_DayOfWeek_Sales_364_count",
+        "DaysToGoodFriday",
+        "DaysToEasterMonday",
+        "DaysSinceEaster",
+        "NearEaster",
+        "Store_SchoolHoliday_Sales_168_mean",
+        "Store_SchoolHoliday_Sales_336_mean",
+        "Store_SchoolHoliday_Sales_168_count",
+        "Store_SchoolHoliday_Sales_336_count"
+      ],
+      "source_table": "tables/t10.parquet",
+      "metric": "rmspe",
+      "val_score": 0.13447841530474075,
+      "val_unavailable": null,
+      "val_se": null,
+      "cv_score": 0.2550121320125408,
+      "fold_spread": 0.081173992231037,
+      "fit_seconds": 31.6,
+      "vs_baseline": 0.644178,
+      "artifact_path": "experiments/e6",
+      "vs_source_table": null,
+      "vs_source_basis": "no gain available: tables/t9.parquet has never been trained. Train lgbm with these params on tables/t9.parquet to get one, or call explain_table on tables/t10.parquet to measure each table's columns directly.",
+      "columns_by_table": [
+        {
+          "table": "the work table",
+          "method": null,
+          "n_columns": 11
+        },
+        {
+          "table": "tables/t1.parquet",
+          "method": "transform",
+          "n_columns": 15
+        },
+        {
+          "table": "tables/t2.parquet",
+          "method": "target",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t3.parquet",
+          "method": "history",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t4.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t5.parquet",
+          "method": "target",
+          "n_columns": 2
+        },
+        {
+          "table": "tables/t7.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t9.parquet",
+          "method": "transform",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t10.parquet",
+          "method": "history",
+          "n_columns": 4
+        }
+      ]
+    },
+    {
+      "id": "e7",
+      "model_type": "xgb",
+      "params": {
+        "subsample": 0.7,
+        "colsample_bytree": 0.7,
+        "random_state": 1337
+      },
+      "target_transform": "log1p",
+      "reference_target": null,
+      "features": [
+        "Store",
+        "DayOfWeek",
+        "Open",
+        "Promo",
+        "SchoolHoliday",
+        "CompetitionDistance",
+        "CompetitionOpenSinceMonth",
+        "CompetitionOpenSinceYear",
+        "Promo2",
+        "Promo2SinceWeek",
+        "Promo2SinceYear",
+        "Year",
+        "Month",
+        "Day",
+        "WeekOfYear",
+        "DayOfYear",
+        "Quarter",
+        "IsWeekend",
+        "DaysToMonthEnd",
+        "DaysInYear",
+        "DaysToNewYear",
+        "DaysToXmas",
+        "CompAgeMonths",
+        "IsPromo2",
+        "Promo2Active",
+        "Promo2Months",
+        "StoreType_te",
+        "StoreType_te_count",
+        "Assortment_te",
+        "Assortment_te_count",
+        "StateHoliday_te",
+        "StateHoliday_te_count",
+        "PromoInterval_te",
+        "PromoInterval_te_count",
+        "Store_Sales_56_mean",
+        "Store_Sales_90_mean",
+        "Store_Sales_182_mean",
+        "Store_Sales_364_mean",
+        "Store_Sales_56_count",
+        "Store_Sales_90_count",
+        "Store_Sales_182_count",
+        "Store_Sales_364_count",
+        "Store_DayOfWeek_Sales_56_mean",
+        "Store_DayOfWeek_Sales_112_mean",
+        "Store_DayOfWeek_Sales_56_count",
+        "Store_DayOfWeek_Sales_112_count",
+        "Store_te",
+        "Store_te_count",
+        "Store_DayOfWeek_Sales_224_mean",
+        "Store_DayOfWeek_Sales_364_mean",
+        "Store_DayOfWeek_Sales_224_count",
+        "Store_DayOfWeek_Sales_364_count",
+        "DaysToGoodFriday",
+        "DaysToEasterMonday",
+        "DaysSinceEaster",
+        "NearEaster",
+        "Store_SchoolHoliday_Sales_168_mean",
+        "Store_SchoolHoliday_Sales_336_mean",
+        "Store_SchoolHoliday_Sales_168_count",
+        "Store_SchoolHoliday_Sales_336_count"
+      ],
+      "source_table": "tables/t10.parquet",
+      "metric": "rmspe",
+      "val_score": 0.14912570114750828,
+      "val_unavailable": null,
+      "val_se": null,
+      "cv_score": 0.28802847164354045,
+      "fold_spread": 0.06253408445308428,
+      "fit_seconds": 38.8,
+      "vs_baseline": 0.629531,
+      "artifact_path": "experiments/e7",
+      "vs_source_table": null,
+      "vs_source_basis": "no gain available: tables/t9.parquet has never been trained. Train xgb with these params on tables/t9.parquet to get one, or call explain_table on tables/t10.parquet to measure each table's columns directly.",
+      "columns_by_table": [
+        {
+          "table": "the work table",
+          "method": null,
+          "n_columns": 11
+        },
+        {
+          "table": "tables/t1.parquet",
+          "method": "transform",
+          "n_columns": 15
+        },
+        {
+          "table": "tables/t2.parquet",
+          "method": "target",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t3.parquet",
+          "method": "history",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t4.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t5.parquet",
+          "method": "target",
+          "n_columns": 2
+        },
+        {
+          "table": "tables/t7.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t9.parquet",
+          "method": "transform",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t10.parquet",
+          "method": "history",
+          "n_columns": 4
+        }
+      ]
+    },
+    {
+      "id": "e8",
+      "model_type": "catboost",
+      "params": {
+        "rsm": 0.8,
+        "random_seed": 1337
+      },
+      "target_transform": "log1p",
+      "reference_target": null,
+      "features": [
+        "Store",
+        "DayOfWeek",
+        "Open",
+        "Promo",
+        "SchoolHoliday",
+        "CompetitionDistance",
+        "CompetitionOpenSinceMonth",
+        "CompetitionOpenSinceYear",
+        "Promo2",
+        "Promo2SinceWeek",
+        "Promo2SinceYear",
+        "Year",
+        "Month",
+        "Day",
+        "WeekOfYear",
+        "DayOfYear",
+        "Quarter",
+        "IsWeekend",
+        "DaysToMonthEnd",
+        "DaysInYear",
+        "DaysToNewYear",
+        "DaysToXmas",
+        "CompAgeMonths",
+        "IsPromo2",
+        "Promo2Active",
+        "Promo2Months",
+        "StoreType_te",
+        "StoreType_te_count",
+        "Assortment_te",
+        "Assortment_te_count",
+        "StateHoliday_te",
+        "StateHoliday_te_count",
+        "PromoInterval_te",
+        "PromoInterval_te_count",
+        "Store_Sales_56_mean",
+        "Store_Sales_90_mean",
+        "Store_Sales_182_mean",
+        "Store_Sales_364_mean",
+        "Store_Sales_56_count",
+        "Store_Sales_90_count",
+        "Store_Sales_182_count",
+        "Store_Sales_364_count",
+        "Store_DayOfWeek_Sales_56_mean",
+        "Store_DayOfWeek_Sales_112_mean",
+        "Store_DayOfWeek_Sales_56_count",
+        "Store_DayOfWeek_Sales_112_count",
+        "Store_te",
+        "Store_te_count",
+        "Store_DayOfWeek_Sales_224_mean",
+        "Store_DayOfWeek_Sales_364_mean",
+        "Store_DayOfWeek_Sales_224_count",
+        "Store_DayOfWeek_Sales_364_count",
+        "DaysToGoodFriday",
+        "DaysToEasterMonday",
+        "DaysSinceEaster",
+        "NearEaster",
+        "Store_SchoolHoliday_Sales_168_mean",
+        "Store_SchoolHoliday_Sales_336_mean",
+        "Store_SchoolHoliday_Sales_168_count",
+        "Store_SchoolHoliday_Sales_336_count"
+      ],
+      "source_table": "tables/t10.parquet",
+      "metric": "rmspe",
+      "val_score": 0.130751567200855,
+      "val_unavailable": null,
+      "val_se": null,
+      "cv_score": 0.2849236091769021,
+      "fold_spread": 0.06214640155096083,
+      "fit_seconds": 78.8,
+      "vs_baseline": 0.647905,
+      "artifact_path": "experiments/e8",
+      "vs_source_table": null,
+      "vs_source_basis": "no gain available: tables/t9.parquet has never been trained. Train catboost with these params on tables/t9.parquet to get one, or call explain_table on tables/t10.parquet to measure each table's columns directly.",
+      "columns_by_table": [
+        {
+          "table": "the work table",
+          "method": null,
+          "n_columns": 11
+        },
+        {
+          "table": "tables/t1.parquet",
+          "method": "transform",
+          "n_columns": 15
+        },
+        {
+          "table": "tables/t2.parquet",
+          "method": "target",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t3.parquet",
+          "method": "history",
+          "n_columns": 8
+        },
+        {
+          "table": "tables/t4.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t5.parquet",
+          "method": "target",
+          "n_columns": 2
+        },
+        {
+          "table": "tables/t7.parquet",
+          "method": "history",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t9.parquet",
+          "method": "transform",
+          "n_columns": 4
+        },
+        {
+          "table": "tables/t10.parquet",
+          "method": "history",
+          "n_columns": 4
+        }
+      ]
+    }
+  ],
+  "log": [],
+  "stop": {
+    "refusals": 0,
+    "finalized": true
+  },
+  "split": {
+    "source_path": "/opt/data/REPOS/tabular_agent-calfeat/_runs/rossmann_forecasting_agent/repeat_01/20260920T112919Z-1f10abef/prepared/train.parquet",
+    "profile": "full",
+    "workflow": "forecast",
+    "mode": "ordered",
+    "stratified": false,
+    "split_on": "Date",
+    "forecast_horizon": 48.0,
+    "seed": 42,
+    "val_fraction": 0.05,
+    "holdout_fraction": 0.05,
+    "n_work": 915744,
+    "n_val": 50175,
+    "n_holdout": 51290,
+    "val_is_thin": false,
+    "holdout_is_thin": false
+  },
+  "work_probe": {
+    "probe_score": null,
+    "probe_unavailable": "1 of this table's feature columns cannot exist at prediction time: ['Customers']. Training on them would produce a score measured on rows that will never occur again, and a model that cannot be asked for a prediction at all.",
+    "unservable": true,
+    "columns_not_available_at_predict_time": [
+      "Customers"
+    ],
+    "next": "build a table without them \u2014 transform_features with `df.drop(columns=[...], errors='ignore')` \u2014 and train on that. The guard matters: the code is stored and re-run on rows that never had the columns."
+  },
+  "holdout": {
+    "n_rows": 51290,
+    "scores": [
+      {
+        "experiment_id": "e2",
+        "model_type": "lgbm",
+        "val_score": 0.12615016035403087,
+        "selected": true,
+        "shipped": false,
+        "holdout_score": 0.131596,
+        "holdout_se": null,
+        "optimism": 0.005446
+      },
+      {
+        "experiment_id": "e3",
+        "model_type": "xgb",
+        "val_score": 0.1380243592902003,
+        "selected": false,
+        "shipped": false,
+        "holdout_score": 0.133955,
+        "holdout_se": null,
+        "optimism": -0.004069
+      },
+      {
+        "experiment_id": "e4",
+        "model_type": "catboost",
+        "val_score": 0.14221151755009906,
+        "selected": false,
+        "shipped": false,
+        "holdout_score": 0.129158,
+        "holdout_se": null,
+        "optimism": -0.013054
+      },
+      {
+        "experiment_id": "e5",
+        "model_type": "elasticnet",
+        "val_score": 0.1991376530504054,
+        "selected": false,
+        "shipped": false,
+        "holdout_score": 0.190936,
+        "holdout_se": null,
+        "optimism": -0.008201
+      },
+      {
+        "experiment_id": "e6",
+        "model_type": "lgbm",
+        "val_score": 0.13447841530474075,
+        "selected": false,
+        "shipped": false,
+        "holdout_score": 0.137263,
+        "holdout_se": null,
+        "optimism": 0.002785
+      },
+      {
+        "experiment_id": "e7",
+        "model_type": "xgb",
+        "val_score": 0.14912570114750828,
+        "selected": false,
+        "shipped": false,
+        "holdout_score": 0.133741,
+        "holdout_se": null,
+        "optimism": -0.015384
+      },
+      {
+        "experiment_id": "e8",
+        "model_type": "catboost",
+        "val_score": 0.130751567200855,
+        "selected": false,
+        "shipped": false,
+        "holdout_score": 0.124119,
+        "holdout_se": null,
+        "optimism": -0.006633
+      },
+      {
+        "experiment_id": "blend",
+        "model_type": "blend(lgbm+xgb+catboost+elasticnet+lgbm+xgb+catboost)",
+        "val_score": 0.12883,
+        "members": [
+          "e2",
+          "e3",
+          "e4",
+          "e5",
+          "e6",
+          "e7",
+          "e8"
+        ],
+        "selected": false,
+        "shipped": true,
+        "holdout_score": 0.124829,
+        "holdout_se": null,
+        "optimism": -0.004001
+      }
+    ]
+  }
+}

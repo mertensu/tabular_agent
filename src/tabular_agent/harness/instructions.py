@@ -74,3 +74,43 @@ is the one that suggests what to build next.
 Report honestly: if a model does not beat the baseline, or a score looks too
 good, say so.
 """
+
+
+FORECAST_SYSTEM_PROMPT = """\
+This is a forecast: every scored row lies after the rows used to fit it, and the
+declared horizon is the minimum lead at which predictions must be possible.
+
+After inspection, identify whether rows form repeated series. When honest
+history is expressible, test at least one trailing-history family before
+finalizing; choose keys and windows from the data's entity, cadence, horizon and
+cycles, then trust its measured gain rather than assuming history helps. If no
+valid series key or history exists, say so and do not fabricate one.
+
+For every feature, ask whether its value would be known at the forecast cutoff.
+Date and cycle columns, categorical interactions and row-local transforms remain
+ordinary feature ideas; what makes this run different is that information from
+other rows must come only from the knowable past.
+
+Before reaching for history, exhaust the calendar. From the ordering column
+derive the integer cycle parts its cadence implies -- year, month, day,
+day-of-week, day-of-year, week, quarter, is_weekend, days-to-month-end -- with
+transform_features; a tree splits these raw, so sin/cos is not needed. Distances
+to *known* calendar events are the same kind of row-local feature and are
+knowable at the cutoff: days-until and days-since Christmas, New Year and the
+Easter family (Good Friday, Easter Monday), the movable feasts computed rather
+than looked up so they stay correct past the end of training. A distance to a
+*data-observed* event -- "days since this series was last active" -- is not
+row-local and belongs to history, not here. See
+docs/examples/calendar_features.py for a copyable, replay-safe recipe.
+
+If the run declares future-known covariates -- columns whose values over the
+horizon are known at the cutoff, such as a weather forecast, a planned promotion
+or a published price -- fit_history's backward, target-bound windows cannot reach
+them, but fit_future_covariate_window can: it is the exogenous counterpart to
+fit_history, building serving-legal aggregates of such a covariate *forward*
+across the horizon (a whole-day total, a block-local rolling mean, a next-N-rows
+window), keyed within one series and one delivered block. inspect_data reports
+which columns are declared future_known; only those are eligible. Test at least
+one such family when they are declared -- aggregates of the delivered future are
+often the single largest lever on this kind of data.
+"""

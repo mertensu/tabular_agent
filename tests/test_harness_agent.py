@@ -58,6 +58,15 @@ EXPECTED_TOOLS = {
     "finalize_run",
 }
 
+#: Forecast-only tools, on top of EXPECTED_TOOLS. Aggregates a *future-known*
+#: covariate forward across the horizon, per series and delivered block (0090).
+#: Forecast-only because it needs a horizon and a declared future-known column,
+#: neither of which the iid or general workflow has — so it is not in
+#: EXPECTED_TOOLS (the general surface) and is added to it only for a forecast.
+FORECAST_ONLY_TOOLS = {
+    "fit_future_covariate_window",
+}
+
 
 def test_the_agent_has_exactly_the_leakage_safe_tools():
     agent = build_agent()
@@ -70,7 +79,7 @@ def test_every_tool_returns_a_summary_not_a_table():
 
     from tabular_agent.harness import tools
 
-    for name in EXPECTED_TOOLS:
+    for name in EXPECTED_TOOLS | FORECAST_ONLY_TOOLS:
         sig = _inspect.signature(getattr(tools, name))
         assert sig.return_annotation is dict, f"{name} must return a compact dict"
 
@@ -363,3 +372,53 @@ def test_gateway_model_sets_an_explicit_output_ceiling():
 
     override = gateway_model("deepseek-v4.1-flash@eu", api_key="unit-test", max_tokens=1234)
     assert override.settings["max_tokens"] == 1234
+
+
+def test_iid_and_forecast_workflows_expose_distinct_temporal_tools():
+    iid_tools = set(build_agent(workflow="iid")._function_toolset.tools)
+    forecast_tools = set(build_agent(workflow="forecast")._function_toolset.tools)
+
+    assert iid_tools == EXPECTED_TOOLS - {"fit_history", "fit_stream_aggregate"}
+    assert forecast_tools == EXPECTED_TOOLS | FORECAST_ONLY_TOOLS
+
+
+def test_forecast_contract_reaches_only_forecast_runs(tmp_path):
+    import pandas as pd
+    from pydantic_ai.models.test import TestModel
+
+    from tabular_agent.harness.agent import Deps
+    from tabular_agent.harness.session import RunSession
+    from tabular_agent.taskspec import TaskSpec
+
+    path = tmp_path / "d.csv"
+    pd.DataFrame({
+        "Date": pd.date_range("2024-01-01", periods=40),
+        "Store": [1, 2] * 20,
+        "y": range(40),
+    }).to_csv(path, index=False)
+
+    def system_text(session, workflow):
+        agent = build_agent(TestModel(call_tools=[]), workflow=workflow)
+        result = agent.run_sync("go", deps=Deps(session=session))
+        return "\n".join(
+            part.content
+            for message in result.all_messages()
+            for part in message.parts
+            if part.__class__.__name__ == "SystemPromptPart"
+        )
+
+    iid = RunSession(
+        str(tmp_path / "iid"), str(path), TaskSpec(target="y"),
+        workflow="iid",
+    )
+    forecast = RunSession(
+        str(tmp_path / "forecast"), str(path),
+        TaskSpec(target="y", forecast_horizon=7),
+        split_on="Date", workflow="forecast",
+    )
+
+    assert "This is a forecast" not in system_text(iid, "iid")
+    text = system_text(forecast, "forecast")
+    assert "This is a forecast" in text
+    assert "categorical interactions" in text
+    assert "trailing-history family" in text

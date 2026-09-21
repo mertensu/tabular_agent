@@ -66,9 +66,11 @@ class RunSession:
         holdout_fraction: float | None = None,
         split_on: str | None = None,
         serving_columns: list[str] | None = None,
+        future_known: list[str] | None = None,
         fit_time_budget_s: float | None = None,
         streams: dict[str, dict] | None = None,
         profile: str = "full",
+        workflow: str = "general",
     ):
         if profile not in {"full", "minimal"}:
             raise ValueError(f"unknown run profile {profile!r}; use 'full' or 'minimal'")
@@ -82,6 +84,17 @@ class RunSession:
                 "the minimal profile accepts one table; declared streams require "
                 "the full research profile"
             )
+        if workflow not in {"general", "iid", "forecast"}:
+            raise ValueError(
+                f"unknown run workflow {workflow!r}; use 'general', 'iid', or 'forecast'"
+            )
+        if workflow == "iid" and split_on is not None:
+            raise ValueError("the iid workflow requires a random split (split_on=None)")
+        if workflow == "forecast":
+            if split_on is None:
+                raise ValueError("the forecast workflow requires an ordering column")
+            if spec.forecast_horizon is None or spec.forecast_horizon <= 0:
+                raise ValueError("the forecast workflow requires a positive forecast_horizon")
         self.ctx = RunContext(run_dir)
         journal_path = os.path.join(self.ctx.run_dir, "run_journal.json")
         if os.path.exists(journal_path):
@@ -94,12 +107,19 @@ class RunSession:
                     f"resume it as {profile!r} because the tool and evaluation "
                     "contracts would change"
                 )
+            recorded_workflow = ((existing.get("split") or {}).get("workflow") or "general")
+            if recorded_workflow != workflow:
+                raise ValueError(
+                    f"this run was created with workflow {recorded_workflow!r}; refusing "
+                    f"to resume it as {workflow!r} because the temporal contract would change"
+                )
         # The file the user handed us. Never trained on directly — `data_path`
         # below is the work half — but kept so the split can be re-derived and
         # so task detection does not depend on which rows landed where.
         self.source_path = os.path.abspath(data_path)
         self.spec = spec
         self.profile = profile
+        self.workflow = workflow
         # How long this run is allowed to keep going without getting better
         # (§19.3). On the session rather than as a module constant because it is
         # a property of *this* run's budget, not of the library.
@@ -137,6 +157,17 @@ class RunSession:
         # catching it.
         self.serving_columns = (
             None if serving_columns is None else list(serving_columns)
+        )
+        # Serving columns whose values over the forecast horizon are known at issue
+        # time (0090): a weather forecast, a planned promotion, a published price.
+        # Declared, for `serving_columns`' reason — presence is not permission, and
+        # nothing in a run can tell a realised future weather column (present in a
+        # test file, unknown in production) from a legitimately-known one. It is the
+        # owner's assertion about the data, and it is what makes a *forward* window
+        # aggregate legal where `fit_history`'s backward one is all the target
+        # allows. Only `fit_future_covariate_window` reads it.
+        self.future_known = (
+            [] if future_known is None else list(future_known)
         )
         # Wall-clock ceiling on one cross-validated fit. `None` means no ceiling,
         # which is right for a library that cannot know how big the data is or what
@@ -488,12 +519,15 @@ class RunSession:
         record = {
             "source_path": self.source_path,
             "profile": self.profile,
+            "workflow": self.workflow,
             "mode": "ordered" if self.split_on else "random",
             "stratified": bool(
                 self.split_on is None
                 and self.resolved().task_type in {"binary", "multiclass"}
             ),
             "split_on": self.split_on,
+            "forecast_horizon": self.spec.forecast_horizon,
+            "future_known": list(self.future_known),
             "seed": self.spec.seed,
             "val_fraction": self.val_fraction,
             "holdout_fraction": self.holdout_fraction,

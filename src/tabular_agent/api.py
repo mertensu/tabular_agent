@@ -83,6 +83,14 @@ class DataPlan:
     seed: int = 42
     target_transform: str | None = None
     forecast_horizon: float | None = None
+    #: Serving columns whose values over the forecast horizon are known at issue
+    #: time (0090) — a weather forecast, a planned promotion, a published price.
+    #: The owner's assertion about the data, never inferred: it is what lets
+    #: `fit_future_covariate_window` aggregate a column *forward* across the
+    #: horizon. Empty (the default) means none are declared and behaviour is
+    #: byte-identical to a run without the field. Must be a subset of
+    #: `serving_columns`; `validate()` checks it.
+    future_known: list[str] = field(default_factory=list)
     _frame: pd.DataFrame | None = field(default=None, repr=False)
 
     @classmethod
@@ -185,6 +193,36 @@ class DataPlan:
                 f"date/time candidates: {_preview(self.ordering_candidates)}",
                 "set: plan.split_on = '<column>' (ordered) or False (random)")),
         )
+        if isinstance(self.split_on, str):
+            _row(
+                self.forecast_horizon is not None and self.forecast_horizon > 0,
+                "forecast_horizon",
+                str(self.forecast_horizon) if self.forecast_horizon else "not set",
+                *(() if self.forecast_horizon else (
+                    "set: plan.forecast_horizon = <positive lead>",
+                )),
+            )
+            # Optional, not a gate: an empty future_known is a valid, complete plan
+            # (behaviour identical to a run without it), so this is an info line
+            # rather than a [ ] decision. Shown only for a forecast so the owner is
+            # reminded the class exists and how to declare it.
+            if self.future_known:
+                lines.append(
+                    f"  (i) future_known       {_preview(self.future_known)}"
+                )
+            else:
+                lines.append(
+                    "  (i) future_known       (none) — covariates whose horizon "
+                    "values are known at"
+                )
+                lines.append(
+                    "                         issue time (weather forecast, planned "
+                    "promo); set:"
+                )
+                lines.append(
+                    "                         plan.future_known = [...] to offer "
+                    "fit_future_covariate_window"
+                )
         _row(
             self.identifier_columns is not None,
             "identifier_columns",
@@ -268,6 +306,20 @@ class DataPlan:
             )
         if self.target in self.serving_columns:
             raise ValueError("serving_columns must not contain the target")
+        if self.future_known:
+            not_serving = [c for c in self.future_known if c not in self.serving_columns]
+            if not_serving:
+                raise ValueError(
+                    "future_known must be a subset of serving_columns; these are not "
+                    f"served at prediction time: {not_serving}. A column whose future "
+                    "values you assert are known has to be a column that exists when "
+                    "a prediction is asked for."
+                )
+            if self.target in self.future_known:
+                raise ValueError(
+                    "the target cannot be future_known: if its future values were "
+                    "known there would be nothing to forecast"
+                )
         if self.split_on is None:
             raise ValueError(
                 "split_on is unconfirmed; set a column for ordered splitting or False "
@@ -335,6 +387,7 @@ class DataPlan:
             "serving_table": self.serving_table,
             "target": self.target,
             "serving_columns": list(self.serving_columns or []),
+            "future_known": list(self.future_known),
             "identifier_columns": list(self.identifier_columns or []),
             "split_on": self.split_on,
             "joins": [asdict(join) for join in self.joins if join.decision == "accepted"],
@@ -578,7 +631,9 @@ class Run:
 
 
 class Agent:
-    """Thin public facade; every safety decision remains enforced by RunSession."""
+    """Agent for row-wise tabular problems whose rows may be split at random."""
+
+    workflow = "iid"
 
     def __init__(
         self,
@@ -640,11 +695,21 @@ class Agent:
         run_dir = run.run_dir if isinstance(run, Run) else run
         return review_capabilities(run_dir, model=self._resolved_model())
 
+    def _validate_workflow(self, plan: DataPlan) -> None:
+        if plan.split_on is not False or plan.forecast_horizon is not None:
+            raise ValueError(
+                "Agent is for independent rows and requires plan.split_on = False; "
+                "use ForecastingAgent for predictions into the future"
+            )
+
     def run(self, plan: DataPlan, prompt: str | None = None) -> Run:
         plan.validate()
+        self._validate_workflow(plan)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         run_dir = self.run_root / f"{stamp}-{uuid4().hex[:8]}"
         data_path, manifest = plan.materialize(run_dir)
+        manifest["workflow"] = self.workflow
+        manifest["forecast_horizon"] = plan.forecast_horizon
         spec = TaskSpec(
             target=str(plan.target),
             task_type=plan.task_type,
@@ -664,8 +729,10 @@ class Agent:
             holdout_fraction=self.holdout_fraction,
             split_on=plan.split_on if isinstance(plan.split_on, str) else None,
             serving_columns=plan.serving_columns,
+            future_known=plan.future_known,
             fit_time_budget_s=self.fit_time_budget_s,
             profile=self.profile,
+            workflow=self.workflow,
         )
         run_agent(
             session,
@@ -685,3 +752,42 @@ class Agent:
             json.dump(manifest, handle, indent=2)
         update_dashboard_contract(str(run_dir), manifest)
         return Run(run_dir)
+
+
+class ForecastingAgent(Agent):
+    """Agent for future prediction under an explicit time and horizon contract.
+
+    It shares the complete execution engine with Agent, but exposes the
+    time-aware tool vocabulary and refuses to run until both the ordering column
+    and minimum forecast horizon are confirmed.
+    """
+
+    workflow = "forecast"
+
+    def __init__(
+        self,
+        model: Any = "anthropic:claude-opus-5",
+        *,
+        run_root: str | os.PathLike = "runs",
+        val_fraction: float = 0.2,
+        holdout_fraction: float | None = None,
+        fit_time_budget_s: float | None = None,
+    ):
+        super().__init__(
+            model,
+            profile="full",
+            run_root=run_root,
+            val_fraction=val_fraction,
+            holdout_fraction=holdout_fraction,
+            fit_time_budget_s=fit_time_budget_s,
+        )
+
+    def _validate_workflow(self, plan: DataPlan) -> None:
+        if not isinstance(plan.split_on, str):
+            raise ValueError(
+                "ForecastingAgent requires plan.split_on to name the confirmed time column"
+            )
+        if plan.forecast_horizon is None or plan.forecast_horizon <= 0:
+            raise ValueError(
+                "ForecastingAgent requires a positive plan.forecast_horizon"
+            )
