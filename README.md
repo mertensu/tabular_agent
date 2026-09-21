@@ -175,6 +175,9 @@ plan.target = "Sales"                    # what to predict
 plan.serving_columns = ["Store", "Date", "Promo"]  # what exists at predict time
 plan.split_on = "Date"                   # confirmed ordering column
 plan.forecast_horizon = 42               # minimum lead predictions must support
+plan.future_known = ["Promo"]            # optional: serving columns whose values over the
+                                         # horizon are known now (a planned promotion, a
+                                         # weather forecast) — unlocks fit_future_covariate_window
 plan.accept_identifier_proposals()       # or reject_identifier_proposals()
 plan.reject_joins()                      # or accept_joins()
 
@@ -186,8 +189,11 @@ requires `plan.split_on = False`; it does not expose history or time-aware
 stream tools. `ta.ForecastingAgent()` is for prediction into the future and
 requires both a time column and a positive horizon. It uses the same engine,
 encoders, sandbox, models, bundle and reports, while adding the temporal contract
-and tools. Categorical interactions and row-local transforms remain available in
-both.
+and tools: it can summarise a series' own past (`fit_history`) and, for a covariate
+you declare `future_known`, aggregate its horizon values forward — total irradiance
+over the delivered day, a rolling mean of forecast temperature — with
+`fit_future_covariate_window`. Categorical interactions and row-local transforms
+remain available in both.
 
 You confirm by setting these attributes on the plan — plain Python, no wizard. If
 you forget one, `agent.run(plan)` refuses before doing any work and names exactly
