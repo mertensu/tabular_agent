@@ -159,7 +159,7 @@ class RunSession:
             None if serving_columns is None else list(serving_columns)
         )
         # Serving columns whose values over the forecast horizon are known at issue
-        # time (0090): a weather forecast, a planned promotion, a published price.
+        # time (0091): a weather forecast, a planned promotion, a published price.
         # Declared, for `serving_columns`' reason — presence is not permission, and
         # nothing in a run can tell a realised future weather column (present in a
         # test file, unknown in production) from a legitimately-known one. It is the

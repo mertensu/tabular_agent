@@ -1,0 +1,127 @@
+Traceback (most recent call last):
+  File "/opt/data/REPOS/tabular_agent/research/episodic_runner_0089/runner.py", line 186, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/opt/data/REPOS/tabular_agent/research/episodic_runner_0089/runner.py", line 143, in main
+    run = agent.run(plan, prompt=PROMPT)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/api.py", line 677, in run
+    run_agent(
+    ~~~~~~~~~^
+        session,
+        ^^^^^^^^
+    ...<2 lines>...
+        **run_kwargs,
+        ^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 899, in run
+    result, boundary = _run_one_episode(
+                       ~~~~~~~~~~~~~~~~^
+        agent, session, episode_prompt, episode_policy.request_limit
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/research/episodic_runner_0089/runner.py", line 82, in measured
+    result, boundary = original(agent, session, prompt, request_limit)
+                       ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 850, in _run_one_episode
+    result = agent.run_sync(
+        prompt,
+        deps=Deps(session=session),
+        usage_limits=UsageLimits(request_limit=request_limit),
+    )
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/agent/abstract.py", line 684, in run_sync
+    return _utils.run_until_complete(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.run(
+        ^^^^^^^^^
+    ...<19 lines>...
+        )
+        ^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/_utils.py", line 75, in run_until_complete
+    return loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/agent/abstract.py", line 556, in run
+    node = await agent_run.next(node)  # pyright: ignore[reportArgumentType]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 412, in next
+    return await self._run_node_with_hooks(node, self._advance_graph)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 336, in _run_node_with_hooks
+    return await self._wrap_and_advance(run_context, node, step_fn)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 299, in _wrap_and_advance
+    result = await cap.on_node_run_error(run_context, node=node, error=e)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 371, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 368, in on_node_run_error
+    return await capability.on_node_run_error(cap_ctx, node=node, error=error)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 603, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 368, in on_node_run_error
+    return await capability.on_node_run_error(cap_ctx, node=node, error=error)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 603, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 297, in _wrap_and_advance
+    result = await cap.wrap_node_run(run_context, node=node, handler=step_fn)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 354, in wrap_node_run
+    return await chain(node)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 783, in wrapped
+    return await cap.wrap_node_run(_ctx_for_cap(cap, ctx), node=node, handler=inner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 582, in wrap_node_run
+    return await handler(node)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 783, in wrapped
+    return await cap.wrap_node_run(_ctx_for_cap(cap, ctx), node=node, handler=inner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 582, in wrap_node_run
+    return await handler(node)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 275, in _advance_graph
+    task = await self._graph_run.next(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 584, in next
+    return await anext(self)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 561, in __anext__
+    raise self._next.error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 860, in _run_tracked_task
+    result = await self._run_task(t_)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 911, in _run_task
+    output = await node.call(step_context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/step.py", line 253, in _call_node
+    return await node.run(GraphRunContext(state=ctx.state, deps=ctx.deps))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1697, in run
+    async with self.stream(ctx):
+               ~~~~~~~~~~~^^^^^
+  File "/usr/lib/python3.13/contextlib.py", line 221, in __aexit__
+    await anext(self.gen)
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1717, in stream
+    async for _event in stream:
+        pass
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 182, in _with_event_stream_buffer
+    async for event in stream:
+    ...<2 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1881, in _run_stream
+    async for event in self._events_iterator:
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1750, in _run_stream
+    raise exceptions.UnexpectedModelBehavior(
+        f'Model token limit ({ctx.state.last_max_tokens or "provider default"}) exceeded before any response was generated. Increase the `max_tokens` model setting, or simplify the prompt to result in a shorter response that will fit within the limit.'
+    )
+pydantic_ai.exceptions.UnexpectedModelBehavior: Model token limit (provider default) exceeded before any response was generated. Increase the `max_tokens` model setting, or simplify the prompt to result in a shorter response that will fit within the limit.

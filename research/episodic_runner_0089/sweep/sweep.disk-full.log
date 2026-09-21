@@ -1,0 +1,1171 @@
+[2026-09-19T14:43:18+00:00] sweep start: seeds=[42, 43, 44] arms=['control', 'episodic'] model=deepseek-v4-flash-0731@eu commit=f9339e1264
+[2026-09-19T14:43:18+00:00] --- launching child: control seed42 ---
+[2026-09-19T14:43:20+00:00] child start: control seed42
+[2026-09-19T15:09:08+00:00] child done control seed42: val=0.132204 test=0.134397 exp=8 reqs=35
+[2026-09-19T15:09:09+00:00] child control seed42 rc=0 OK in 25.8min
+[2026-09-19T15:09:09+00:00] --- launching child: episodic seed42 ---
+[2026-09-19T15:09:11+00:00] child start: episodic seed42
+[2026-09-19T15:44:35+00:00] child done episodic seed42: val=0.145921 test=0.146449 exp=8 reqs=65
+[2026-09-19T15:44:36+00:00] child episodic seed42 rc=0 OK in 35.5min
+[2026-09-19T15:44:36+00:00] --- launching child: control seed43 ---
+[2026-09-19T15:44:39+00:00] child start: control seed43
+Traceback (most recent call last):
+  File "/opt/data/.scratch/sweep_0089.py", line 233, in <module>
+    raise SystemExit(_single(int(sys.argv[2]), sys.argv[3]))
+                     ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/.scratch/sweep_0089.py", line 221, in _single
+    r = run_one(seed, arm)
+  File "/opt/data/.scratch/sweep_0089.py", line 84, in run_one
+    run = agent.run(plan, prompt=runner.PROMPT)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/api.py", line 677, in run
+    run_agent(
+    ~~~~~~~~~^
+        session,
+        ^^^^^^^^
+    ...<2 lines>...
+        **run_kwargs,
+        ^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 954, in run
+    result, _ = _run_one_episode(agent, session, prompt, REQUEST_LIMIT)
+                ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/research/episodic_runner_0089/runner.py", line 82, in measured
+    result, boundary = original(agent, session, prompt, request_limit)
+                       ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 914, in _run_one_episode
+    result = agent.run_sync(
+        prompt,
+        deps=Deps(session=session),
+        usage_limits=UsageLimits(request_limit=request_limit),
+    )
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/agent/abstract.py", line 684, in run_sync
+    return _utils.run_until_complete(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.run(
+        ^^^^^^^^^
+    ...<19 lines>...
+        )
+        ^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/_utils.py", line 75, in run_until_complete
+    return loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/agent/abstract.py", line 556, in run
+    node = await agent_run.next(node)  # pyright: ignore[reportArgumentType]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 412, in next
+    return await self._run_node_with_hooks(node, self._advance_graph)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 336, in _run_node_with_hooks
+    return await self._wrap_and_advance(run_context, node, step_fn)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 299, in _wrap_and_advance
+    result = await cap.on_node_run_error(run_context, node=node, error=e)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 371, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 368, in on_node_run_error
+    return await capability.on_node_run_error(cap_ctx, node=node, error=error)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 603, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 368, in on_node_run_error
+    return await capability.on_node_run_error(cap_ctx, node=node, error=error)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 603, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 297, in _wrap_and_advance
+    result = await cap.wrap_node_run(run_context, node=node, handler=step_fn)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 354, in wrap_node_run
+    return await chain(node)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 783, in wrapped
+    return await cap.wrap_node_run(_ctx_for_cap(cap, ctx), node=node, handler=inner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 582, in wrap_node_run
+    return await handler(node)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 783, in wrapped
+    return await cap.wrap_node_run(_ctx_for_cap(cap, ctx), node=node, handler=inner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 582, in wrap_node_run
+    return await handler(node)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 275, in _advance_graph
+    task = await self._graph_run.next(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 584, in next
+    return await anext(self)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 561, in __anext__
+    raise self._next.error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 860, in _run_tracked_task
+    result = await self._run_task(t_)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 911, in _run_task
+    output = await node.call(step_context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/step.py", line 253, in _call_node
+    return await node.run(GraphRunContext(state=ctx.state, deps=ctx.deps))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1697, in run
+    async with self.stream(ctx):
+               ~~~~~~~~~~~^^^^^
+  File "/usr/lib/python3.13/contextlib.py", line 221, in __aexit__
+    await anext(self.gen)
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1717, in stream
+    async for _event in stream:
+        pass
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 182, in _with_event_stream_buffer
+    async for event in stream:
+    ...<2 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1881, in _run_stream
+    async for event in self._events_iterator:
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1844, in _run_stream
+    async for event in self._handle_tool_calls(ctx, tool_calls, response_output=response_output):
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1933, in _handle_tool_calls
+    async for event in process_tool_calls(
+    ...<9 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 175, in process_tool_calls
+    async for event in processor.run():
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 307, in run
+    async for event in self._run_strategy():
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 964, in _run_strategy
+    async for event in flush_pending():
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 952, in flush_pending
+    async for event in self._run_function_calls(batch):
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 493, in _run_function_calls
+    async for event in self._call_tools(
+    ...<6 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 666, in _call_tools
+    if event := await handle_call_or_result(call_tool(index), index):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 621, in handle_call_or_result
+    (await coro_or_task) if inspect.isawaitable(coro_or_task) else coro_or_task.result()
+     ^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 528, in _call_tool
+    tool_result = await self.tool_manager.execute_tool_call(validated)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 541, in execute_tool_call
+    return await self._execute_tool_call_impl(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        validated, usage=self.ctx.usage, wrap_validation_errors=wrap_validation_errors
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 778, in _execute_tool_call_impl
+    tool_result = await self._run_execute_hooks(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        validated, usage=usage, wrap_validation_errors=wrap_validation_errors
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 359, in _run_execute_hooks
+    tool_result = await cap.on_tool_execute_error(ctx, call=call, tool_def=tool_def, args=args, error=e)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 574, in on_tool_execute_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 569, in on_tool_execute_error
+    return await capability.on_tool_execute_error(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        cap_ctx, call=call, tool_def=tool_def, args=args, error=error
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 828, in on_tool_execute_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 569, in on_tool_execute_error
+    return await capability.on_tool_execute_error(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        cap_ctx, call=call, tool_def=tool_def, args=args, error=error
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 828, in on_tool_execute_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 351, in _run_execute_hooks
+    tool_result = await cap.wrap_tool_execute(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        ctx, call=call, tool_def=tool_def, args=args, handler=do_execute
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 553, in wrap_tool_execute
+    return await chain(args)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 796, in wrapped
+    return await cap.wrap_tool_execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        _ctx_for_cap(cap, ctx), call=call, tool_def=tool_def, args=args, handler=inner
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 796, in wrap_tool_execute
+    return await handler(args)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 796, in wrapped
+    return await cap.wrap_tool_execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        _ctx_for_cap(cap, ctx), call=call, tool_def=tool_def, args=args, handler=inner
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 796, in wrap_tool_execute
+    return await handler(args)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 336, in do_execute
+    return await self._raw_execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+        modified_validated, usage=usage, wrap_validation_errors=wrap_validation_errors
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 806, in _raw_execute
+    tool_result = await self.toolset.call_tool(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/_tool_search.py", line 397, in call_tool
+    return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/wrapper.py", line 66, in call_tool
+    return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/combined.py", line 98, in call_tool
+    return await tool.source_toolset.call_tool(name, tool_args, ctx, tool.source_tool)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/function.py", line 651, in call_tool
+    return await tool.call_func(tool_args, ctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_function_schema.py", line 87, in call
+    return await run_in_executor(function, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_utils.py", line 136, in run_in_executor
+    return await run_sync(wrapped_func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/anyio/to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 2641, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 1033, in run
+    result = context.run(func, *args)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 633, in transform_features
+    return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table), ctx)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 194, in _retryable
+    return call()
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 633, in <lambda>
+    return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table), ctx)
+                              ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/tools.py", line 1675, in transform_features
+    out_features, summary = _transform_features(features, code, timeout=timeout)
+                            ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/transform.py", line 118, in transform_features
+    out, summary = run_transform(df, code, func_name="transform_features", timeout=timeout)
+                   ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/sandbox.py", line 387, in run_transform
+    return _run({"df": df}, code, mode="transform", func_name=func_name,
+                timeout=timeout, mem_mb=mem_mb, max_rows=0, load_out=load_out)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/sandbox.py", line 297, in _run
+    pickle.dump(frames, f)
+    ~~~~~~~~~~~^^^^^^^^^^^
+OSError: [Errno 28] No space left on device
+[2026-09-19T15:44:53+00:00] child control seed43 rc=1 NO-RESULT in 0.3min
+[2026-09-19T15:44:53+00:00] --- launching child: episodic seed43 ---
+[2026-09-19T15:44:54+00:00] child start: episodic seed43
+Traceback (most recent call last):
+  File "/opt/data/.scratch/sweep_0089.py", line 233, in <module>
+    raise SystemExit(_single(int(sys.argv[2]), sys.argv[3]))
+                     ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/.scratch/sweep_0089.py", line 221, in _single
+    r = run_one(seed, arm)
+  File "/opt/data/.scratch/sweep_0089.py", line 84, in run_one
+    run = agent.run(plan, prompt=runner.PROMPT)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/api.py", line 677, in run
+    run_agent(
+    ~~~~~~~~~^
+        session,
+        ^^^^^^^^
+    ...<2 lines>...
+        **run_kwargs,
+        ^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 971, in run
+    result, boundary = _run_one_episode(
+                       ~~~~~~~~~~~~~~~~^
+        agent, session, episode_prompt, episode_policy.request_limit
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/research/episodic_runner_0089/runner.py", line 82, in measured
+    result, boundary = original(agent, session, prompt, request_limit)
+                       ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 914, in _run_one_episode
+    result = agent.run_sync(
+        prompt,
+        deps=Deps(session=session),
+        usage_limits=UsageLimits(request_limit=request_limit),
+    )
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/agent/abstract.py", line 684, in run_sync
+    return _utils.run_until_complete(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.run(
+        ^^^^^^^^^
+    ...<19 lines>...
+        )
+        ^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/_utils.py", line 75, in run_until_complete
+    return loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/agent/abstract.py", line 556, in run
+    node = await agent_run.next(node)  # pyright: ignore[reportArgumentType]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 412, in next
+    return await self._run_node_with_hooks(node, self._advance_graph)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 336, in _run_node_with_hooks
+    return await self._wrap_and_advance(run_context, node, step_fn)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 299, in _wrap_and_advance
+    result = await cap.on_node_run_error(run_context, node=node, error=e)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 371, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 368, in on_node_run_error
+    return await capability.on_node_run_error(cap_ctx, node=node, error=error)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 603, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 368, in on_node_run_error
+    return await capability.on_node_run_error(cap_ctx, node=node, error=error)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 603, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 297, in _wrap_and_advance
+    result = await cap.wrap_node_run(run_context, node=node, handler=step_fn)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 354, in wrap_node_run
+    return await chain(node)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 783, in wrapped
+    return await cap.wrap_node_run(_ctx_for_cap(cap, ctx), node=node, handler=inner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 582, in wrap_node_run
+    return await handler(node)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 783, in wrapped
+    return await cap.wrap_node_run(_ctx_for_cap(cap, ctx), node=node, handler=inner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 582, in wrap_node_run
+    return await handler(node)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 275, in _advance_graph
+    task = await self._graph_run.next(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 584, in next
+    return await anext(self)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 561, in __anext__
+    raise self._next.error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 860, in _run_tracked_task
+    result = await self._run_task(t_)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 911, in _run_task
+    output = await node.call(step_context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/step.py", line 253, in _call_node
+    return await node.run(GraphRunContext(state=ctx.state, deps=ctx.deps))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1697, in run
+    async with self.stream(ctx):
+               ~~~~~~~~~~~^^^^^
+  File "/usr/lib/python3.13/contextlib.py", line 221, in __aexit__
+    await anext(self.gen)
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1717, in stream
+    async for _event in stream:
+        pass
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 182, in _with_event_stream_buffer
+    async for event in stream:
+    ...<2 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1881, in _run_stream
+    async for event in self._events_iterator:
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1844, in _run_stream
+    async for event in self._handle_tool_calls(ctx, tool_calls, response_output=response_output):
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1933, in _handle_tool_calls
+    async for event in process_tool_calls(
+    ...<9 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 175, in process_tool_calls
+    async for event in processor.run():
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 307, in run
+    async for event in self._run_strategy():
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 964, in _run_strategy
+    async for event in flush_pending():
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 952, in flush_pending
+    async for event in self._run_function_calls(batch):
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 493, in _run_function_calls
+    async for event in self._call_tools(
+    ...<6 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 666, in _call_tools
+    if event := await handle_call_or_result(call_tool(index), index):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 621, in handle_call_or_result
+    (await coro_or_task) if inspect.isawaitable(coro_or_task) else coro_or_task.result()
+     ^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 528, in _call_tool
+    tool_result = await self.tool_manager.execute_tool_call(validated)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 541, in execute_tool_call
+    return await self._execute_tool_call_impl(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        validated, usage=self.ctx.usage, wrap_validation_errors=wrap_validation_errors
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 778, in _execute_tool_call_impl
+    tool_result = await self._run_execute_hooks(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        validated, usage=usage, wrap_validation_errors=wrap_validation_errors
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 359, in _run_execute_hooks
+    tool_result = await cap.on_tool_execute_error(ctx, call=call, tool_def=tool_def, args=args, error=e)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 574, in on_tool_execute_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 569, in on_tool_execute_error
+    return await capability.on_tool_execute_error(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        cap_ctx, call=call, tool_def=tool_def, args=args, error=error
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 828, in on_tool_execute_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 569, in on_tool_execute_error
+    return await capability.on_tool_execute_error(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        cap_ctx, call=call, tool_def=tool_def, args=args, error=error
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 828, in on_tool_execute_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 351, in _run_execute_hooks
+    tool_result = await cap.wrap_tool_execute(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        ctx, call=call, tool_def=tool_def, args=args, handler=do_execute
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 553, in wrap_tool_execute
+    return await chain(args)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 796, in wrapped
+    return await cap.wrap_tool_execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        _ctx_for_cap(cap, ctx), call=call, tool_def=tool_def, args=args, handler=inner
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 796, in wrap_tool_execute
+    return await handler(args)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 796, in wrapped
+    return await cap.wrap_tool_execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        _ctx_for_cap(cap, ctx), call=call, tool_def=tool_def, args=args, handler=inner
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 796, in wrap_tool_execute
+    return await handler(args)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 336, in do_execute
+    return await self._raw_execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+        modified_validated, usage=usage, wrap_validation_errors=wrap_validation_errors
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 806, in _raw_execute
+    tool_result = await self.toolset.call_tool(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/_tool_search.py", line 397, in call_tool
+    return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/wrapper.py", line 66, in call_tool
+    return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/combined.py", line 98, in call_tool
+    return await tool.source_toolset.call_tool(name, tool_args, ctx, tool.source_tool)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/function.py", line 651, in call_tool
+    return await tool.call_func(tool_args, ctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_function_schema.py", line 87, in call
+    return await run_in_executor(function, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_utils.py", line 136, in run_in_executor
+    return await run_sync(wrapped_func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/anyio/to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 2641, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 1033, in run
+    result = context.run(func, *args)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 633, in transform_features
+    return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table), ctx)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 194, in _retryable
+    return call()
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 633, in <lambda>
+    return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table), ctx)
+                              ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/tools.py", line 1675, in transform_features
+    out_features, summary = _transform_features(features, code, timeout=timeout)
+                            ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/transform.py", line 118, in transform_features
+    out, summary = run_transform(df, code, func_name="transform_features", timeout=timeout)
+                   ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/sandbox.py", line 387, in run_transform
+    return _run({"df": df}, code, mode="transform", func_name=func_name,
+                timeout=timeout, mem_mb=mem_mb, max_rows=0, load_out=load_out)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/sandbox.py", line 297, in _run
+    pickle.dump(frames, f)
+    ~~~~~~~~~~~^^^^^^^^^^^
+OSError: [Errno 28] No space left on device
+[2026-09-19T15:45:07+00:00] child episodic seed43 rc=1 NO-RESULT in 0.2min
+[2026-09-19T15:45:07+00:00] --- launching child: control seed44 ---
+[2026-09-19T15:45:09+00:00] child start: control seed44
+Traceback (most recent call last):
+  File "/opt/data/.scratch/sweep_0089.py", line 233, in <module>
+    raise SystemExit(_single(int(sys.argv[2]), sys.argv[3]))
+                     ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/.scratch/sweep_0089.py", line 221, in _single
+    r = run_one(seed, arm)
+  File "/opt/data/.scratch/sweep_0089.py", line 84, in run_one
+    run = agent.run(plan, prompt=runner.PROMPT)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/api.py", line 677, in run
+    run_agent(
+    ~~~~~~~~~^
+        session,
+        ^^^^^^^^
+    ...<2 lines>...
+        **run_kwargs,
+        ^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 954, in run
+    result, _ = _run_one_episode(agent, session, prompt, REQUEST_LIMIT)
+                ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/research/episodic_runner_0089/runner.py", line 82, in measured
+    result, boundary = original(agent, session, prompt, request_limit)
+                       ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 914, in _run_one_episode
+    result = agent.run_sync(
+        prompt,
+        deps=Deps(session=session),
+        usage_limits=UsageLimits(request_limit=request_limit),
+    )
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/agent/abstract.py", line 684, in run_sync
+    return _utils.run_until_complete(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.run(
+        ^^^^^^^^^
+    ...<19 lines>...
+        )
+        ^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/_utils.py", line 75, in run_until_complete
+    return loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/agent/abstract.py", line 556, in run
+    node = await agent_run.next(node)  # pyright: ignore[reportArgumentType]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 412, in next
+    return await self._run_node_with_hooks(node, self._advance_graph)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 336, in _run_node_with_hooks
+    return await self._wrap_and_advance(run_context, node, step_fn)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 299, in _wrap_and_advance
+    result = await cap.on_node_run_error(run_context, node=node, error=e)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 371, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 368, in on_node_run_error
+    return await capability.on_node_run_error(cap_ctx, node=node, error=error)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 603, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 368, in on_node_run_error
+    return await capability.on_node_run_error(cap_ctx, node=node, error=error)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 603, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 297, in _wrap_and_advance
+    result = await cap.wrap_node_run(run_context, node=node, handler=step_fn)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 354, in wrap_node_run
+    return await chain(node)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 783, in wrapped
+    return await cap.wrap_node_run(_ctx_for_cap(cap, ctx), node=node, handler=inner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 582, in wrap_node_run
+    return await handler(node)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 783, in wrapped
+    return await cap.wrap_node_run(_ctx_for_cap(cap, ctx), node=node, handler=inner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 582, in wrap_node_run
+    return await handler(node)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 275, in _advance_graph
+    task = await self._graph_run.next(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 584, in next
+    return await anext(self)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 561, in __anext__
+    raise self._next.error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 860, in _run_tracked_task
+    result = await self._run_task(t_)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 911, in _run_task
+    output = await node.call(step_context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/step.py", line 253, in _call_node
+    return await node.run(GraphRunContext(state=ctx.state, deps=ctx.deps))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1697, in run
+    async with self.stream(ctx):
+               ~~~~~~~~~~~^^^^^
+  File "/usr/lib/python3.13/contextlib.py", line 221, in __aexit__
+    await anext(self.gen)
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1717, in stream
+    async for _event in stream:
+        pass
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 182, in _with_event_stream_buffer
+    async for event in stream:
+    ...<2 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1881, in _run_stream
+    async for event in self._events_iterator:
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1844, in _run_stream
+    async for event in self._handle_tool_calls(ctx, tool_calls, response_output=response_output):
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1933, in _handle_tool_calls
+    async for event in process_tool_calls(
+    ...<9 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 175, in process_tool_calls
+    async for event in processor.run():
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 307, in run
+    async for event in self._run_strategy():
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 964, in _run_strategy
+    async for event in flush_pending():
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 952, in flush_pending
+    async for event in self._run_function_calls(batch):
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 493, in _run_function_calls
+    async for event in self._call_tools(
+    ...<6 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 666, in _call_tools
+    if event := await handle_call_or_result(call_tool(index), index):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 621, in handle_call_or_result
+    (await coro_or_task) if inspect.isawaitable(coro_or_task) else coro_or_task.result()
+     ^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 528, in _call_tool
+    tool_result = await self.tool_manager.execute_tool_call(validated)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 541, in execute_tool_call
+    return await self._execute_tool_call_impl(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        validated, usage=self.ctx.usage, wrap_validation_errors=wrap_validation_errors
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 778, in _execute_tool_call_impl
+    tool_result = await self._run_execute_hooks(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        validated, usage=usage, wrap_validation_errors=wrap_validation_errors
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 359, in _run_execute_hooks
+    tool_result = await cap.on_tool_execute_error(ctx, call=call, tool_def=tool_def, args=args, error=e)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 574, in on_tool_execute_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 569, in on_tool_execute_error
+    return await capability.on_tool_execute_error(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        cap_ctx, call=call, tool_def=tool_def, args=args, error=error
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 828, in on_tool_execute_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 569, in on_tool_execute_error
+    return await capability.on_tool_execute_error(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        cap_ctx, call=call, tool_def=tool_def, args=args, error=error
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 828, in on_tool_execute_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 351, in _run_execute_hooks
+    tool_result = await cap.wrap_tool_execute(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        ctx, call=call, tool_def=tool_def, args=args, handler=do_execute
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 553, in wrap_tool_execute
+    return await chain(args)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 796, in wrapped
+    return await cap.wrap_tool_execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        _ctx_for_cap(cap, ctx), call=call, tool_def=tool_def, args=args, handler=inner
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 796, in wrap_tool_execute
+    return await handler(args)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 796, in wrapped
+    return await cap.wrap_tool_execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        _ctx_for_cap(cap, ctx), call=call, tool_def=tool_def, args=args, handler=inner
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 796, in wrap_tool_execute
+    return await handler(args)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 336, in do_execute
+    return await self._raw_execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+        modified_validated, usage=usage, wrap_validation_errors=wrap_validation_errors
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 806, in _raw_execute
+    tool_result = await self.toolset.call_tool(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/_tool_search.py", line 397, in call_tool
+    return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/wrapper.py", line 66, in call_tool
+    return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/combined.py", line 98, in call_tool
+    return await tool.source_toolset.call_tool(name, tool_args, ctx, tool.source_tool)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/function.py", line 651, in call_tool
+    return await tool.call_func(tool_args, ctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_function_schema.py", line 87, in call
+    return await run_in_executor(function, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_utils.py", line 136, in run_in_executor
+    return await run_sync(wrapped_func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/anyio/to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 2641, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 1033, in run
+    result = context.run(func, *args)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 633, in transform_features
+    return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table), ctx)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 194, in _retryable
+    return call()
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 633, in <lambda>
+    return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table), ctx)
+                              ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/tools.py", line 1675, in transform_features
+    out_features, summary = _transform_features(features, code, timeout=timeout)
+                            ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/transform.py", line 118, in transform_features
+    out, summary = run_transform(df, code, func_name="transform_features", timeout=timeout)
+                   ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/sandbox.py", line 387, in run_transform
+    return _run({"df": df}, code, mode="transform", func_name=func_name,
+                timeout=timeout, mem_mb=mem_mb, max_rows=0, load_out=load_out)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/sandbox.py", line 297, in _run
+    pickle.dump(frames, f)
+    ~~~~~~~~~~~^^^^^^^^^^^
+OSError: [Errno 28] No space left on device
+[2026-09-19T15:45:19+00:00] child control seed44 rc=1 NO-RESULT in 0.2min
+[2026-09-19T15:45:19+00:00] --- launching child: episodic seed44 ---
+[2026-09-19T15:45:21+00:00] child start: episodic seed44
+Traceback (most recent call last):
+  File "/opt/data/.scratch/sweep_0089.py", line 233, in <module>
+    raise SystemExit(_single(int(sys.argv[2]), sys.argv[3]))
+                     ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/.scratch/sweep_0089.py", line 221, in _single
+    r = run_one(seed, arm)
+  File "/opt/data/.scratch/sweep_0089.py", line 84, in run_one
+    run = agent.run(plan, prompt=runner.PROMPT)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/api.py", line 677, in run
+    run_agent(
+    ~~~~~~~~~^
+        session,
+        ^^^^^^^^
+    ...<2 lines>...
+        **run_kwargs,
+        ^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 971, in run
+    result, boundary = _run_one_episode(
+                       ~~~~~~~~~~~~~~~~^
+        agent, session, episode_prompt, episode_policy.request_limit
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/research/episodic_runner_0089/runner.py", line 82, in measured
+    result, boundary = original(agent, session, prompt, request_limit)
+                       ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 914, in _run_one_episode
+    result = agent.run_sync(
+        prompt,
+        deps=Deps(session=session),
+        usage_limits=UsageLimits(request_limit=request_limit),
+    )
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/agent/abstract.py", line 684, in run_sync
+    return _utils.run_until_complete(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.run(
+        ^^^^^^^^^
+    ...<19 lines>...
+        )
+        ^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/_utils.py", line 75, in run_until_complete
+    return loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/agent/abstract.py", line 556, in run
+    node = await agent_run.next(node)  # pyright: ignore[reportArgumentType]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 412, in next
+    return await self._run_node_with_hooks(node, self._advance_graph)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 336, in _run_node_with_hooks
+    return await self._wrap_and_advance(run_context, node, step_fn)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 299, in _wrap_and_advance
+    result = await cap.on_node_run_error(run_context, node=node, error=e)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 371, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 368, in on_node_run_error
+    return await capability.on_node_run_error(cap_ctx, node=node, error=error)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 603, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 368, in on_node_run_error
+    return await capability.on_node_run_error(cap_ctx, node=node, error=error)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 603, in on_node_run_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 297, in _wrap_and_advance
+    result = await cap.wrap_node_run(run_context, node=node, handler=step_fn)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 354, in wrap_node_run
+    return await chain(node)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 783, in wrapped
+    return await cap.wrap_node_run(_ctx_for_cap(cap, ctx), node=node, handler=inner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 582, in wrap_node_run
+    return await handler(node)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 783, in wrapped
+    return await cap.wrap_node_run(_ctx_for_cap(cap, ctx), node=node, handler=inner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 582, in wrap_node_run
+    return await handler(node)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/run.py", line 275, in _advance_graph
+    task = await self._graph_run.next(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 584, in next
+    return await anext(self)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 561, in __anext__
+    raise self._next.error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 860, in _run_tracked_task
+    result = await self._run_task(t_)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/graph_builder.py", line 911, in _run_task
+    output = await node.call(step_context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_graph/step.py", line 253, in _call_node
+    return await node.run(GraphRunContext(state=ctx.state, deps=ctx.deps))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1697, in run
+    async with self.stream(ctx):
+               ~~~~~~~~~~~^^^^^
+  File "/usr/lib/python3.13/contextlib.py", line 221, in __aexit__
+    await anext(self.gen)
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1717, in stream
+    async for _event in stream:
+        pass
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 182, in _with_event_stream_buffer
+    async for event in stream:
+    ...<2 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1881, in _run_stream
+    async for event in self._events_iterator:
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1844, in _run_stream
+    async for event in self._handle_tool_calls(ctx, tool_calls, response_output=response_output):
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_agent_graph.py", line 1933, in _handle_tool_calls
+    async for event in process_tool_calls(
+    ...<9 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 175, in process_tool_calls
+    async for event in processor.run():
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 307, in run
+    async for event in self._run_strategy():
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 964, in _run_strategy
+    async for event in flush_pending():
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 952, in flush_pending
+    async for event in self._run_function_calls(batch):
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 493, in _run_function_calls
+    async for event in self._call_tools(
+    ...<6 lines>...
+        yield event
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 666, in _call_tools
+    if event := await handle_call_or_result(call_tool(index), index):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 621, in handle_call_or_result
+    (await coro_or_task) if inspect.isawaitable(coro_or_task) else coro_or_task.result()
+     ^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_tool_execution.py", line 528, in _call_tool
+    tool_result = await self.tool_manager.execute_tool_call(validated)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 541, in execute_tool_call
+    return await self._execute_tool_call_impl(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        validated, usage=self.ctx.usage, wrap_validation_errors=wrap_validation_errors
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 778, in _execute_tool_call_impl
+    tool_result = await self._run_execute_hooks(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        validated, usage=usage, wrap_validation_errors=wrap_validation_errors
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 359, in _run_execute_hooks
+    tool_result = await cap.on_tool_execute_error(ctx, call=call, tool_def=tool_def, args=args, error=e)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 574, in on_tool_execute_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 569, in on_tool_execute_error
+    return await capability.on_tool_execute_error(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        cap_ctx, call=call, tool_def=tool_def, args=args, error=error
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 828, in on_tool_execute_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 569, in on_tool_execute_error
+    return await capability.on_tool_execute_error(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        cap_ctx, call=call, tool_def=tool_def, args=args, error=error
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 828, in on_tool_execute_error
+    raise error
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 351, in _run_execute_hooks
+    tool_result = await cap.wrap_tool_execute(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        ctx, call=call, tool_def=tool_def, args=args, handler=do_execute
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 553, in wrap_tool_execute
+    return await chain(args)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 796, in wrapped
+    return await cap.wrap_tool_execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        _ctx_for_cap(cap, ctx), call=call, tool_def=tool_def, args=args, handler=inner
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 796, in wrap_tool_execute
+    return await handler(args)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/combined.py", line 796, in wrapped
+    return await cap.wrap_tool_execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        _ctx_for_cap(cap, ctx), call=call, tool_def=tool_def, args=args, handler=inner
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/capabilities/abstract.py", line 796, in wrap_tool_execute
+    return await handler(args)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 336, in do_execute
+    return await self._raw_execute(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+        modified_validated, usage=usage, wrap_validation_errors=wrap_validation_errors
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/tool_manager.py", line 806, in _raw_execute
+    tool_result = await self.toolset.call_tool(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/_tool_search.py", line 397, in call_tool
+    return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/wrapper.py", line 66, in call_tool
+    return await self.wrapped.call_tool(name, tool_args, ctx, tool)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/combined.py", line 98, in call_tool
+    return await tool.source_toolset.call_tool(name, tool_args, ctx, tool.source_tool)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/toolsets/function.py", line 651, in call_tool
+    return await tool.call_func(tool_args, ctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_function_schema.py", line 87, in call
+    return await run_in_executor(function, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/pydantic_ai/_utils.py", line 136, in run_in_executor
+    return await run_sync(wrapped_func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/anyio/to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 2641, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/anyio/_backends/_asyncio.py", line 1033, in run
+    result = context.run(func, *args)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 633, in transform_features
+    return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table), ctx)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 194, in _retryable
+    return call()
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/agent.py", line 633, in <lambda>
+    return _retryable(lambda: tools.transform_features(ctx.deps.session, code, table=table), ctx)
+                              ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/harness/tools.py", line 1675, in transform_features
+    out_features, summary = _transform_features(features, code, timeout=timeout)
+                            ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/transform.py", line 118, in transform_features
+    out, summary = run_transform(df, code, func_name="transform_features", timeout=timeout)
+                   ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/sandbox.py", line 387, in run_transform
+    return _run({"df": df}, code, mode="transform", func_name=func_name,
+                timeout=timeout, mem_mb=mem_mb, max_rows=0, load_out=load_out)
+  File "/opt/data/REPOS/tabular_agent/src/tabular_agent/sandbox.py", line 297, in _run
+    pickle.dump(frames, f)
+    ~~~~~~~~~~~^^^^^^^^^^^
+OSError: [Errno 28] No space left on device
+[2026-09-19T15:45:30+00:00] child episodic seed44 rc=1 NO-RESULT in 0.2min
+[2026-09-19T15:45:30+00:00] sweep complete
+[2026-09-19T15:45:30+00:00] summary:
+0089 sweep  model=deepseek-v4-flash-0731@eu  commit=f9339e1264
+seeds=[42, 43, 44]  policy=request_limit=24,max_episodes=8
+
+arm       seed       val      test  exp  reqs  calls  peak_in    min
+----------------------------------------------------------------------
+control     42    0.1322    0.1344    8    35     34    22104   25.8
+control   MEAN    0.1322    0.1344         35   (val_std=0.0000, test_std=0.0000, n=1)
+
+episodic    42    0.1459    0.1464    8    65     78    17294   35.4
+episodic  MEAN    0.1459    0.1464         65   (val_std=0.0000, test_std=0.0000, n=1)
+
+

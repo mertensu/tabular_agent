@@ -1,0 +1,246 @@
+[wrapper] model=deepseek-v4-flash-0731@eu arm=episodic policy=EpisodePolicy(request_limit=24, max_episodes=8)
+{
+  "measurement": "decision_0089_episodic_runner",
+  "arm": "episodic",
+  "created_at": "2026-09-19T13:34:00.601647+00:00",
+  "git_commit": "f9339e126476ca5f1c962478c5cbeca4ef697a59",
+  "model": "deepseek-v4-flash-0731@eu",
+  "task_seed": 42,
+  "episode_policy": {
+    "request_limit": 24,
+    "max_episodes": 8
+  },
+  "run_dir": "/opt/data/REPOS/tabular_agent/_runs/episodic_runner_0089/episodic/20260919T125137Z-4006eaae",
+  "elapsed_minutes": 42.39,
+  "n_tables": 19,
+  "n_experiments": 8,
+  "tool_calls": 90,
+  "tool_calls_per_experiment": 11.25,
+  "contexts": [
+    {
+      "context": 1,
+      "episode": 1,
+      "ended_by": "request_limit",
+      "elapsed_minutes": 5.68,
+      "new_experiments": 0,
+      "tool_calls": 25,
+      "tool_call_counts": {
+        "explore_journal": 1,
+        "explore_table": 2,
+        "fit_encoding": 3,
+        "fit_group_stats": 2,
+        "fit_history": 4,
+        "inspect_data": 1,
+        "transform_features": 12
+      },
+      "n_requests": 24,
+      "first_input_tokens": 5985,
+      "peak_input_tokens": 16927,
+      "final_input_tokens": 16927,
+      "total_input_tokens": 289011,
+      "total_output_tokens": 11225,
+      "slope_per_turn": 475.7,
+      "input_tokens_per_experiment": null
+    },
+    {
+      "context": 2,
+      "episode": 2,
+      "ended_by": "request_limit",
+      "elapsed_minutes": 15.04,
+      "new_experiments": 0,
+      "tool_calls": 26,
+      "tool_call_counts": {
+        "explain_table": 1,
+        "explore_journal": 5,
+        "explore_table": 5,
+        "fit_encoding": 1,
+        "fit_group_stats": 2,
+        "fit_history": 6,
+        "fit_reference_target": 1,
+        "inspect_data": 1,
+        "transform_features": 4
+      },
+      "n_requests": 24,
+      "first_input_tokens": 6213,
+      "peak_input_tokens": 18072,
+      "final_input_tokens": 18072,
+      "total_input_tokens": 309883,
+      "total_output_tokens": 16440,
+      "slope_per_turn": 515.6,
+      "input_tokens_per_experiment": null
+    },
+    {
+      "context": 3,
+      "episode": 3,
+      "ended_by": "request_limit",
+      "elapsed_minutes": 7.59,
+      "new_experiments": 0,
+      "tool_calls": 25,
+      "tool_call_counts": {
+        "explore_journal": 6,
+        "explore_table": 3,
+        "filter_rows": 1,
+        "fit_encoding": 4,
+        "fit_group_stats": 1,
+        "inspect_data": 1,
+        "transform_features": 9
+      },
+      "n_requests": 24,
+      "first_input_tokens": 6213,
+      "peak_input_tokens": 23455,
+      "final_input_tokens": 23455,
+      "total_input_tokens": 379566,
+      "total_output_tokens": 24437,
+      "slope_per_turn": 749.7,
+      "input_tokens_per_experiment": null
+    },
+    {
+      "context": 4,
+      "episode": 4,
+      "ended_by": "agent",
+      "elapsed_minutes": 14.06,
+      "new_experiments": 8,
+      "tool_calls": 14,
+      "tool_call_counts": {
+        "explain_table": 1,
+        "explore_journal": 5,
+        "explore_table": 4,
+        "finalize_run": 1,
+        "fit_history": 1,
+        "inspect_data": 2
+      },
+      "n_requests": 13,
+      "first_input_tokens": 6233,
+      "peak_input_tokens": 17810,
+      "final_input_tokens": 17810,
+      "total_input_tokens": 179418,
+      "total_output_tokens": 15726,
+      "slope_per_turn": 964.8,
+      "input_tokens_per_experiment": 22427.2
+    }
+  ],
+  "journal_episodes": [
+    {
+      "episode": 1,
+      "ended_by": "request_limit",
+      "progressed": true,
+      "tables_before": 0,
+      "tables_after": 9,
+      "experiments_before": 0,
+      "experiments_after": 0
+    },
+    {
+      "episode": 2,
+      "ended_by": "request_limit",
+      "progressed": true,
+      "tables_before": 9,
+      "tables_after": 12,
+      "experiments_before": 0,
+      "experiments_after": 0
+    },
+    {
+      "episode": 3,
+      "ended_by": "request_limit",
+      "progressed": true,
+      "tables_before": 12,
+      "tables_after": 19,
+      "experiments_before": 0,
+      "experiments_after": 0
+    },
+    {
+      "episode": 4,
+      "ended_by": "finalized",
+      "progressed": true,
+      "tables_before": 19,
+      "tables_after": 19,
+      "experiments_before": 0,
+      "experiments_after": 8
+    }
+  ],
+  "summary": {
+    "task_type": "regression",
+    "metric": "rmspe",
+    "direction": "lower",
+    "validation_score": 0.15617,
+    "validation_se": null,
+    "test_score": 0.1626,
+    "baseline_score": 0.7786564623476767,
+    "gain_vs_baseline": 0.6224864623476767,
+    "beats_baseline": true,
+    "cv_score": null
+  },
+  "models": [
+    {
+      "experiment_id": "e2",
+      "model_type": "lgbm",
+      "selected": true,
+      "shipped": false,
+      "val_score": 0.13714840773554407,
+      "holdout_score": 0.139675,
+      "optimism": 0.002526
+    },
+    {
+      "experiment_id": "e3",
+      "model_type": "xgb",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.1599287517040262,
+      "holdout_score": 0.185066,
+      "optimism": 0.025137
+    },
+    {
+      "experiment_id": "e4",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.1489213573921017,
+      "holdout_score": 0.162333,
+      "optimism": 0.013411
+    },
+    {
+      "experiment_id": "e5",
+      "model_type": "elasticnet",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.20971450307001088,
+      "holdout_score": 0.216713,
+      "optimism": 0.006998
+    },
+    {
+      "experiment_id": "e6",
+      "model_type": "lgbm",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.2539246620649,
+      "holdout_score": 0.252734,
+      "optimism": -0.001191
+    },
+    {
+      "experiment_id": "e7",
+      "model_type": "xgb",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.5409321008886007,
+      "holdout_score": 0.580794,
+      "optimism": 0.039861
+    },
+    {
+      "experiment_id": "e8",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.26906999407199544,
+      "holdout_score": 0.268812,
+      "optimism": -0.000258
+    },
+    {
+      "experiment_id": "blend",
+      "model_type": "blend(lgbm+xgb+catboost+elasticnet+lgbm+xgb+catboost)",
+      "selected": false,
+      "shipped": true,
+      "val_score": 0.15617,
+      "holdout_score": 0.1626,
+      "optimism": 0.00643
+    }
+  ]
+}

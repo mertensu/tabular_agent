@@ -84,7 +84,7 @@ class DataPlan:
     target_transform: str | None = None
     forecast_horizon: float | None = None
     #: Serving columns whose values over the forecast horizon are known at issue
-    #: time (0090) — a weather forecast, a planned promotion, a published price.
+    #: time (0091) — a weather forecast, a planned promotion, a published price.
     #: The owner's assertion about the data, never inferred: it is what lets
     #: `fit_future_covariate_window` aggregate a column *forward* across the
     #: horizon. Empty (the default) means none are declared and behaviour is

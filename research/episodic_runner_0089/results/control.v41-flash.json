@@ -1,0 +1,128 @@
+{
+  "measurement": "decision_0089_episodic_runner",
+  "arm": "control",
+  "created_at": "2026-09-19T06:08:52.948494+00:00",
+  "git_commit": "febb585ae450a4b2928ca8a68bfeb66788d905d9",
+  "model": "deepseek-v4.1-flash@eu",
+  "task_seed": 42,
+  "episode_policy": null,
+  "run_dir": "/opt/data/REPOS/tabular_agent/_runs/episodic_runner_0089/control/20260919T060250Z-0c56dca9",
+  "elapsed_minutes": 6.04,
+  "n_tables": 9,
+  "n_experiments": 8,
+  "tool_calls": 23,
+  "tool_calls_per_experiment": 2.88,
+  "contexts": [
+    {
+      "context": 1,
+      "episode": null,
+      "ended_by": "agent",
+      "elapsed_minutes": 6.03,
+      "new_experiments": 8,
+      "tool_calls": 23,
+      "tool_call_counts": {
+        "explore_journal": 5,
+        "filter_rows": 2,
+        "finalize_run": 1,
+        "fit_encoding": 1,
+        "inspect_data": 1,
+        "transform_features": 13
+      },
+      "n_requests": 20,
+      "first_input_tokens": 6001,
+      "peak_input_tokens": 15562,
+      "final_input_tokens": 15562,
+      "total_input_tokens": 226836,
+      "total_output_tokens": 12796,
+      "slope_per_turn": 503.2,
+      "input_tokens_per_experiment": 28354.5
+    }
+  ],
+  "journal_episodes": [],
+  "summary": {
+    "task_type": "regression",
+    "metric": "rmspe",
+    "direction": "lower",
+    "validation_score": 0.199147,
+    "validation_se": null,
+    "test_score": 0.205013,
+    "baseline_score": 0.7786564623476767,
+    "gain_vs_baseline": 0.5795094623476768,
+    "beats_baseline": true,
+    "cv_score": null
+  },
+  "models": [
+    {
+      "experiment_id": "e3",
+      "model_type": "xgb",
+      "selected": true,
+      "shipped": false,
+      "val_score": 0.16429002567690015,
+      "holdout_score": 0.165965,
+      "optimism": 0.001675
+    },
+    {
+      "experiment_id": "e2",
+      "model_type": "lgbm",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.18822970901433098,
+      "holdout_score": 0.192748,
+      "optimism": 0.004519
+    },
+    {
+      "experiment_id": "e4",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.1916926261788864,
+      "holdout_score": 0.189896,
+      "optimism": -0.001796
+    },
+    {
+      "experiment_id": "e5",
+      "model_type": "elasticnet",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.2594915239815552,
+      "holdout_score": 0.254042,
+      "optimism": -0.005449
+    },
+    {
+      "experiment_id": "e6",
+      "model_type": "lgbm",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.2801525450266902,
+      "holdout_score": 0.255303,
+      "optimism": -0.024849
+    },
+    {
+      "experiment_id": "e7",
+      "model_type": "xgb",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.6466178128172201,
+      "holdout_score": 0.643673,
+      "optimism": -0.002944
+    },
+    {
+      "experiment_id": "e8",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.17203353637384755,
+      "holdout_score": 0.159333,
+      "optimism": -0.012701
+    },
+    {
+      "experiment_id": "blend",
+      "model_type": "blend(lgbm+xgb+catboost+elasticnet+lgbm+xgb+catboost)",
+      "selected": false,
+      "shipped": true,
+      "val_score": 0.199147,
+      "holdout_score": 0.205013,
+      "optimism": 0.005866
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "aggregate": {
+    "control": {
+      "n": 3,
+      "val_mean": 0.133,
+      "val_std": 0.0006,
+      "test_mean": 0.1339,
+      "test_std": 0.0024,
+      "reqs_mean": 41.7
+    },
+    "episodic": {
+      "n": 3,
+      "val_mean": 0.1406,
+      "val_std": 0.0063,
+      "test_mean": 0.1521,
+      "test_std": 0.0274,
+      "reqs_mean": 100
+    }
+  },
+  "git_commit": "f9339e126476ca5f1c962478c5cbeca4ef697a59",
+  "model": "deepseek-v4-flash-0731@eu",
+  "seeds": [
+    42,
+    43,
+    44
+  ]
+}

@@ -1,0 +1,1 @@
+[wrapper] model=deepseek-v4-flash-0731@eu arm=episodic policy=EpisodePolicy(request_limit=24, max_episodes=8)

@@ -153,7 +153,7 @@ def render_brief(session: RunSession) -> str | None:
     # declared on the run and true from the first call, but no tool other than
     # `inspect_data` mentions it, and the prompt tells a resumed agent to skip
     # that. Without this line an episode never learns the run has forward-legal
-    # covariates at all (0090).
+    # covariates at all (0091).
     if getattr(session, "future_known", None):
         names = ", ".join(session.future_known)
         lines.append(

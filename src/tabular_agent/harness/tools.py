@@ -738,7 +738,7 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
         # about — the note says so, so the refusal is not a surprise.
         **({"columns_not_available_at_predict_time": unavailable}
            if unavailable else {}),
-        # Only when the run declares them (0090). Serving columns whose values over
+        # Only when the run declares them (0091). Serving columns whose values over
         # the forecast horizon are known at issue time, so a *forward* aggregate of
         # them is legal where the target's is not. Named here because no other tool
         # reports the declaration and the agent otherwise cannot know which columns
@@ -1583,7 +1583,7 @@ def fit_future_covariate_window(
         )
     order = session.split_on
 
-    # Presence is not permission (0090): only a column the owner declared known
+    # Presence is not permission (0091): only a column the owner declared known
     # across the horizon may be aggregated forward. The refusal names why, because
     # the whole point of the class is that a realised future column looks identical
     # to a legal one from inside the run.

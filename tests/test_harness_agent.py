@@ -59,7 +59,7 @@ EXPECTED_TOOLS = {
 }
 
 #: Forecast-only tools, on top of EXPECTED_TOOLS. Aggregates a *future-known*
-#: covariate forward across the horizon, per series and delivered block (0090).
+#: covariate forward across the horizon, per series and delivered block (0091).
 #: Forecast-only because it needs a horizon and a declared future-known column,
 #: neither of which the iid or general workflow has — so it is not in
 #: EXPECTED_TOOLS (the general surface) and is added to it only for a forecast.

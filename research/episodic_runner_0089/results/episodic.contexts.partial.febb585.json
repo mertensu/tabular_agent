@@ -1,0 +1,96 @@
+[
+  {
+    "context": 1,
+    "episode": 1,
+    "ended_by": "request_limit",
+    "elapsed_minutes": 2.3,
+    "new_experiments": 0,
+    "tool_calls": 25,
+    "tool_call_counts": {
+      "explore_journal": 2,
+      "fit_encoding": 2,
+      "inspect_data": 1,
+      "transform_features": 20
+    },
+    "n_requests": 24,
+    "first_input_tokens": 6001,
+    "peak_input_tokens": 16229,
+    "final_input_tokens": 16229,
+    "total_input_tokens": 283244,
+    "total_output_tokens": 14472,
+    "slope_per_turn": 444.7,
+    "input_tokens_per_experiment": null
+  },
+  {
+    "context": 2,
+    "episode": 2,
+    "ended_by": "request_limit",
+    "elapsed_minutes": 2.11,
+    "new_experiments": 0,
+    "tool_calls": 28,
+    "tool_call_counts": {
+      "explore_journal": 5,
+      "explore_table": 1,
+      "fit_encoding": 4,
+      "fit_history": 1,
+      "inspect_data": 2,
+      "transform_features": 15
+    },
+    "n_requests": 24,
+    "first_input_tokens": 6270,
+    "peak_input_tokens": 18887,
+    "final_input_tokens": 18887,
+    "total_input_tokens": 349650,
+    "total_output_tokens": 12725,
+    "slope_per_turn": 548.6,
+    "input_tokens_per_experiment": null
+  },
+  {
+    "context": 3,
+    "episode": 3,
+    "ended_by": "request_limit",
+    "elapsed_minutes": 9.87,
+    "new_experiments": 0,
+    "tool_calls": 29,
+    "tool_call_counts": {
+      "explain_table": 1,
+      "explore_journal": 9,
+      "explore_table": 7,
+      "filter_rows": 1,
+      "fit_history": 3,
+      "inspect_data": 2,
+      "transform_features": 6
+    },
+    "n_requests": 24,
+    "first_input_tokens": 6275,
+    "peak_input_tokens": 24299,
+    "final_input_tokens": 24299,
+    "total_input_tokens": 377214,
+    "total_output_tokens": 29956,
+    "slope_per_turn": 783.7,
+    "input_tokens_per_experiment": null
+  },
+  {
+    "context": 4,
+    "episode": 4,
+    "ended_by": "request_limit",
+    "elapsed_minutes": 9.51,
+    "new_experiments": 0,
+    "tool_calls": 32,
+    "tool_call_counts": {
+      "explain_table": 1,
+      "explore_journal": 7,
+      "explore_table": 9,
+      "inspect_data": 6,
+      "transform_features": 9
+    },
+    "n_requests": 24,
+    "first_input_tokens": 6275,
+    "peak_input_tokens": 32783,
+    "final_input_tokens": 32783,
+    "total_input_tokens": 504136,
+    "total_output_tokens": 61218,
+    "slope_per_turn": 1152.5,
+    "input_tokens_per_experiment": null
+  }
+]

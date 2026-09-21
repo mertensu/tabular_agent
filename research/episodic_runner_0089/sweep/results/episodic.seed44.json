@@ -1,0 +1,315 @@
+{
+  "measurement": "decision_0089_episodic_runner_sweep",
+  "arm": "episodic",
+  "seed": 44,
+  "created_at": "2026-09-19T21:16:53.012630+00:00",
+  "git_commit": "f9339e126476ca5f1c962478c5cbeca4ef697a59",
+  "model": "deepseek-v4-flash-0731@eu",
+  "task_seed": 44,
+  "episode_policy": {
+    "request_limit": 24,
+    "max_episodes": 8
+  },
+  "run_dir": "/opt/data/REPOS/tabular_agent/research/episodic_runner_0089/sweep/_runs/seed44/episodic/20260919T195921Z-0c24f904",
+  "elapsed_minutes": 77.55,
+  "n_tables": 30,
+  "n_experiments": 8,
+  "tool_calls": 149,
+  "tool_calls_per_experiment": 18.62,
+  "contexts": [
+    {
+      "context": 1,
+      "episode": 1,
+      "ended_by": "request_limit",
+      "elapsed_minutes": 3.98,
+      "new_experiments": 0,
+      "tool_calls": 26,
+      "tool_call_counts": {
+        "explore_journal": 3,
+        "explore_table": 4,
+        "fit_encoding": 2,
+        "fit_group_stats": 2,
+        "fit_history": 4,
+        "inspect_data": 1,
+        "transform_features": 10
+      },
+      "n_requests": 24,
+      "first_input_tokens": 5985,
+      "peak_input_tokens": 17847,
+      "final_input_tokens": 17847,
+      "total_input_tokens": 311750,
+      "total_output_tokens": 12347,
+      "slope_per_turn": 515.7,
+      "input_tokens_per_experiment": null
+    },
+    {
+      "context": 2,
+      "episode": 2,
+      "ended_by": "request_limit",
+      "elapsed_minutes": 9.92,
+      "new_experiments": 0,
+      "tool_calls": 30,
+      "tool_call_counts": {
+        "explain_table": 1,
+        "explore_journal": 7,
+        "explore_table": 6,
+        "filter_rows": 2,
+        "fit_encoding": 2,
+        "fit_history": 4,
+        "fit_reference_target": 1,
+        "inspect_data": 1,
+        "transform_features": 6
+      },
+      "n_requests": 24,
+      "first_input_tokens": 6240,
+      "peak_input_tokens": 18602,
+      "final_input_tokens": 18602,
+      "total_input_tokens": 320187,
+      "total_output_tokens": 18103,
+      "slope_per_turn": 537.5,
+      "input_tokens_per_experiment": null
+    },
+    {
+      "context": 3,
+      "episode": 3,
+      "ended_by": "request_limit",
+      "elapsed_minutes": 13.22,
+      "new_experiments": 0,
+      "tool_calls": 30,
+      "tool_call_counts": {
+        "explain_table": 1,
+        "explore_journal": 8,
+        "explore_table": 9,
+        "fit_history": 6,
+        "fit_reference_target": 1,
+        "inspect_data": 2,
+        "transform_features": 3
+      },
+      "n_requests": 24,
+      "first_input_tokens": 6240,
+      "peak_input_tokens": 21718,
+      "final_input_tokens": 21718,
+      "total_input_tokens": 344514,
+      "total_output_tokens": 26574,
+      "slope_per_turn": 673.0,
+      "input_tokens_per_experiment": null
+    },
+    {
+      "context": 4,
+      "episode": 4,
+      "ended_by": "request_limit",
+      "elapsed_minutes": 15.32,
+      "new_experiments": 0,
+      "tool_calls": 25,
+      "tool_call_counts": {
+        "explore_journal": 7,
+        "explore_table": 4,
+        "fit_encoding": 1,
+        "fit_history": 9,
+        "fit_reference_target": 1,
+        "inspect_data": 2,
+        "transform_features": 1
+      },
+      "n_requests": 24,
+      "first_input_tokens": 6240,
+      "peak_input_tokens": 25317,
+      "final_input_tokens": 25317,
+      "total_input_tokens": 404801,
+      "total_output_tokens": 19898,
+      "slope_per_turn": 829.4,
+      "input_tokens_per_experiment": null
+    },
+    {
+      "context": 5,
+      "episode": 5,
+      "ended_by": "request_limit",
+      "elapsed_minutes": 20.89,
+      "new_experiments": 0,
+      "tool_calls": 25,
+      "tool_call_counts": {
+        "explain_table": 1,
+        "explore_journal": 7,
+        "explore_table": 6,
+        "filter_rows": 1,
+        "fit_encoding": 1,
+        "fit_history": 4,
+        "fit_reference_target": 1,
+        "inspect_data": 2,
+        "transform_features": 2
+      },
+      "n_requests": 24,
+      "first_input_tokens": 6240,
+      "peak_input_tokens": 23672,
+      "final_input_tokens": 23672,
+      "total_input_tokens": 388576,
+      "total_output_tokens": 22114,
+      "slope_per_turn": 757.9,
+      "input_tokens_per_experiment": null
+    },
+    {
+      "context": 6,
+      "episode": 6,
+      "ended_by": "agent",
+      "elapsed_minutes": 14.16,
+      "new_experiments": 8,
+      "tool_calls": 13,
+      "tool_call_counts": {
+        "explore_journal": 6,
+        "explore_table": 3,
+        "finalize_run": 1,
+        "inspect_data": 2,
+        "transform_features": 1
+      },
+      "n_requests": 12,
+      "first_input_tokens": 6240,
+      "peak_input_tokens": 17855,
+      "final_input_tokens": 17855,
+      "total_input_tokens": 163963,
+      "total_output_tokens": 14113,
+      "slope_per_turn": 1055.9,
+      "input_tokens_per_experiment": 20495.4
+    }
+  ],
+  "journal_episodes": [
+    {
+      "episode": 1,
+      "ended_by": "request_limit",
+      "progressed": true,
+      "tables_before": 0,
+      "tables_after": 7,
+      "experiments_before": 0,
+      "experiments_after": 0
+    },
+    {
+      "episode": 2,
+      "ended_by": "request_limit",
+      "progressed": true,
+      "tables_before": 7,
+      "tables_after": 14,
+      "experiments_before": 0,
+      "experiments_after": 0
+    },
+    {
+      "episode": 3,
+      "ended_by": "request_limit",
+      "progressed": true,
+      "tables_before": 14,
+      "tables_after": 18,
+      "experiments_before": 0,
+      "experiments_after": 0
+    },
+    {
+      "episode": 4,
+      "ended_by": "request_limit",
+      "progressed": true,
+      "tables_before": 18,
+      "tables_after": 25,
+      "experiments_before": 0,
+      "experiments_after": 0
+    },
+    {
+      "episode": 5,
+      "ended_by": "request_limit",
+      "progressed": true,
+      "tables_before": 25,
+      "tables_after": 29,
+      "experiments_before": 0,
+      "experiments_after": 0
+    },
+    {
+      "episode": 6,
+      "ended_by": "finalized",
+      "progressed": true,
+      "tables_before": 29,
+      "tables_after": 30,
+      "experiments_before": 0,
+      "experiments_after": 8
+    }
+  ],
+  "summary": {
+    "task_type": "regression",
+    "metric": "rmspe",
+    "direction": "lower",
+    "validation_score": 0.131793,
+    "validation_se": null,
+    "test_score": 0.121713,
+    "baseline_score": 0.7786564623476767,
+    "gain_vs_baseline": 0.6468634623476768,
+    "beats_baseline": true,
+    "cv_score": null
+  },
+  "models": [
+    {
+      "experiment_id": "e2",
+      "model_type": "lgbm",
+      "selected": true,
+      "shipped": false,
+      "val_score": 0.13336957421218315,
+      "holdout_score": 0.12768,
+      "optimism": -0.005689
+    },
+    {
+      "experiment_id": "e3",
+      "model_type": "xgb",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.1490659667321245,
+      "holdout_score": 0.127992,
+      "optimism": -0.021074
+    },
+    {
+      "experiment_id": "e4",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.13510456137894913,
+      "holdout_score": 0.129872,
+      "optimism": -0.005232
+    },
+    {
+      "experiment_id": "e5",
+      "model_type": "elasticnet",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.20117776556182337,
+      "holdout_score": 0.195806,
+      "optimism": -0.005371
+    },
+    {
+      "experiment_id": "e6",
+      "model_type": "lgbm",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.13366991156441693,
+      "holdout_score": 0.131567,
+      "optimism": -0.002103
+    },
+    {
+      "experiment_id": "e7",
+      "model_type": "xgb",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.140276213192627,
+      "holdout_score": 0.130794,
+      "optimism": -0.009482
+    },
+    {
+      "experiment_id": "e8",
+      "model_type": "catboost",
+      "selected": false,
+      "shipped": false,
+      "val_score": 0.13798296885973307,
+      "holdout_score": 0.122691,
+      "optimism": -0.015292
+    },
+    {
+      "experiment_id": "blend",
+      "model_type": "blend(lgbm+xgb+catboost+elasticnet+lgbm+xgb+catboost)",
+      "selected": false,
+      "shipped": true,
+      "val_score": 0.131793,
+      "holdout_score": 0.121713,
+      "optimism": -0.01008
+    }
+  ]
+}

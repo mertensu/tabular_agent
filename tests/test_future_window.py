@@ -1,4 +1,4 @@
-"""Invariants for FutureWindowEncoder and fit_future_covariate_window (0090).
+"""Invariants for FutureWindowEncoder and fit_future_covariate_window (0091).
 
 The forward, exogenous counterpart to fit_history. These check the three
 properties the block invariant rests on — order is restored, no aggregate crosses

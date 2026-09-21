@@ -1,4 +1,4 @@
-# 0090  Future-known covariates are a declared class, and their windowed aggregates are a tool
+# 0091  Future-known covariates are a declared class, and their windowed aggregates are a tool
 
 - **Date:** 2026-09-20
 - **Status:** accepted, implemented (`DataPlan.future_known`,

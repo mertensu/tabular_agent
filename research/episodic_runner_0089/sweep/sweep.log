@@ -1,0 +1,43 @@
+[2026-09-19T17:48:35+00:00] sweep start: seeds=[42, 43, 44] arms=['control', 'episodic'] model=deepseek-v4-flash-0731@eu commit=f9339e1264
+[2026-09-19T17:48:35+00:00] skip control seed42: result already present
+[2026-09-19T17:48:35+00:00] skip episodic seed42: result already present
+[2026-09-19T17:48:35+00:00] --- launching child: control seed43 ---
+[2026-09-19T17:48:38+00:00] child start: control seed43
+[2026-09-19T18:16:23+00:00] reclaimed scratch /opt/data/REPOS/tabular_agent/research/episodic_runner_0089/sweep/_runs/seed43/control
+[2026-09-19T18:16:23+00:00] child done control seed43: val=0.133667 test=0.136489 exp=8 reqs=56
+[2026-09-19T18:16:25+00:00] child control seed43 rc=0 OK in 27.8min
+[2026-09-19T18:16:25+00:00] --- launching child: episodic seed43 ---
+[2026-09-19T18:16:27+00:00] child start: episodic seed43
+[2026-09-19T19:22:59+00:00] reclaimed scratch /opt/data/REPOS/tabular_agent/research/episodic_runner_0089/sweep/_runs/seed43/episodic
+[2026-09-19T19:22:59+00:00] child done episodic seed43: val=0.144223 test=0.188215 exp=8 reqs=103
+[2026-09-19T19:23:01+00:00] child episodic seed43 rc=0 OK in 66.6min
+[2026-09-19T19:23:02+00:00] --- launching child: control seed44 ---
+[2026-09-19T19:23:05+00:00] child start: control seed44
+[2026-09-19T19:59:15+00:00] reclaimed scratch /opt/data/REPOS/tabular_agent/research/episodic_runner_0089/sweep/_runs/seed44/control
+[2026-09-19T19:59:15+00:00] child done control seed44: val=0.133113 test=0.130715 exp=8 reqs=34
+[2026-09-19T19:59:17+00:00] child control seed44 rc=0 OK in 36.3min
+[2026-09-19T19:59:17+00:00] --- launching child: episodic seed44 ---
+[2026-09-19T19:59:20+00:00] child start: episodic seed44
+/opt/data/REPOS/tabular_agent/.venv/lib/python3.13/site-packages/sklearn/linear_model/_coordinate_descent.py:825: ConvergenceWarning: Objective did not converge. You might want to increase the number of iterations, check the scale of the features or consider increasing regularisation. Duality gap: 9.083292e+07, tolerance: 1.397e+07
+  model = cd_fast.enet_coordinate_descent_gram(
+[2026-09-19T21:16:53+00:00] reclaimed scratch /opt/data/REPOS/tabular_agent/research/episodic_runner_0089/sweep/_runs/seed44/episodic
+[2026-09-19T21:16:53+00:00] child done episodic seed44: val=0.131793 test=0.121713 exp=8 reqs=132
+[2026-09-19T21:16:55+00:00] child episodic seed44 rc=0 OK in 77.6min
+[2026-09-19T21:16:55+00:00] sweep complete
+[2026-09-19T21:16:55+00:00] summary:
+0089 sweep  model=deepseek-v4-flash-0731@eu  commit=f9339e1264
+seeds=[42, 43, 44]  policy=request_limit=24,max_episodes=8
+
+arm       seed       val      test  exp  reqs  calls  peak_in    min
+----------------------------------------------------------------------
+control     42    0.1322    0.1344    8    35     34    22104   25.8
+control     43    0.1337    0.1365    8    56     72    37391   27.8
+control     44    0.1331    0.1307    8    34     43    25037   36.2
+control   MEAN    0.1330    0.1339         42   (val_std=0.0006, test_std=0.0024, n=3)
+
+episodic    42    0.1459    0.1464    8    65     78    17294   35.4
+episodic    43    0.1442    0.1882    8   103    129    24697   66.5
+episodic    44    0.1318    0.1217    8   132    149    25317   77.5
+episodic  MEAN    0.1406    0.1521        100   (val_std=0.0063, test_std=0.0274, n=3)
+
+

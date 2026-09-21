@@ -1,0 +1,15 @@
+0089 sweep  model=deepseek-v4-flash-0731@eu  commit=f9339e1264
+seeds=[42, 43, 44]  policy=request_limit=24,max_episodes=8
+
+arm       seed       val      test  exp  reqs  calls  peak_in    min
+----------------------------------------------------------------------
+control     42    0.1322    0.1344    8    35     34    22104   25.8
+control     43    0.1337    0.1365    8    56     72    37391   27.8
+control     44    0.1331    0.1307    8    34     43    25037   36.2
+control   MEAN    0.1330    0.1339         42   (val_std=0.0006, test_std=0.0024, n=3)
+
+episodic    42    0.1459    0.1464    8    65     78    17294   35.4
+episodic    43    0.1442    0.1882    8   103    129    24697   66.5
+episodic    44    0.1318    0.1217    8   132    149    25317   77.5
+episodic  MEAN    0.1406    0.1521        100   (val_std=0.0063, test_std=0.0274, n=3)
+

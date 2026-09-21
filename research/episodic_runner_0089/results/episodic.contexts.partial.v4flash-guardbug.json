@@ -1,0 +1,28 @@
+[
+  {
+    "context": 1,
+    "episode": 1,
+    "ended_by": "request_limit",
+    "elapsed_minutes": 18.73,
+    "new_experiments": 0,
+    "tool_calls": 28,
+    "tool_call_counts": {
+      "explain_table": 2,
+      "explore_journal": 1,
+      "explore_table": 3,
+      "fit_encoding": 7,
+      "fit_group_stats": 2,
+      "fit_history": 6,
+      "inspect_data": 2,
+      "transform_features": 5
+    },
+    "n_requests": 24,
+    "first_input_tokens": 5985,
+    "peak_input_tokens": 19658,
+    "final_input_tokens": 19658,
+    "total_input_tokens": 333195,
+    "total_output_tokens": 11109,
+    "slope_per_turn": 594.5,
+    "input_tokens_per_experiment": null
+  }
+]

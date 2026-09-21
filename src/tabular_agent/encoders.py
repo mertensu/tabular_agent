@@ -1503,7 +1503,7 @@ class StreamAggregateEncoder:
         return enc
 
 
-#: What may be asked of a future-known covariate over a window (0090). Broader
+#: What may be asked of a future-known covariate over a window (0091). Broader
 #: than :data:`WINDOW_STATS` because there is no leakage tightrope here. Those
 #: statistics summarise the *target's* past, where an extreme or a sum over a
 #: short stretch is one draw of the thing being predicted wearing a summary's
@@ -1518,7 +1518,7 @@ FUTURE_STATS = ("mean", "sum", "min", "max", "std", "count")
 #: Calendar units a whole-period aggregate may key on. ``"block"`` is the whole
 #: delivered serving block; the others floor the ordering timestamp so the group
 #: is one calendar unit that never straddles a block boundary — the invariant
-#: that keeps a forward-looking aggregate serving-legal (0090).
+#: that keeps a forward-looking aggregate serving-legal (0091).
 FUTURE_UNITS = ("hour", "day", "week", "month", "block")
 
 #: Window families for :class:`FutureWindowEncoder`. ``period`` groups a whole
@@ -1597,14 +1597,14 @@ def _calendar_key(dt: pd.Series, unit: str) -> np.ndarray:
 
 
 class FutureWindowEncoder:
-    """Serving-legal windowed aggregates of a *future-known* covariate (0090).
+    """Serving-legal windowed aggregates of a *future-known* covariate (0091).
 
     The exogenous counterpart to :class:`HistoryEncoder`, and the one it cannot
     reach. History aggregates the **target backward** — trailing windows frozen in
     the past, gated to be at least one horizon old, because the target is unknown
     across the horizon and a served row may read only its own past. A *future
     covariate* is the opposite case: the run's owner has declared (``future_known``,
-    0090) that this column's values over the forecast horizon are available at
+    0091) that this column's values over the forecast horizon are available at
     issue time — a weather forecast, a planned promotion, a published price. So a
     statistic that looks **forward across the horizon** is not a leak; it is the
     standard, high-value forecasting family (M5, the Rossmann winner, Darts
@@ -1640,7 +1640,7 @@ class FutureWindowEncoder:
     * **forward** — a window of ``window`` rows starting at the row and running
       ahead, clipped at the block end (``next_3h_temp_mean``).
 
-    **The realism caveat (0090), recorded so it is not forgotten.** Serving-legal
+    **The realism caveat (0091), recorded so it is not forgotten.** Serving-legal
     under a contract that *delivers realised* future covariates (as a Kaggle test
     file does) is not the same as production-realistic: in operation a future
     covariate is a forecast issued at the cutoff whose quality decays with lead.
