@@ -410,3 +410,8 @@ uv run pytest
 - Fresh-machine and dataset setup: [`docs/SETUP.md`](docs/SETUP.md)
 - Current state and next action: [`docs/CURRENT.md`](docs/CURRENT.md)
 - Why the code has the shape it has: [`docs/decisions/`](docs/decisions/)
+
+## License
+
+MIT — see [`LICENSE`](LICENSE). The Kaggle datasets used as probes are not
+included and are not covered by it; `docs/SETUP.md` explains how to fetch them.

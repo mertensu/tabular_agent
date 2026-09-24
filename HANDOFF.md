@@ -41,6 +41,13 @@ Report the distribution; do not select the best run.
 
 ## Blocking gotchas
 
+- **History was rewritten on 2026-09-24** (Kaggle data removed before publishing).
+  On the other Mac, do NOT pull or merge: move the old clone aside, re-clone, and
+  copy the untracked dataset folders and `config.env` across. Pulling into the old
+  clone would reintroduce the removed data. Only master was kept on GitHub; the
+  side branches (15 with unmerged work) are in
+  `~/Documents/tabular_agent-pre-rewrite-2026-09-24.bundle` on the MacBook Air.
+
 - Requesty model strings used as public API strings normally need a provider/model
   slash to trigger gateway routing; for the exact requested bare model ID, pass a
   preconfigured `gateway_model("deepseek-v4-flash-0731@eu")`

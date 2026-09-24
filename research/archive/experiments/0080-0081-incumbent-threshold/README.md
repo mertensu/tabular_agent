@@ -26,20 +26,23 @@ reporting instrument.
 - `analyze.py` / `test_analysis.py` — reconstruction and focused tests
 - `contrasts.csv` / `summary.json` — tracked deterministic readings
 - `walkthrough.ipynb` — unexecuted, smoke-tested teaching walkthrough
-- `artifacts.tar.gz` — journals, validation rows and prediction sidecars for the
-  three covered runs; no fitted models or raw competition datasets
+
+The run artifacts the analysis reads (journals, validation rows and prediction
+sidecars for the three covered runs) are **not in the repository**. The
+validation rows are competition data, which may not be redistributed, so the
+archive that `PREREGISTRATION.md` refers to was removed from history before the
+repository was published.
 
 ## Reproduce
 
-From the repository root:
+The focused tests run from the repository alone. Reconstructing the readings
+needs the three run directories (`_runs/restaurant_v1`, `_runs/restaurant_v2`,
+`_runs/ieee_v1`), rebuilt locally from the competition data:
 
 ```bash
-mkdir -p /tmp/tabular_incumbent_artifacts
-tar -xzf research/archive/experiments/0080-0081-incumbent-threshold/artifacts.tar.gz \
-  --exclude='*/._*' -C /tmp/tabular_incumbent_artifacts
 uv run pytest research/archive/experiments/0080-0081-incumbent-threshold/test_analysis.py
 uv run python research/archive/experiments/0080-0081-incumbent-threshold/analyze.py \
-  --runs-root /tmp/tabular_incumbent_artifacts/_runs
+  --runs-root _runs
 ```
 
 The analysis defaults to writing its outputs back into this directory.
