@@ -2,11 +2,11 @@
 
 - **Date:** 2026-08-10
 - **Status:** accepted, **not yet implemented**
-- **Related:** [0019](0019-the-leaderboard-is-a-public-leaderboard.md) (which moved
+- **Related:** [0019](../../research/archive/decisions/0019-the-leaderboard-is-a-public-leaderboard.md) (which moved
   ranking onto `val_score` and left this behind),
-  [0014](0014-two-level-stop.md) (the rule that uses the yardstick),
-  [0021](0021-the-agent-picks-the-target-scale.md) (the feature whose measurement
-  exposed it), [0023](0023-the-third-split-has-evidence-now.md)
+  [0014](../../research/archive/decisions/0014-two-level-stop.md) (the rule that uses the yardstick),
+  [0021](../../research/archive/decisions/0021-the-agent-picks-the-target-scale.md) (the feature whose measurement
+  exposed it), [0023](../../research/archive/decisions/0023-the-third-split-has-evidence-now.md)
 
 ## The problem, found by accident
 

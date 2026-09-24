@@ -1,6 +1,6 @@
 # Slice 3 — rolling windows over stored history
 
-> **Superseded by [0052](decisions/0052-a-window-is-a-worse-estimator-of-a-better-idea.md)
+> **Superseded by [0052](../research/archive/decisions/0052-a-window-is-a-worse-estimator-of-a-better-idea.md)
 > (2026-08-14). This was the plan; it was built and it measured negative.** The
 > trailing window loses to 0046's unbounded mean of the same key, the gain the
 > first probe showed belongs to the periodic key rather than the averaging, and a
@@ -11,7 +11,7 @@
 **Status:** a plan, written 2026-08-14 so a fresh session can start from the
 argument instead of rebuilding it. Nothing here is built.
 
-**Read first, in this order:** `docs/decisions/0047`, `0048`, `0049`, `0050`, then
+**Read first, in this order:** `research/archive/decisions/0047`, `0048`, `0049`, `0050`, then
 `src/tabular_agent/encoders.py` (`HistoryEncoder`, `fit_history`) and
 `research/archive/notebooks/phase5_history_and_the_horizon.ipynb`. `docs/time_aware_features.md` is
 the original three-slice plan; slices 1 and 2 are done.

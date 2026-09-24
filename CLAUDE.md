@@ -11,7 +11,10 @@ the deliberately untracked Kaggle datasets.
 `docs/decisions/` holds one file per design decision — the problem, what was
 chosen, what was rejected, and what it cost. Start at `docs/decisions/README.md`,
 which also defines the project vocabulary (run, table, experiment, journal,
-lineage, bundle).
+lineage, bundle). It holds only the records that still carry the product; the
+rest — measurements, refuted mechanisms, superseded plans — are in
+`research/archive/decisions/` with the full index. Numbers are one sequence
+across both; new records go in `docs/decisions/` and continue it.
 
 - **Read them** when touching an area you did not build: they explain *why* the
   code has the shape it has, which the code itself cannot.

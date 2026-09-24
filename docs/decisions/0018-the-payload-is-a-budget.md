@@ -4,7 +4,7 @@
 - **Status:** accepted
 - **Decided by:** Ulf (noticed the drift, and asked whether the two new concepts
   were needed — they were not)
-- **Related:** [0017](0017-credit-by-ablation.md), [0003](0003-file-based-tools.md)
+- **Related:** [0017](../../research/archive/decisions/0017-credit-by-ablation.md), [0003](../../research/archive/decisions/0003-file-based-tools.md)
 
 ## The problem
 

@@ -2,13 +2,13 @@
 
 - **Date:** 2026-09-16
 - **Status:** accepted and implemented
-- **Related:** [0023](0023-the-seal-is-one-number-seen-once.md) (the internal
-  test ranks nothing), [0029](0029-the-harness-owns-the-exam.md) (the harness
-  owns evaluation), [0057](0057-the-capabilities-the-agent-does-not-have.md)
-  (the first manual capability inventory), [0070](0070-what-the-winner-had-that-we-cannot-express.md)
-  and [0071](0071-the-gap-was-not-the-vocabulary-it-was-a-column-nobody-asked-for.md)
+- **Related:** [0023](../../research/archive/decisions/0023-the-seal-is-one-number-seen-once.md) (the internal
+  test ranks nothing), [0029](../../research/archive/decisions/0029-the-harness-owns-the-exam.md) (the harness
+  owns evaluation), [0057](../../research/archive/decisions/0057-the-capabilities-the-agent-does-not-have.md)
+  (the first manual capability inventory), [0070](../../research/archive/decisions/0070-what-the-winner-had-that-we-cannot-express.md)
+  and [0071](../../research/archive/decisions/0071-the-gap-was-not-the-vocabulary-it-was-a-column-nobody-asked-for.md)
   (capability gap, agent gap, and tool defect are different claims),
-  [0084](0084-one-finalized-run-has-one-report-model-and-three-views.md)
+  [0084](../../research/archive/decisions/0084-one-finalized-run-has-one-report-model-and-three-views.md)
   (one sanitized report model)
 
 ## What happened

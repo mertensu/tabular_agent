@@ -368,7 +368,8 @@ never shipping that model by accident.
 A run executes in fresh episodes that read their state from the run journal rather
 than an ever-growing context, so a long or expensive search does not balloon in
 cost and can resume where it left off if interrupted. The mechanics live in the
-decision records ([`docs/decisions/`](docs/decisions/), 0024–0027).
+archived decision records 0024–0027
+([`research/archive/decisions/`](research/archive/decisions/)).
 
 ## What this is not
 

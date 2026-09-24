@@ -6,19 +6,19 @@ argument rather than rebuild it.
 **Updated 2026-08-14, later the same day:**
 
 - **Both blocking questions (§3.2, §3.3) are settled** — see
-  [0047](decisions/0047-the-forecast-horizon-is-a-column-not-a-constant.md). The
+  [0047](../research/archive/decisions/0047-the-forecast-horizon-is-a-column-not-a-constant.md). The
   short version: frozen history + a per-row staleness column, optional
   `TaskSpec.forecast_horizon` as a *minimum*, no recursion, predict rows never
   read their own batch. §3.2 and §3.3 below are left as written; the record is
   the decision.
 - **Slice 1 is built** —
-  [0046](decisions/0046-the-mean-is-a-lossy-summary-of-a-group.md). Gap A is
+  [0046](../research/archive/decisions/0046-the-mean-is-a-lossy-summary-of-a-group.md). Gap A is
   closed. Slices 2 and 3 are untouched.
 
 **Updated again, same day — §3.4 settled and slice 2 built:**
 
 - **§3.4's premise was wrong** — see
-  [0048](decisions/0048-a-target-lag-is-not-target-encoding.md). A target lag is
+  [0048](../research/archive/decisions/0048-a-target-lag-is-not-target-encoding.md). A target lag is
   *not* target encoding's near relative: out-of-fold construction removes
   self-inclusion, which a strictly backward lag cannot commit at any group size.
   What it actually needs guarding against is availability skew, so history is

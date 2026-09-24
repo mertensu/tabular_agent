@@ -3,9 +3,9 @@
 - **Date:** 2026-08-21
 - **Status:** registered prediction, unresolved — written before computing any
   candidate-vs-incumbent block contrast from `artifacts.tar.gz`
-- **Related:** [0078](../../../../docs/decisions/0078-the-panel-was-a-stop-rule-and-the-gain-threshold-is-the-real-lever.md)
-  (the zero threshold on ordered runs), [0059](../../../../docs/decisions/0059-the-interval-belongs-to-the-difference-not-the-score.md)
-  (the block instrument), [0079](../../../../docs/decisions/0079-the-work-table-stays-on-the-terminal-ballot.md)
+- **Related:** [0078](../../../../research/archive/decisions/0078-the-panel-was-a-stop-rule-and-the-gain-threshold-is-the-real-lever.md)
+  (the zero threshold on ordered runs), [0059](../../../../research/archive/decisions/0059-the-interval-belongs-to-the-difference-not-the-score.md)
+  (the block instrument), [0079](../../../../research/archive/decisions/0079-the-work-table-stays-on-the-terminal-ballot.md)
   (why raw and derived incumbents are different questions),
   [`ruler_deflation_across_runs.csv`](../../readings/ruler_deflation_across_runs.csv).
 

@@ -1,60 +1,59 @@
 # Handoff
 
-## Latest session (2026-09-17)
+## Current state
 
-Merged capability-review V1 to master first, then built the explicit forecasting
-surface on branch `chad/forecasting-agent`.
+Preparing the repository for publication (it is still **private** on GitHub).
 
-- `Agent` is now the public IID contract: it requires `split_on = False` and
-  cannot call `fit_history` or `fit_stream_aggregate`
-- `ForecastingAgent` is a separate public surface over the same engine: it
-  requires a confirmed ordering column and positive `forecast_horizon`
-- forecast runs receive a focused temporal brief which asks them to test honest
-  history when a repeated series is expressible, while ordinary interactions
-  and row-local transforms remain common to both workflows
-- workflow and horizon are persisted in the split contract, checked on resume,
-  visible in Markdown/JSON/HTML, and available to capability review
-- the guided DataPlan summary now surfaces the horizon when an ordered split is
-  selected
-- the Quickstart documents the explicit choice; no automatic mode switching was
-  added
-
-Decision 0089 records why these are two product contracts but one implementation,
-and preregisters the repeated Rossmann acceptance test as a variance test rather
-than a best-score contest.
-
-## Verification so far
-
-- focused API/tool-surface/prompt/report/reviewer suite passes
-- full repository suite: 626 tests collected and all pass
-- Wheel and sdist build successfully with `uv build`
-- `git diff --check` and compile checks pass
-- the real-run acceptance is intentionally still pending: three predeclared
-  Rossmann runs with Requesty `deepseek-v4-flash-0731@eu`
+- History rewritten 2026-09-24: the committed Rossmann competition data and the
+  0080–0081 artifact archive (competition validation rows) are gone from every
+  commit. Only `master` and tag `research-reference-2026-08-21` remain on GitHub.
+- MIT license added (`LICENSE`, `pyproject.toml`, README section).
+- Decision records trimmed to the 12 that still carry the product in
+  `docs/decisions/`; the other 80 moved unchanged (link paths only) to
+  `research/archive/decisions/` with the full old index. Numbering stays one
+  sequence; new records go in `docs/decisions/`.
 
 ## Next action
 
-Commit and push the implementation, then run exactly three Rossmann repetitions.
-For each, report whether at least one valid history family was attempted, its
-best internal validation/test score, feature count, and failure/refusal state.
-Report the distribution; do not select the best run.
+Remaining pre-publication items from the design review, in suggested order:
+
+1. README safety wording: the sandbox allows the whole standard library
+   (`sandbox.py`, `ALLOWED`), so "no shell", "target-blind" and "data never leaves
+   the machine" overstate it. Reword, or enforce at the OS level. Also say that
+   loading a bundle executes code.
+2. `Agent` defaults to `profile="minimal"`, `ForecastingAgent` hardcodes
+   `profile="full"` (`api.py`); CURRENT.md still calls minimal a shadow profile
+   and does not mention `ForecastingAgent`. Settle one profile or label 0.x
+   experimental.
+3. Implicit Requesty routing for any `a/b` model string; README table says
+   `claude-sonnet-4-6` while `DEFAULT_MODEL` is `anthropic:claude-opus-5` — check
+   the ID exists.
+4. A small preregistered comparison (raw GBM vs this vs AutoGluon, repeats, cost).
+5. Absolute `/Users/ulfmertens` paths in `research/archive/runs/house-prices/*.py`.
+
+Carried over and status unknown: the three predeclared Rossmann
+`ForecastingAgent` repetitions from the 2026-09-17 session.
 
 ## Blocking gotchas
 
-- **History was rewritten on 2026-09-24** (Kaggle data removed before publishing).
-  On the other Mac, do NOT pull or merge: move the old clone aside, re-clone, and
-  copy the untracked dataset folders and `config.env` across. Pulling into the old
-  clone would reintroduce the removed data. Only master was kept on GitHub; the
-  side branches (15 with unmerged work) are in
-  `~/Documents/tabular_agent-pre-rewrite-2026-09-24.bundle` on the MacBook Air.
+- **Other Mac: do NOT pull.** History was rewritten. Move the old clone aside,
+  re-clone, then copy the untracked dataset folders and `config.env` across.
+  Pulling or merging into the old clone reintroduces the removed data.
+- The 28 deleted side branches (15 had unmerged work) and the pre-rewrite
+  history are only in `~/Documents/tabular_agent-pre-rewrite-2026-09-24.bundle`
+  on the MacBook Air. It contains the competition data: keep it private.
+  Recover a branch with `git fetch <bundle> <branch>:<branch>`.
+- On this Mac, `refs/stash` and `refs/claude/checkpoint-9e2193fb` still pin the
+  old objects in `.git` (deletion was blocked in-session); both are in the bundle.
+- GitHub may keep serving old commits by SHA until it garbage-collects; ask
+  GitHub Support to purge before making the repo public if that matters.
 
-- Requesty model strings used as public API strings normally need a provider/model
-  slash to trigger gateway routing; for the exact requested bare model ID, pass a
-  preconfigured `gateway_model("deepseek-v4-flash-0731@eu")`
-- the forecast brief requires a history attempt only when an honest repeated
-  series is expressible; it must not fabricate an entity key on a single-series
-  or non-repeated dataset
-- low-level `RunSession(workflow="general")` remains backward compatible for
-  research scripts; do not weaken the strict public facade contracts to remove it
-- do not interpret a single improved repeat as acceptance: the motivating defect
-  was run-to-run omission of history
+## Uncommitted work
+
+- `notebooks/concepts/` and `zomato_model_comparison.ipynb` are untracked (the
+  concept notebook's decision links were updated to the archive paths).
+
+## Latest session (2026-09-24, MacBook Air)
+
+Pre-publication review: history rewrite, MIT license, decision records trimmed
+to 12. Tests were not re-run; the changes touched no code.

@@ -2,11 +2,11 @@
 
 - **Date:** 2026-08-11
 - **Status:** accepted, implemented; **validation run in flight** (`_runs/rossmann_v2`)
-- **Related:** [0029](0029-the-harness-owns-the-exam.md) (whose ownership line this
-  sits exactly on), [0010](0010-store-code-not-columns.md) (why the second failure
-  mode exists at all), [0013](0013-refusal-as-return-value.md) (the refusal's
-  shape), [0019](0019-the-leaderboard-is-a-public-leaderboard.md) (the validation
-  half that confirms the leak instead of catching it), [0024](0024-the-episode-stop-is-structural.md)
+- **Related:** [0029](../../research/archive/decisions/0029-the-harness-owns-the-exam.md) (whose ownership line this
+  sits exactly on), [0010](../../research/archive/decisions/0010-store-code-not-columns.md) (why the second failure
+  mode exists at all), [0013](../../research/archive/decisions/0013-refusal-as-return-value.md) (the refusal's
+  shape), [0019](../../research/archive/decisions/0019-the-leaderboard-is-a-public-leaderboard.md) (the validation
+  half that confirms the leak instead of catching it), [0024](../../research/archive/decisions/0024-the-episode-stop-is-structural.md)
   (advisory vs structural, again)
 
 ## The run that made the case

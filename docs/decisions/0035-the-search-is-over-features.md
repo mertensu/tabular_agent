@@ -5,11 +5,11 @@
 - **Decided by:** Ulf ("only searching for good features and no models at all is
   also appealing … expanding the search for models is probably not the best
   thing")
-- **Supersedes:** [0021](0021-the-agent-picks-the-target-scale.md) in one respect
+- **Supersedes:** [0021](../../research/archive/decisions/0021-the-agent-picks-the-target-scale.md) in one respect
   only — *where* the target scale is chosen. Its menu-not-code decision stands.
-- **Related:** [0014](0014-two-level-stop.md) (the two-level stop this collapses),
-  [0017](0017-credit-by-ablation.md), [0034](0034-the-tiebreak-was-tested-and-rejected.md),
-  [0023](0023-the-third-split-has-evidence-now.md) (the instrument that can
+- **Related:** [0014](../../research/archive/decisions/0014-two-level-stop.md) (the two-level stop this collapses),
+  [0017](../../research/archive/decisions/0017-credit-by-ablation.md), [0034](../../research/archive/decisions/0034-the-tiebreak-was-tested-and-rejected.md),
+  [0023](../../research/archive/decisions/0023-the-third-split-has-evidence-now.md) (the instrument that can
   judge this change, still unbuilt)
 
 ## The problem
@@ -24,7 +24,7 @@ Asked whether t16 is a better table than t10, the leaderboard cannot answer.
 Something else moved. It ranks them anyway, and `finalize_run` packages the top
 row.
 
-This is [0017](0017-credit-by-ablation.md)'s rule — *a comparison must differ by
+This is [0017](../../research/archive/decisions/0017-credit-by-ablation.md)'s rule — *a comparison must differ by
 exactly one thing* — applied to attribution but never to selection.
 
 ## The measurement
@@ -211,7 +211,7 @@ another thing we believe.
 
 ## What follows
 
-The two-level stop of [0014](0014-two-level-stop.md) collapses: with no model
+The two-level stop of [0014](../../research/archive/decisions/0014-two-level-stop.md) collapses: with no model
 experiments there is one patience, over tables. The `df.copy()` no-op that reset
 `table_patience` — and thereby produced e11, the best model this harness has made
 (0034's footnote) — stops being a loophole in a search that has only one level to

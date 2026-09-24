@@ -2,9 +2,9 @@
 
 - **Date:** 2026-09-17
 - **Status:** accepted and implemented
-- **Related:** [0029](0029-the-harness-owns-the-exam.md) (the harness owns
-  evaluation), [0060](0060-a-forecast-is-not-an-iid-table-with-a-date-column.md)
-  (ordered evidence), [0062](0062-a-stream-is-a-declared-second-input-not-a-hidden-join.md)
+- **Related:** [0029](../../research/archive/decisions/0029-the-harness-owns-the-exam.md) (the harness owns
+  evaluation), [0060](../../research/archive/decisions/0060-a-forecast-is-not-an-iid-table-with-a-date-column.md)
+  (ordered evidence), [0062](../../research/archive/decisions/0062-a-stream-is-a-declared-second-input-not-a-hidden-join.md)
   (observation-time-safe streams), [0088](0088-a-run-may-propose-a-capability-gap-but-not-change-the-product.md)
   (agent gaps are not capability gaps)
 

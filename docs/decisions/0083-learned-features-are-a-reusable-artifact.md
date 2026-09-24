@@ -2,10 +2,10 @@
 
 - **Date:** 2026-09-10
 - **Status:** accepted and implemented
-- **Related:** [0006](0006-lineage-per-table.md) (lineage belongs to each
-  table), [0010](0010-pipeline-is-the-deployable-artifact.md) (the fitted
+- **Related:** [0006](../../research/archive/decisions/0006-lineage-per-table.md) (lineage belongs to each
+  table), [0010](../../research/archive/decisions/0010-pipeline-is-the-deployable-artifact.md) (the fitted
   pipeline ships), [0030](0030-a-model-that-cannot-be-served-is-not-trained.md)
-  (training and serving share a contract), [0081](0081-random-classification-preserves-classes-identifiers-are-transport.md)
+  (training and serving share a contract), [0081](../../research/archive/decisions/0081-random-classification-preserves-classes-identifiers-are-transport.md)
   (identifiers are transport metadata)
 
 ## What happened

@@ -4,10 +4,10 @@
 - **Status:** accepted
 - **Decided by:** Ulf (the call to build `explore_experiment` first, and to
   capture stdout)
-- **Related:** [0003](0003-file-based-tools.md) (tools speak in paths),
+- **Related:** [0003](../../research/archive/decisions/0003-file-based-tools.md) (tools speak in paths),
   [0009](0009-target-hidden-from-transforms.md),
-  [0010](0010-store-code-not-columns.md),
-  [0017](0017-credit-by-ablation.md) (the other free diagnostic)
+  [0010](../../research/archive/decisions/0010-store-code-not-columns.md),
+  [0017](../../research/archive/decisions/0017-credit-by-ablation.md) (the other free diagnostic)
 
 ## The problem
 

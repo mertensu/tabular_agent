@@ -3,12 +3,12 @@
 - **Date:** 2026-08-14
 - **Status:** accepted and implemented
 - **Decided by:** Ulf
-- **Related:** [0042](0042-the-terminal-argmax-shipped-the-worst-model.md) (the
+- **Related:** [0042](../../research/archive/decisions/0042-the-terminal-argmax-shipped-the-worst-model.md) (the
   measurement and the pre-registration this implements),
   [0035](0035-the-search-is-over-features.md) (whose terminal enumeration this
-  changes the ending of), [0023](0023-the-third-split-has-evidence-now.md) /
-  [0041](0041-the-sealed-split-scores-the-ballot-not-the-winner.md) (the seal
-  that judges it), [0034](0034-the-tiebreak-was-tested-and-rejected.md),
+  changes the ending of), [0023](../../research/archive/decisions/0023-the-third-split-has-evidence-now.md) /
+  [0041](../../research/archive/decisions/0041-the-sealed-split-scores-the-ballot-not-the-winner.md) (the seal
+  that judges it), [0034](../../research/archive/decisions/0034-the-tiebreak-was-tested-and-rejected.md),
   [0022](0022-the-yardstick-must-measure-the-ranked-quantity.md)
 
 ## The problem
