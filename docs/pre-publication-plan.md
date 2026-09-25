@@ -159,6 +159,24 @@ report sections (larger).
 
 ---
 
+## Other open items
+
+Not design points, but still to settle before or around publishing:
+
+- A model string containing `/` but no `:` routes silently to the Requesty
+  gateway; make that explicit (`requesty:...`) or keep it out of the public API.
+- README table says `claude-sonnet-4-6` while `DEFAULT_MODEL` is
+  `anthropic:claude-opus-5`; check the ID exists and make them agree.
+- README "Long runs stay robust" cites 0024/0025, which the old index marks as
+  not implemented; check the claim.
+- Absolute `/Users/ulfmertens` paths in `research/archive/runs/house-prices/*.py`.
+- A small preregistered external comparison (raw GBM vs this vs AutoGluon,
+  repeats, cost).
+- Unknown status: the three predeclared Rossmann `ForecastingAgent` repetitions
+  from 2026-09-17.
+- GitHub may keep serving pre-rewrite commits by SHA until it garbage-collects;
+  ask GitHub Support to purge before making the repository public if that matters.
+
 ## Suggested order
 
 | # | item | size |

@@ -45,12 +45,3 @@ decision records by default.
 - One research experiment lives in one directory under
   `research/archive/experiments/`, not spread across `scripts/`, `results/`,
   `notebooks/` and several decision records.
-
-## Multi-machine workflow
-
-Worked on from two Macs; `HANDOFF.md` is the live state between them.
-
-- Session start: `git pull`, then read `HANDOFF.md`.
-- Session end: replace its Current state / Next action / Blocking gotchas /
-  Uncommitted work / Latest session sections, move the closed entry verbatim to
-  `research/archive/handoffs/`, and push (WIP branch if master shouldn't hold it).

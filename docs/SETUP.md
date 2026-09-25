@@ -1,7 +1,7 @@
 # Setup — getting a fresh machine to a running state
 
 What a new collaborator needs beyond `git clone`. The repo tracks the library,
-the tests, the runners, and the reasoning (`docs/decisions/`, `HANDOFF.md`), but
+the tests, the runners, and the reasoning (`docs/decisions/`), but
 three things are deliberately **not** in git and have to be supplied locally:
 
 1. the Python environment,
@@ -111,5 +111,5 @@ this table, to understand what a row of each dataset means.
 
 ## Then
 
-Read `HANDOFF.md` (what happened last, possibly on the other machine) and
+Read `docs/CURRENT.md` (where the product stands) and
 `docs/decisions/README.md` (why the code has the shape it has). Start there.

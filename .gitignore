@@ -12,7 +12,7 @@ catboost_info/
 _step5_demo/
 
 # Agent run output: journals, transcripts and fitted models (100s of MB).
-# The runners in `scripts/` reproduce them; findings go in HANDOFF/decisions.
+# The runners in `scripts/` reproduce them; findings go in research/ or docs/decisions/.
 _runs/
 
 # Kaggle competition data — downloaded, not ours to redistribute.
