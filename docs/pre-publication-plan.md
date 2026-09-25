@@ -1,6 +1,7 @@
 # Pre-publication plan
 
-Six design points from the 2026-09-25 review, with Ulf's calls on each. Suggested
+Six design points from the 2026-09-25 review, with Ulf's calls on each (revised
+the same day: no sealed split; the explore tools stay). Suggested
 order is at the end. Items that change a product contract get a decision record
 (next free number: 0092).
 
@@ -15,36 +16,32 @@ honestly ("an internal search score, not an independent estimate"), but the
 README sells "three splits" and "every number it reports is one you can trust".
 The minimal profile rejects `holdout_fraction` outright (`session.py`).
 
-**Decision.** Two changes that work together:
+**Decision.** Keep the single work/evaluation split. Give the agent a coarser
+signal instead: **round every score and gain it sees to 3 decimals** — tool
+results (`_agent_score_fields` in `tools.py`) and the rendered brief
+(`harness/brief.py`). Journal and report keep full precision. This slows how
+fast the evaluation rows wear out; it does not make the final score an
+independent estimate, and the report keeps saying so.
 
-- **(a) Coarser signal to the agent: round scores to 3 decimals.** Every score
-  and gain the agent sees — tool results (`_agent_score_fields` in `tools.py`)
-  and the rendered brief (`harness/brief.py`) — is rounded before it reaches the
-  model. Journal and report keep full precision.
-  *Caveat to keep in mind:* fixed decimals depend on the metric's scale. On AUC
-  or log-RMSE, 3 decimals is about the noise level; on RMSE in raw target units
-  (sales in the thousands) it hides nothing. If that bites, the same-effort
-  variant is 3 *significant* figures. Better options (a better/same/worse
-  verdict from the difference interval, the Ladder) are noted in the chat
-  record, not planned.
-- **(b) A sealed split in the product run.** Carve it at run start (the full
-  profile already has the machinery: `holdout_fraction`, `data/holdout.parquet`),
-  keep it away from every tool, score the shipped bundle on it exactly once at
-  finalize, and make that the headline number. The evaluation score is then
-  labelled as the search score.
+*Caveat:* fixed decimals depend on the metric's scale. On AUC or log-RMSE,
+3 decimals is about the noise level; on RMSE in raw target units (sales in the
+thousands) it hides nothing. If that bites, the same-effort variant is
+3 *significant* figures.
+
+A sealed third split was considered and not taken: it costs rows (on ordered
+data, the freshest ones — 0043), and the report already labels the score as a
+search score.
 
 **Steps.**
 1. Round in `_agent_score_fields` and `render_brief`; test that no agent-facing
    payload carries more than 3 decimals and that the journal still does.
-2. Allow `holdout_fraction` in the minimal profile with a default (e.g. 0.2),
-   and handle small data (below some row count: warn, or report the interval).
-3. Finalize scores the bundle on the sealed rows once; report and README lead
-   with it.
-4. Decision record: the product run keeps one sealed split.
+2. Make the README match the default profile: drop "Three splits" from the
+   AutoML comparison, and replace (or label) the House Prices report excerpt —
+   its validation/test/optimism table comes from a full-profile run with a
+   sealed split, which `ta.Agent()` does not have.
 
-**Done when** the report's headline number comes from rows no tool and no score
-shown to the agent ever touched, and the README's "three splits" claim is true
-for the default profile.
+**Done when** the agent never sees a score finer than 3 decimals, and nothing in
+the README promises a split the default run does not make.
 
 ---
 
@@ -62,8 +59,8 @@ found. The trade-off is accepted, not solved.
 2. State it where users read: one sentence in the README and the report — tables
    are ranked by a fast fixed model; the shipped models are fitted at full
    strength, so the ranking can disagree with what finally ships.
-3. The sealed split (1b) and an external comparison (raw GBM vs this vs
-   AutoGluon) are what catch it when the ruler is wrong.
+3. An external comparison (raw GBM vs this vs AutoGluon) is what would catch
+   it when the ruler is wrong.
 
 ---
 
@@ -118,50 +115,47 @@ store only a table's new columns plus lineage, and materialize on read.
 
 ---
 
-## 6. One clear way of presenting the findings
+## 6. One clear way of presenting the results to the user
 
-**Problem.** The agent learns where the run stands through three channels that
-overlap: the rendered brief (`render_brief`, every turn), `explore_journal`
-(agent writes pandas over its own journal), and `explore_table` (agent writes
-pandas over the data). The user learns it through a fourth, the report
-(0084's view model). Ulf is not happy with the explore tools.
+**Problem.** At the end of a run the user meets many surfaces: `run.report()`
+(Markdown), `run.report_path()` (HTML dashboard), `run.report("json")`,
+`bundle.describe_features()`, `run.training_features()`, `bundle.explain()`,
+and the optional capability review under "What limited this run?". 0084 already
+makes the three report formats renderings of one view model, so the facts agree;
+what is missing is **one obvious place to start and one fixed reading order**.
+The README also shows a full-profile report excerpt, so the report a new user
+sees does not match the one they read about (see 1, step 2).
 
-**Proposal.** One findings view model, built from the journal, with two
-renderings:
+**Proposal.** The HTML report is *the* result; the others are exports.
 
-- **To the agent:** the brief, every turn. One row per table: id, parent, what
-  it did (tool + columns, one line), result (rounded score and gain vs parent),
-  and refusals with their reason. Plus the current best and what is left of the
-  budget.
-- **To the user:** the report's search-history section, from the same view model
-  (full precision there).
+- `agent.run(...)` ends by printing a short summary (score, baseline, number of
+  features, where the report is) and the path to the HTML report.
+- The report answers the user's questions in a fixed order, one section each:
+  1. **How good is it, and how far can I trust that?** Evaluation score next to
+     the trivial baseline, labelled as a search score, with the interval where
+     one exists.
+  2. **What did it build?** The feature story: which tables led to what shipped,
+     in plain words, from the journal.
+  3. **What ships and how do I use it?** Models in the blend, the confirmed
+     serving contract, the two lines to predict and save.
+  4. **What limited it?** Refusals, warnings, and the capability review if run.
+- Markdown and JSON stay as renderings of the same view model; the
+  feature-catalog, training-features and explanation calls are linked from
+  section 3 rather than being separate entry points in the README.
 
-What the agent believed during the run is then exactly what the user reads
-afterwards. `explore_journal` goes: the brief is the answer to "what have I
-tried". The full profile's extra tools go with the profile (see below).
+**Open question for Ulf:** what bothers you most about the current end of a
+run — too many places to look, the report's content or order, or the gap
+between what the README shows and what a default run produces? The answer
+decides whether this is a README-and-ordering change (small) or a rework of the
+report sections (larger).
 
-**Open question for Ulf: what replaces `explore_table`?** The agent does need to
-look at data to have feature ideas.
-- *Option A:* fixed views in `inspect_data` — per-column profile, relation to
-  the target on work rows, group sizes for candidate keys. Predictable, cheap in
-  tokens, no free-form code.
-- *Option B:* keep one read-only code tool, renamed and capped. Most flexible,
-  but it is the second free-form code path and the least auditable (exploration
-  code is not recorded).
-My lean is A, with B only if runs show the agent starving for a view A lacks.
-
-**Tied to it: one profile.** `ForecastingAgent` hardcodes the full profile
-(`api.py`) and the forecast workflow requires it (`build_agent`). Settling the
-findings view is the moment to move forecasting onto minimal plus its forecast
-tools and retire the full profile, so there is one tool surface to publish.
-
-**Steps.**
-1. Decide Option A or B.
-2. Build the view model; render the brief from it; point the report's history
-   section at it.
-3. Remove `explore_journal` (and `explore_table` if A).
-4. Move forecasting onto the minimal profile; retire the full profile.
-5. Decision record: one findings view for agent and user.
+**Steps** (once that is answered).
+1. Look at a real minimal-profile report end to end and list what a newcomer
+   cannot answer from it.
+2. Reorder or rewrite the report sections to the four questions above.
+3. Make `agent.run` print the summary and path.
+4. Rewrite the README's "What you get back" around the one report, with an
+   excerpt from a real `ta.Agent()` run.
 
 ---
 
@@ -171,8 +165,7 @@ tools and retire the full profile, so there is one tool surface to publish.
 |---|---|---|
 | 1 | 4 — Windows note and classifiers | minutes |
 | 2 | 3 — fix the hint, clean the vocabulary | an hour |
-| 3 | 1a — round agent-facing scores to 3 decimals | an hour |
+| 3 | 1 — round agent-facing scores; README matches the default profile | an hour or two |
 | 4 | 2 — one sentence on the ruler in README and report | minutes |
-| 5 | 1b — sealed split in the product run | a day |
-| 6 | 6 — findings view, explore tools, one profile | a few days; needs the A/B call first |
+| 5 | 6 — one clear results presentation | small to medium; needs Ulf's answer first |
 | — | 5 — table storage | deferred |

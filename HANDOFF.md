@@ -16,9 +16,10 @@ Preparing the repository for publication (it is still **private** on GitHub).
 ## Next action
 
 Work through `docs/pre-publication-plan.md` in its suggested order: Windows note,
-sandbox hint and vocabulary, round agent-facing scores to 3 decimals, ruler
-sentence, sealed split in the product run, then one findings view (needs Ulf's
-Option A/B call on `explore_table`).
+sandbox hint and vocabulary, round agent-facing scores to 3 decimals (no sealed
+split — decided), README matching the default profile, ruler sentence, then one
+clear results presentation for the user (needs Ulf's answer on what bothers him
+most about the end of a run). The explore tools stay.
 
 Also still open from the first review: implicit Requesty routing for any `a/b`
 model string; README table says `claude-sonnet-4-6` while `DEFAULT_MODEL` is
