@@ -15,21 +15,17 @@ Preparing the repository for publication (it is still **private** on GitHub).
 
 ## Next action
 
-Remaining pre-publication items from the design review, in suggested order:
+Work through `docs/pre-publication-plan.md` in its suggested order: Windows note,
+sandbox hint and vocabulary, round agent-facing scores to 3 decimals, ruler
+sentence, sealed split in the product run, then one findings view (needs Ulf's
+Option A/B call on `explore_table`).
 
-1. ~~README safety wording~~ done 2026-09-25: the child gets an allowlisted
-   environment (API keys unreadable, tested) and the README has a Security
-   section claiming only what holds. The OS-sandbox plan is written up and
-   deliberately deferred in `docs/sandbox-threat-model.md`.
-2. `Agent` defaults to `profile="minimal"`, `ForecastingAgent` hardcodes
-   `profile="full"` (`api.py`); CURRENT.md still calls minimal a shadow profile
-   and does not mention `ForecastingAgent`. Settle one profile or label 0.x
-   experimental.
-3. Implicit Requesty routing for any `a/b` model string; README table says
-   `claude-sonnet-4-6` while `DEFAULT_MODEL` is `anthropic:claude-opus-5` — check
-   the ID exists.
-4. A small preregistered comparison (raw GBM vs this vs AutoGluon, repeats, cost).
-5. Absolute `/Users/ulfmertens` paths in `research/archive/runs/house-prices/*.py`.
+Also still open from the first review: implicit Requesty routing for any `a/b`
+model string; README table says `claude-sonnet-4-6` while `DEFAULT_MODEL` is
+`anthropic:claude-opus-5` (check the ID exists); README "Long runs stay robust"
+cites 0024/0025, which the old index marks as not implemented; absolute
+`/Users/ulfmertens` paths in `research/archive/runs/house-prices/*.py`; a small
+preregistered external comparison.
 
 Carried over and status unknown: the three predeclared Rossmann
 `ForecastingAgent` repetitions from the 2026-09-17 session.
