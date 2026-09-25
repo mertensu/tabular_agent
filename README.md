@@ -5,10 +5,13 @@ Point it at your table, confirm a few facts about it, and get back a
 feature engineering, no model tuning, no notebook plumbing on your side.
 
 The differentiator is not accuracy for its own sake; it is that every number it
-reports is one you can trust. The agent has no shell, no arbitrary model trainer,
-and no path around its fitted, replayable feature tools. Transforms are sandboxed
-and target-blind; categorical encoders are cross-fitted, so nothing it builds can
-quietly leak the target into your validation score.
+reports is one you can trust. The agent works through a small set of tools: it
+has no model trainer of its own, every feature it builds is a fitted, replayable
+step, the free-form code it writes is never handed the target, and validation
+rows are never handed to any tool. Categorical encoders are cross-fitted, so
+nothing it builds through those tools can quietly leak the target into your
+validation score. (What the sandbox does *not* stop is spelled out under
+[Security](#security-what-the-sandbox-does-and-does-not-do).)
 
 ## Install
 
@@ -112,11 +115,10 @@ agent = ta.Agent(model=llm)
 Two things to keep in mind. First, pick a model with **strong tool calling** and
 enough context: the whole workflow is tool-driven (it writes sandboxed pandas,
 follows strict schemas), so small or weak-tool-calling models tend to emit
-malformed tool calls and stall. Second, the model choice affects *quality, never
-safety*: the
-leakage-safety guarantees live in the tools, not the model, so a weak local model
-produces a worse run, never an unsafe one. Running fully local also means your
-data and prompts never leave the machine.
+malformed tool calls and stall. Second, the leakage guarantees live in the
+tools, not the model, so a weak local model produces a worse run through the
+same guarded tools. Running fully local also means your data and prompts are
+never sent to a model provider.
 
 ## Try it on your own data
 
@@ -363,6 +365,34 @@ training table but absent from the serving table is excluded), and asks you to
 confirm the rest via `serving_columns`. Requiring one confirmation is the price of
 never shipping that model by accident.
 
+## Security: what the sandbox does and does not do
+
+The agent writes pandas code for transforms and row filters. That code runs in a
+separate Python process with CPU, memory and time limits, its own temporary
+directory, and an **empty environment** — API keys you have exported are not
+readable from it. Model libraries are blocked so the agent uses the fitted tools
+instead.
+
+It is an isolation boundary, not a security boundary. The code runs as you, so
+the standard library and pandas can still read any file you can read and open
+network connections. The leakage guarantees hold for what the tools hand the
+code; they do not stop code that deliberately reads the training or validation
+files from disk. In practice that means:
+
+- **Treat the data you feed it as input to an LLM.** A data description or cell
+  values crafted to steer the model could make it write code that reads local
+  files or sends them somewhere. Only run it on data whose source you trust, or
+  in a container or VM without network access.
+- **Code that changes a table is recorded.** Transform and row-filter code is
+  kept in the run journal, and transform code ships in the bundle, shown by
+  `bundle.describe_features()`. Read-only exploration code is not recorded.
+- **A bundle is code.** Loading one unpickles models and replays stored agent
+  code. Only load bundles you produced or trust, as with any pickle.
+
+An OS-level sandbox (no network, no file access outside the work directory) would
+close the rest. It is designed but deliberately not built yet:
+[`docs/sandbox-threat-model.md`](docs/sandbox-threat-model.md).
+
 ## Long runs stay robust
 
 A run executes in fresh episodes that read their state from the run journal rather
@@ -392,8 +422,8 @@ models and stacking them. This project is a deliberately different bet:
   Aggressive stacking can quietly flatter its own validation; this is built not to.
 - **Auditable and portable.** A replayable bundle, a readable report,
   per-prediction explanations, reusable feature tables, and a confirmed serving
-  contract — runnable fully local (your infra, local models), so data never
-  leaves the machine.
+  contract — runnable fully local (your infra, local models), so no data is
+  sent to a model provider.
 
 Honestly: on a pure leaderboard, a mature AutoML like AutoGluon will often score
 higher. Reach for this when you need a model you can **trust, explain, and run on

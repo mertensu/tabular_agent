@@ -132,3 +132,17 @@ def test_stdout_is_capped():
     out = run_readonly({"df": _df()}, code)
     assert len(out["stdout"]) < MAX_STDOUT_CHARS + 100
     assert "truncated" in out["stdout"]
+
+
+def test_child_cannot_read_caller_secrets(monkeypatch):
+    # The provider key a run uses lives in the caller's environment; agent code
+    # must not be able to read it, whatever the variable is called.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-not-leak")
+    monkeypatch.setenv("SOME_CUSTOM_TOKEN", "also-secret")
+    code = (
+        "def explore(df):\n"
+        "    import os\n"
+        "    return {k: os.environ.get(k) for k in ('ANTHROPIC_API_KEY', 'SOME_CUSTOM_TOKEN')}"
+    )
+    result = run_readonly({"df": _df()}, code)["result"]
+    assert result == {"ANTHROPIC_API_KEY": None, "SOME_CUSTOM_TOKEN": None}

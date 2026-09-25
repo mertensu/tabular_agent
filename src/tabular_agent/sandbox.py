@@ -8,12 +8,18 @@ A fresh Python subprocess runs the user's code with:
   structurally unable to train a model or learn state;
 - **resource limits** (CPU seconds, and address space off macOS) and a hard
   wall-clock ``timeout``;
-- its **own temp working directory** as ``cwd``;
+- its **own temp working directory** as ``cwd``, ``HOME`` and ``TMPDIR``;
+- an **empty environment** apart from a few non-secret variables Python needs
+  (:func:`_child_env`), so API keys and tokens in the caller's environment are
+  not readable from agent code;
 - a validated result contract.
 
 This is an *isolation* boundary (survives runaway/buggy code), not a hard
-*security* boundary — the child runs with the same OS rights. That matches the
-threat model: your machine, your data.
+*security* boundary — the child runs with the same OS rights, so the standard
+library, including file and network access, is still reachable. A prompt-injected
+model could read files the user can read or open a connection; it cannot read
+secrets from the environment. An OS-level sandbox that would close the rest is
+written up, and deliberately deferred, in ``docs/sandbox-threat-model.md``.
 
 Three entry points share the same child and guard, differing only in what leaves
 the sandbox:
@@ -289,6 +295,24 @@ with open("result.json", "w") as f:
 '''
 
 
+#: Environment variables the child may inherit. None of them carries a secret;
+#: they are what the interpreter and its libraries need to start and to decode
+#: text (``SYSTEMROOT`` is required by Python itself on Windows).
+_INHERITED_ENV = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "PYTHONPATH", "SYSTEMROOT")
+
+
+def _child_env(work):
+    """The child's whole environment: an allowlist, never the caller's copy.
+
+    Inheriting ``os.environ`` would hand agent-written code every API key the
+    caller exported — the provider key the run itself uses included — and a
+    denylist of secret-looking names would miss whatever a user named theirs.
+    """
+    env = {k: os.environ[k] for k in _INHERITED_ENV if k in os.environ}
+    env.update(HOME=work, TMPDIR=work)
+    return env
+
+
 def _run(frames, code, *, mode, func_name, timeout, mem_mb, max_rows, load_out):
     """Shared subprocess driver. ``load_out(work, out)`` reads whatever the
     child wrote for this mode and produces the caller's return value."""
@@ -313,7 +337,7 @@ def _run(frames, code, *, mode, func_name, timeout, mem_mb, max_rows, load_out):
         try:
             proc = subprocess.run(
                 [sys.executable, "_runner.py"],
-                cwd=work, timeout=timeout,
+                cwd=work, env=_child_env(work), timeout=timeout,
                 capture_output=True, text=True,
             )
         except subprocess.TimeoutExpired:

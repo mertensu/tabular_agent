@@ -17,10 +17,10 @@ Preparing the repository for publication (it is still **private** on GitHub).
 
 Remaining pre-publication items from the design review, in suggested order:
 
-1. README safety wording: the sandbox allows the whole standard library
-   (`sandbox.py`, `ALLOWED`), so "no shell", "target-blind" and "data never leaves
-   the machine" overstate it. Reword, or enforce at the OS level. Also say that
-   loading a bundle executes code.
+1. ~~README safety wording~~ done 2026-09-25: the child gets an allowlisted
+   environment (API keys unreadable, tested) and the README has a Security
+   section claiming only what holds. The OS-sandbox plan is written up and
+   deliberately deferred in `docs/sandbox-threat-model.md`.
 2. `Agent` defaults to `profile="minimal"`, `ForecastingAgent` hardcodes
    `profile="full"` (`api.py`); CURRENT.md still calls minimal a shadow profile
    and does not mention `ForecastingAgent`. Settle one profile or label 0.x
