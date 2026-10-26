@@ -467,3 +467,39 @@ def test_forecasting_agent_passes_explicit_workflow_to_shared_engine(monkeypatch
 
 def test_forecasting_agent_is_public():
     assert ta.ForecastingAgent is public_api.ForecastingAgent
+
+
+@pytest.mark.parametrize("profile", ["minimal", "full"])
+def test_a_poisson_plan_ships_a_poisson_bundle_end_to_end(tmp_path, profile):
+    """The owner's objective reaches every fit: the run ranks on Poisson deviance,
+    the shipped members fit a Poisson loss, and explain() reports in log space."""
+    from pydantic_ai.models.test import TestModel
+
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=300)
+    frame = pd.DataFrame({"x": x, "count": rng.poisson(np.exp(0.5 + 0.8 * x)).astype(float)})
+    # A few recording errors, spread over both halves of the split: the run must
+    # train and score around them without the owner cleaning anything.
+    frame.loc[::60, "count"] = -3.0
+    agent = ta.Agent(model=TestModel(call_tools=[]), run_root=tmp_path, profile=profile)
+    plan = agent.inspect(frame)
+    plan.target = "count"
+    plan.serving_columns = ["x"]
+    plan.split_on = False
+    plan.objective = "poisson"
+    assert "objective          poisson" in plan.summary()
+
+    run = agent.run(plan)
+
+    assert json.loads(run.report("json"))["summary"]["metric"] == "poisson_deviance"
+    for member in run.bundle._bundle["models"]:
+        params = member.get_params() if hasattr(member, "get_params") else {}
+        loss = params.get("objective") or params.get("loss_function")
+        if loss is None:  # the linear member: impute -> scale -> Poisson GLM
+            loss = type(member.steps[-1][1].estimator_).__name__
+        assert loss in {"poisson", "count:poisson", "Poisson",
+                        "PoissonRegressor", "_PoissonAlphaSearch"}
+    predictions = run.bundle.predict(frame[["x"]])
+    assert (predictions > 0).all()
+    explanation = run.bundle.explain(frame[["x"]].iloc[:5])
+    assert explanation.space == "log(target)"

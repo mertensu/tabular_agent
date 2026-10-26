@@ -27,8 +27,9 @@ the raw model output, exactly. For a plain regression (``target_transform="none"
 that raw output *is* the prediction, so the reconstruction equals
 ``bundle.predict`` to numerical precision (double for every member but XGBoost,
 whose ``pred_contribs`` are computed in float32). Under a non-linear target transform
-(``log1p``) or for a classifier (log-odds), the raw output is one link function
-away from the shipped number — the attribution stays exactly additive on the
+(``log1p``), under a Poisson objective (log of the expected count) or for a
+classifier (log-odds), the raw output is one link function away from the shipped
+number — the attribution stays exactly additive on the
 transformed scale, and :attr:`Explanation.space` names it rather than pretending
 the sum lands on the euros or the probability. That honesty is the whole point:
 0044 measured how much the invert-then-blend order matters, and a decomposition
@@ -67,8 +68,9 @@ class Explanation:
     predicted: np.ndarray
     #: The scale the attribution is additive on. ``"target"`` when it equals the
     #: shipped prediction (regression, no transform); otherwise the transformed
-    #: regression scale (e.g. ``"log1p(target)"``) or ``"log-odds"`` for a
-    #: classifier — one monotone link away from what ``predict`` returns.
+    #: regression scale (e.g. ``"log1p(target)"``), ``"log(target)"`` under a
+    #: Poisson objective, or ``"log-odds"`` for a classifier — one monotone link
+    #: away from what ``predict`` returns.
     space: str
 
     def for_row(self, i: int) -> pd.Series:
@@ -107,15 +109,19 @@ def _linear_pipeline_contributions(model, X: pd.DataFrame) -> tuple[np.ndarray, 
     return contribs, intercept
 
 
-def _baseline_contributions(model, X: pd.DataFrame, task_type: str) -> tuple[np.ndarray, float]:
+def _baseline_contributions(model, X: pd.DataFrame, task_type: str,
+                            objective: str | None = None) -> tuple[np.ndarray, float]:
     """A constant predictor pushes nothing: zeros, with the constant as the base.
 
-    In log-odds space for a classifier, so it combines with the other members on
-    the same scale the trees and the linear model report.
+    In log-odds space for a classifier, and in log space under a Poisson
+    objective, so it combines with the other members on the same scale the trees
+    and the linear model report.
     """
     n, f = len(X), X.shape[1]
     zeros = np.zeros((n, f), dtype=float)
     if task_type == "regression":
+        if objective == "poisson":
+            return zeros, float(np.log(max(float(model.value_), 1e-12)))
         return zeros, float(model.value_)
     p = float(np.asarray(model.proba_)[1])
     p = min(max(p, 1e-12), 1.0 - 1e-12)
@@ -160,11 +166,13 @@ def _tree_contributions(model, X: pd.DataFrame) -> tuple[np.ndarray, float]:
     return raw[:, :-1], float(np.mean(raw[:, -1]))
 
 
-def _member_contributions(model, X: pd.DataFrame, task_type: str) -> tuple[np.ndarray, float]:
+def _member_contributions(model, X: pd.DataFrame, task_type: str,
+                          objective: str | None = None) -> tuple[np.ndarray, float]:
     """Dispatch one member to its native attribution, in model-output space.
 
-    Regression members report on the (possibly transformed) target scale; binary
-    classifiers report in log-odds — the space each family is additive in, which is
+    Regression members report on the (possibly transformed) target scale, or on
+    the log of the expected count under a Poisson objective; binary classifiers
+    report in log-odds — the space each family is additive in, which is
     why the blend is combined there and the link is applied, if at all, only once
     the caller reads :attr:`Explanation.space`.
     """
@@ -172,13 +180,15 @@ def _member_contributions(model, X: pd.DataFrame, task_type: str) -> tuple[np.nd
     if module in ("lightgbm", "xgboost", "catboost"):
         return _tree_contributions(model, X)
     if type(model).__name__ == "_Baseline":
-        return _baseline_contributions(model, X, task_type)
+        return _baseline_contributions(model, X, task_type, objective)
     return _linear_pipeline_contributions(model, X)
 
 
-def _space(task_type: str, target_transform: str) -> str:
+def _space(task_type: str, target_transform: str, objective: str | None = None) -> str:
     if task_type != "regression":
         return "log-odds"
+    if objective == "poisson":
+        return "log(target)"
     if target_transform == "none":
         return "target"
     return f"{target_transform}(target)"
@@ -212,7 +222,9 @@ def explain_bundle(bundle: dict, raw_df: pd.DataFrame, streams: dict | None = No
     combined = np.zeros((len(X), X.shape[1]), dtype=float)
     base = 0.0
     for weight, model in zip(weights, bundle["models"]):
-        contribs, member_base = _member_contributions(model, X, task_type)
+        contribs, member_base = _member_contributions(
+            model, X, task_type, bundle.get("objective")
+        )
         combined += weight * contribs
         base += weight * member_base
 
@@ -224,5 +236,5 @@ def explain_bundle(bundle: dict, raw_df: pd.DataFrame, streams: dict | None = No
         contributions=contributions,
         base_value=float(base),
         predicted=predicted,
-        space=_space(task_type, bundle.get("target_transform", "none")),
+        space=_space(task_type, bundle.get("target_transform", "none"), bundle.get("objective")),
     )

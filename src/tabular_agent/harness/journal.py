@@ -115,9 +115,12 @@ def save(run_dir: str, journal: dict) -> str:
 
 
 @_serialized_mutation
-def set_task(run_dir: str, *, target: str, task_type: str, metric: str) -> dict:
+def set_task(run_dir: str, *, target: str, task_type: str, metric: str,
+             objective: str | None = None) -> dict:
     journal = load(run_dir)
     journal["task"] = {"target": target, "task_type": task_type, "metric": metric}
+    if objective is not None:
+        journal["task"]["objective"] = objective
     _save_unlocked(run_dir, journal)
     return journal
 

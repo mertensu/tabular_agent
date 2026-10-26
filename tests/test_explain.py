@@ -19,10 +19,12 @@ def _features(seed=0, n=200):
     )
 
 
-def _bundle(tmp_path, X, y, model_types, task_type, metric, weights, transform="none"):
+def _bundle(tmp_path, X, y, model_types, task_type, metric, weights, transform="none",
+            objective=None):
     folds = make_folds(y, task_type, n_splits=4, seed=42)
     results = [
-        train_cv(X, y, folds, task_type, metric, model_type=mt, target_transform=transform)
+        train_cv(X, y, folds, task_type, metric, model_type=mt, target_transform=transform,
+                 objective=objective)
         for mt in model_types
     ]
     ctx = RunContext(str(tmp_path / f"run_{'_'.join(model_types)}_{task_type}"))
@@ -34,6 +36,7 @@ def _bundle(tmp_path, X, y, model_types, task_type, metric, weights, transform="
         list(X.columns),
         task_type,
         target_transform=transform,
+        objective=objective,
     )
     return load_bundle(bundle_dir)
 
@@ -190,3 +193,21 @@ def test_facade_explain_drops_identifiers_like_predict(tmp_path):
 
     assert "RowId" not in explanation.contributions.columns
     np.testing.assert_allclose(explanation.predicted, facade.predict(served), atol=1e-9)
+
+
+@pytest.mark.parametrize("model_types", [["lgbm"], ["xgb"], ["catboost"], ["elasticnet"]])
+def test_a_poisson_member_is_additive_in_log_space(tmp_path, model_types):
+    """Under a Poisson objective every member's raw output is log(expected count),
+    so the attribution is additive there and exp() of it is the shipped count."""
+    X = _features(n=400)
+    rng = np.random.default_rng(1)
+    y = pd.Series(rng.poisson(np.exp(0.5 + 0.7 * X["a"] - 0.4 * X["b"])).astype(float))
+    bundle = _bundle(tmp_path, X, y, model_types, "regression", "poisson_deviance",
+                     [1.0], objective="poisson")
+
+    explanation = explain_bundle(bundle, X)
+
+    assert explanation.space == "log(target)"
+    np.testing.assert_allclose(
+        np.exp(explanation.predicted), predict_bundle(bundle, X), rtol=1e-4
+    )

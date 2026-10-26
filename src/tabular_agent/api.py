@@ -82,6 +82,10 @@ class DataPlan:
     n_splits: int = 5
     seed: int = 42
     target_transform: str | None = None
+    #: ``"poisson"`` when the target is a count and its expected value should be
+    #: fitted with a Poisson loss; `None` keeps the default (squared error, or
+    #: whatever the metric implies). See `TaskSpec.objective`.
+    objective: str | None = None
     forecast_horizon: float | None = None
     #: Serving columns whose values over the forecast horizon are known at issue
     #: time (0091) — a weather forecast, a planned promotion, a published price.
@@ -223,6 +227,10 @@ class DataPlan:
                     "                         plan.future_known = [...] to offer "
                     "fit_future_covariate_window"
                 )
+        # Optional, like future_known: shown only when the owner set it, because
+        # the default needs no confirmation.
+        if self.objective is not None:
+            lines.append(f"  (i) objective          {self.objective}")
         _row(
             self.identifier_columns is not None,
             "identifier_columns",
@@ -719,6 +727,7 @@ class Agent:
             n_splits=plan.n_splits,
             seed=plan.seed,
             target_transform=plan.target_transform,
+            objective=plan.objective,
             forecast_horizon=plan.forecast_horizon,
         )
         session = RunSession(

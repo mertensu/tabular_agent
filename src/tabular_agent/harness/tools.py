@@ -570,7 +570,9 @@ def probe_table(session: RunSession, table_path: str) -> dict:
                 "next": refusal.get("next"),
             }
         y = df[spec.target]
-        fit = fit_probe(X, y, spec.task_type, spec.metric, spec.target_transform)
+        fit = fit_probe(
+            X, y, spec.task_type, spec.metric, spec.target_transform, spec.objective,
+        )
         score, se, why_not, preds = _score_on_val(
             session, table_path, [fit.model], fit.feature_names, spec, y,
             target_transform=fit.target_transform,
@@ -594,6 +596,14 @@ def probe_table(session: RunSession, table_path: str) -> dict:
         "probe_fit_seconds": fit.fit_seconds,
         "probe_target_transform": fit.target_transform,
     }
+    if fit.unfitted_rows:
+        # Kept in both profiles: a skipped row is a fact about the data the agent
+        # may want to act on (they are usually recording errors), not a detail
+        # of the ruler.
+        out["rows_not_fitted"] = (
+            f"{fit.unfitted_rows} rows with a negative target were left out of the "
+            "Poisson fit and are not scored"
+        )
     if session.profile != "minimal":
         out["probe_se"] = None if se is None else round(se, 6)
     return out
@@ -701,7 +711,8 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
 
     _, dropped = _feature_frame(df, spec.target)
     journal.set_task(
-        session.run_dir, target=spec.target, task_type=spec.task_type, metric=spec.metric
+        session.run_dir, target=spec.target, task_type=spec.task_type, metric=spec.metric,
+        objective=spec.objective,
     )
     journal.set_split(session.run_dir, session.split_record())
     journal.set_streams(session.run_dir, session.stream_record())
@@ -727,6 +738,12 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
         # that `rmspe` does not score zero-valued rows at all — and both change
         # what a good model looks like rather than merely how it is graded.
         "metric_measures": describe_metric(spec.metric),
+        # Only when it is not the default. The owner declared the target a count,
+        # so every model fits a Poisson loss and a target_transform is refused.
+        **({"objective": "poisson: every model fits the expected count with a "
+                         "Poisson loss; target_transform is fixed at 'none', and "
+                         "rows with a negative target are left out of every fit"}
+           if spec.objective == "poisson" else {}),
         "n_splits": spec.n_splits,
         "target": prof.get("target"),
         "columns": shown,
@@ -2182,6 +2199,7 @@ def train_tabular_model(
         seed=model_seed,
         target_transform=target_transform,
         reference_target=reference_target,
+        objective=spec.objective,
         # `None` unless this run set one. Raises `TrainingTooSlow` (a ValueError,
         # so the agent gets a correction rather than the run ending) and records
         # nothing — an abandoned fit has no score to put on the leaderboard.
@@ -2444,6 +2462,7 @@ def explain_table(
             seed=spec.seed,
             target_transform=target_transform,
             reference_target=reference_target,
+            objective=spec.objective,
         )
         return float(np.mean(result.fold_metrics))
 
@@ -2762,7 +2781,7 @@ def explore_table(
     result = train_cv(
         X, y, folds, spec.task_type, spec.metric,
         model_type=PROBE_MODEL_TYPE, params=dict(PROBE_PARAMS), seed=PROBE_SEED,
-        target_transform=spec.target_transform,
+        target_transform=spec.target_transform, objective=spec.objective,
         time_budget_s=session.fit_time_budget_s,
     )
     oof = pd.DataFrame({"oof_pred": result.oof}) if result.oof.ndim == 1 else pd.DataFrame(
@@ -3163,7 +3182,9 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         raise ValueError(refusal["reason"])
     y = df[spec.target]
 
-    fit = fit_probe(X, y, spec.task_type, spec.metric, spec.target_transform)
+    fit = fit_probe(
+        X, y, spec.task_type, spec.metric, spec.target_transform, spec.objective,
+    )
     evaluation_score, _, unavailable, _ = _score_on_val(
         session, path, [fit.model], fit.feature_names, spec, y,
         target_transform=fit.target_transform,
@@ -3231,6 +3252,7 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         session.ctx, pipeline, [fit.model], np.array([1.0]), fit.feature_names,
         spec.task_type, fit.target_transform,
         training_table=table_rel,
+        objective=spec.objective,
     )
     j = journal.load(session.run_dir)
     credit = journal.attribution(j, table_rel)
@@ -3416,6 +3438,7 @@ def finalize_run(session: RunSession) -> dict:
         ship.get("target_transform", "none"),
         reference_target=ship.get("reference_target"),
         training_table=ship["source_table"],
+        objective=session.resolved().objective,
     )
 
     credit = journal.attribution(j, ship["source_table"])

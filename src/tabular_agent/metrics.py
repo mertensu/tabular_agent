@@ -5,17 +5,28 @@ from sklearn.metrics import (
     accuracy_score,
     log_loss,
     mean_absolute_error,
+    mean_poisson_deviance,
     mean_squared_error,
     roc_auc_score,
 )
 
-SUPPORTED_METRICS = {"rmse", "rmsle", "rmspe", "mae", "logloss", "auc", "accuracy"}
+SUPPORTED_METRICS = {
+    "rmse", "rmsle", "rmspe", "mae", "poisson_deviance", "logloss", "auc", "accuracy",
+}
+
+#: The smallest prediction `poisson_deviance` scores. The deviance takes
+#: ``log(y_pred)``, so a zero or negative prediction is not a large error but an
+#: undefined one. A Poisson fit never produces one; a squared-error member of a
+#: blend can, and flooring it charges that row a steep but finite price instead
+#: of crashing the comparison.
+POISSON_PRED_FLOOR = 1e-9
 
 _GREATER_IS_BETTER = {
     "rmse": False,
     "rmsle": False,
     "rmspe": False,
     "mae": False,
+    "poisson_deviance": False,
     "logloss": False,
     "auc": True,
     "accuracy": True,
@@ -50,6 +61,16 @@ METRIC_NOTES = {
     "mae": "Mean absolute error, in the target's own units. Every row counts the "
            "same regardless of how wrong it is, so outliers matter less than under "
            "rmse.",
+    "poisson_deviance": "Mean Poisson deviance: how well the predictions work as the "
+                        "expected value of a count. Zeros are ordinary observations, "
+                        "not a special case, and the penalty for a miss grows with "
+                        "its size relative to the predicted count, so a slow seller "
+                        "predicted at 3 when it sold 0 costs more than a fast seller "
+                        "predicted at 103 when it sold 100. Predicting zero for a "
+                        "row that sold something is punished severely. **Rows whose "
+                        "true value is negative are not scored** — a count cannot be "
+                        "negative, so its deviance is undefined — and a Poisson fit "
+                        "does not train on them either.",
     "logloss": "Penalises confident wrong probabilities sharply. A confident "
                "mistake costs far more than an uncertain one, so calibration "
                "matters as much as ranking.",
@@ -98,6 +119,19 @@ def compute_metric(name: str, y_true, y_pred, labels: list | None = None) -> flo
         return float(np.sqrt(np.mean(np.square(rel))))
     if name == "mae":
         return float(mean_absolute_error(y_true, y_pred))
+    if name == "poisson_deviance":
+        # Negative true values are outside a count's domain (a return booked as
+        # a sale, a correction), so they are excluded as `rmspe` excludes zeros:
+        # part of the metric's definition, stated to the agent in METRIC_NOTES.
+        scored = y_true >= 0
+        if not np.any(scored):
+            raise ValueError(
+                "poisson_deviance scores only rows whose true value is non-negative, "
+                "and this set has none"
+            )
+        return float(mean_poisson_deviance(
+            y_true[scored], np.maximum(y_pred[scored], POISSON_PRED_FLOOR)
+        ))
     if name == "logloss":
         return float(log_loss(y_true, y_pred, labels=labels))
     if name == "auc":

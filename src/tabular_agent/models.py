@@ -310,8 +310,62 @@ class _PenaltySearchThenRefit(BaseEstimator):
         return self.estimator_.predict_proba(np.asarray(X))
 
 
+#: The L2 strengths the Poisson GLM searches, on standardised features. The loss
+#: is the mean deviance, so the useful range does not grow with the row count.
+_POISSON_ALPHAS = tuple(np.logspace(-6, 0, 13))
+
+
+class _PoissonAlphaSearch(BaseEstimator):
+    """A `PoissonRegressor` that picks its own L2 strength by inner cross-validation.
+
+    sklearn has an `ElasticNetCV` but no Poisson counterpart, and no elastic-net
+    Poisson model at all: `PoissonRegressor` is ridge-penalised only. So this is
+    the search `ElasticNetCV` would have done, over ``alpha`` alone, scored by the
+    mean Poisson deviance the fit minimises. It exposes ``alpha_`` so
+    `_PenaltySearchThenRefit` can read the choice back exactly as it does for the
+    elasticnet, and ``coef_`` / ``intercept_`` so the explanation can read the
+    fitted linear predictor when no refit happened.
+    """
+
+    def __init__(self, alphas=_POISSON_ALPHAS, cv: int = 5, max_iter: int = 1000):
+        self.alphas = alphas
+        self.cv = cv
+        self.max_iter = max_iter
+
+    def fit(self, X, y):
+        from sklearn.linear_model import PoissonRegressor
+        from sklearn.metrics import mean_poisson_deviance
+        from sklearn.model_selection import KFold
+
+        X = np.asarray(X)
+        y = np.asarray(y, dtype=float)
+        # Unshuffled, as `ElasticNetCV(cv=5)` is: on a time-ordered run the rows
+        # arrive in time order, and contiguous folds keep the penalty search from
+        # validating on rows interleaved with its own training rows.
+        folds = list(KFold(self.cv).split(X))
+        losses = []
+        for alpha in self.alphas:
+            fold_losses = []
+            for tr, va in folds:
+                model = PoissonRegressor(
+                    alpha=alpha, solver="newton-cholesky", max_iter=self.max_iter,
+                ).fit(X[tr], y[tr])
+                fold_losses.append(mean_poisson_deviance(y[va], model.predict(X[va])))
+            losses.append(np.mean(fold_losses))
+        self.alpha_ = float(self.alphas[int(np.argmin(losses))])
+        self.estimator_ = PoissonRegressor(
+            alpha=self.alpha_, solver="newton-cholesky", max_iter=self.max_iter,
+        ).fit(X, y)
+        self.coef_ = self.estimator_.coef_
+        self.intercept_ = self.estimator_.intercept_
+        return self
+
+    def predict(self, X):
+        return self.estimator_.predict(np.asarray(X))
+
+
 def _make_elasticnet(task_type: str, params: dict | None, seed: int,
-                     metric: str | None = None):
+                     metric: str | None = None, objective: str | None = None):
     """L1/L2-regularised linear model, self-tuning, with the preprocessing it needs.
 
     The preprocessing is the reason this cannot be one line. GBDTs take the raw
@@ -338,7 +392,25 @@ def _make_elasticnet(task_type: str, params: dict | None, seed: int,
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import FunctionTransformer, StandardScaler
 
-    if task_type == "regression":
+    if objective == "poisson":
+        from sklearn.linear_model import PoissonRegressor
+
+        # Under a Poisson objective the linear member is a Poisson GLM, so it
+        # predicts the same quantity as the trees (the expected count, through a
+        # log link) and its attribution lands in the same log space theirs does.
+        # A squared-error elasticnet here would be the one member of the blend
+        # fitting a different target. The L1 half of the family is lost: sklearn
+        # has no elastic-net Poisson model.
+        kw = _resolve_params({"alphas": _POISSON_ALPHAS, "cv": 5, "max_iter": 1000}, params)
+        estimator = _PenaltySearchThenRefit(
+            search=_PoissonAlphaSearch(
+                alphas=tuple(kw["alphas"]), cv=kw["cv"], max_iter=kw["max_iter"],
+            ),
+            final=PoissonRegressor(solver="newton-cholesky", max_iter=kw["max_iter"]),
+            selected={"alpha": "alpha_"},
+            seed=seed,
+        )
+    elif task_type == "regression":
         from sklearn.linear_model import ElasticNet, ElasticNetCV
 
         # `alphas` as a count, not a grid: sklearn then derives the path from the
@@ -407,41 +479,106 @@ def _make_elasticnet(task_type: str, params: dict | None, seed: int,
     )
 
 
+#: What each GBDT library calls the Poisson loss. Set *after* the caller's
+#: params are merged, so no params dict can quietly put a squared-error member
+#: into a run whose owner declared the target a count.
+_POISSON_LOSS = {
+    "lgbm": ("objective", "poisson"),
+    "xgb": ("objective", "count:poisson"),
+    "catboost": ("loss_function", "Poisson"),
+}
+
+
+def _with_objective(kw: dict, model_type: str, objective: str | None) -> dict:
+    if objective != "poisson":
+        return kw
+    key, value = _POISSON_LOSS[model_type]
+    # CatBoost takes `objective` as an alias of `loss_function` and rejects both.
+    kw.pop("objective", None)
+    kw.pop("loss_function", None)
+    kw[key] = value
+    return kw
+
+
+def check_objective(objective: str | None, y, target_transform: str = "none") -> None:
+    """Refuse a fit the Poisson loss cannot make, with a message the agent can act on.
+
+    The libraries would refuse too, but in their own words, which name a
+    parameter the agent never set.
+    """
+    if objective != "poisson":
+        return
+    if target_transform != "none":
+        raise ValueError(
+            f"target_transform={target_transform!r} cannot be used under this run's "
+            "Poisson objective: the loss already fits the log of the expected count. "
+            "Use target_transform='none'."
+        )
+    if not np.any(poisson_fit_rows(objective, y)):
+        raise ValueError(
+            "this run fits a Poisson objective, which trains only on non-negative "
+            "counts, and every target value on this table is negative"
+        )
+
+
+def poisson_fit_rows(objective: str | None, y) -> np.ndarray:
+    """Which rows a fit may train on: all of them, except negatives under Poisson.
+
+    A negative count is outside the loss's domain — in practice a return or a
+    correction booked against the target, not a demand of below zero. Such rows
+    are left out of the *fit* only: they stay in the table, still receive
+    predictions, and are left unscored by `poisson_deviance` for the same reason.
+    Dropping them here rather than refusing means a run on real, slightly dirty
+    counts cannot fail on rows nobody could have trained a Poisson model on.
+    """
+    if objective != "poisson":
+        # Before any conversion: a classifier's labels may be strings.
+        return np.ones(len(y), dtype=bool)
+    return ~(np.asarray(y, dtype=float) < 0)
+
+
 def _make_model(model_type: str, task_type: str, params: dict | None, seed: int,
-                metric: str | None = None):
+                metric: str | None = None, objective: str | None = None):
     """Build an unfitted model.
 
     ``metric`` is only consulted by model types that run their own inner selection
     — currently just `elasticnet`, whose classification branch would otherwise
     choose a penalty by accuracy while the run is ranked on something else. The
-    GBDTs ignore it: their loss is set by `task_type` and their rounds are fixed.
+    GBDTs ignore it: their rounds are fixed.
+
+    ``objective`` is the run's regression loss (`TaskSpec.objective`). Under
+    ``"poisson"`` every family fits the expected count through a log link, and
+    ``predict`` returns that count. The baseline is unchanged: the training mean
+    is already the best constant under both losses.
     """
     if model_type == "baseline":
         return _Baseline(task_type)
     if model_type == "elasticnet":
-        return _make_elasticnet(task_type, params, seed, metric)
+        return _make_elasticnet(task_type, params, seed, metric, objective)
     if model_type == "lgbm":
         import lightgbm as lgb
 
         kw = _resolve_params({"random_state": seed, "n_estimators": 200, "verbose": -1}, params)
         cls = lgb.LGBMRegressor if task_type == "regression" else lgb.LGBMClassifier
-        return cls(**kw)
+        return cls(**_with_objective(kw, model_type, objective))
     if model_type == "xgb":
         import xgboost as xgb
 
         kw = _resolve_params({"random_state": seed, "n_estimators": 200, "verbosity": 0}, params)
         cls = xgb.XGBRegressor if task_type == "regression" else xgb.XGBClassifier
-        return cls(**kw)
+        return cls(**_with_objective(kw, model_type, objective))
     if model_type == "catboost":
         from catboost import CatBoostClassifier, CatBoostRegressor
 
         kw = _resolve_params(
-            {"random_state": seed, "n_estimators": 200, "verbose": False},
+            {"random_state": seed, "n_estimators": 200, "verbose": False,
+             # Otherwise every fit writes catboost_info/ into the cwd.
+             "allow_writing_files": False},
             params,
             _CATBOOST_ALIASES,
         )
         cls = CatBoostRegressor if task_type == "regression" else CatBoostClassifier
-        return cls(**kw)
+        return cls(**_with_objective(kw, model_type, objective))
     raise ValueError(
         f"unknown model_type: {model_type!r} (use 'baseline', 'elasticnet', 'lgbm', "
         "'xgb' or 'catboost')"
@@ -494,11 +631,14 @@ class TrainResult:
     #: had to reconstruct it from file timestamps after the fact (Rossmann v6: two
     #: experiments with identical parameters took 3.8 and 113.2 minutes).
     fit_seconds: float = 0.0
+    #: Rows left out of every fit because the objective cannot train on them
+    #: (negative counts under Poisson). They still carry out-of-fold predictions.
+    unfitted_rows: int = 0
 
 
 def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, seed=42,
              target_transform="none", reference_target=None,
-             time_budget_s=None) -> TrainResult:
+             time_budget_s=None, objective=None) -> TrainResult:
     """Cross-validated fit. ``target_transform`` changes what the model is fitted
     on; it never changes what is *reported*.
 
@@ -536,6 +676,8 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
         if target_transform != "none"
         else y_reference
     )
+    check_objective(objective, y_fit, target_transform)
+    fittable = poisson_fit_rows(objective, y_fit)
     n = len(X)
     classes = None
     if task_type in ("binary", "multiclass"):
@@ -556,7 +698,8 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
     fold_metrics = []
     started = time.monotonic()
     for i, (tr, va) in enumerate(folds):
-        model = _make_model(model_type, task_type, params, seed, metric)
+        model = _make_model(model_type, task_type, params, seed, metric, objective)
+        tr = np.asarray(tr)[fittable[tr]]
         model.fit(X.iloc[tr], y_fit.iloc[tr])
         preds = predict_model(model, X.iloc[va], task_type, classes=classes)
         if target_transform != "none":
@@ -582,9 +725,10 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
                 f"expensive fit."
             )
 
-    final = _make_model(model_type, task_type, params, seed, metric)
-    final.fit(X, y_fit)
+    final = _make_model(model_type, task_type, params, seed, metric, objective)
+    final.fit(X[fittable], y_fit[fittable])
     return TrainResult(
         oof, fold_metrics, models, final, list(X.columns), model_type,
         target_transform, reference_target, round(time.monotonic() - started, 1),
+        unfitted_rows=int((~fittable).sum()),
     )

@@ -86,7 +86,7 @@ import numpy as np
 import pandas as pd
 
 from .metrics import SUPPORTED_METRICS
-from .models import _make_model, predict_model
+from .models import _make_model, check_objective, poisson_fit_rows, predict_model
 from .target import apply_target, check_target_domain
 
 __all__ = [
@@ -154,6 +154,8 @@ class ProbeFit:
     classes: np.ndarray | None = None
     fit_seconds: float = 0.0
     spec: dict = field(default_factory=dict)
+    #: Rows the fit skipped: negative counts under a Poisson objective.
+    unfitted_rows: int = 0
 
 
 def describe_probe() -> dict:
@@ -176,6 +178,7 @@ def fit_probe(
     task_type: str,
     metric: str,
     target_transform: str | None = None,
+    objective: str | None = None,
 ) -> ProbeFit:
     """Fit the ruler on one table. One fit, no folds — see the module docstring.
 
@@ -183,6 +186,9 @@ def fit_probe(
     explicitly to honour a `TaskSpec` override. It changes what the model is
     fitted on and never what is reported: callers invert before scoring, exactly
     as ``train_cv`` does.
+
+    ``objective`` is the run's regression loss. The ruler fits with it, so a
+    Poisson run ranks its tables by what a Poisson model can make of them.
     """
     import time
 
@@ -193,12 +199,16 @@ def fit_probe(
     y = pd.Series(np.asarray(y)).reset_index(drop=True)
     check_target_domain(target_transform, y, task_type)
     y_fit = pd.Series(apply_target(target_transform, y)) if target_transform != "none" else y
+    check_objective(objective, y_fit, target_transform)
+    fittable = poisson_fit_rows(objective, y_fit)
 
     classes = np.unique(y.to_numpy()) if task_type in ("binary", "multiclass") else None
 
     started = time.monotonic()
-    model = _make_model(PROBE_MODEL_TYPE, task_type, dict(PROBE_PARAMS), PROBE_SEED, metric)
-    model.fit(X, y_fit)
+    model = _make_model(
+        PROBE_MODEL_TYPE, task_type, dict(PROBE_PARAMS), PROBE_SEED, metric, objective
+    )
+    model.fit(X[fittable], y_fit[fittable])
     elapsed = round(time.monotonic() - started, 2)
 
     return ProbeFit(
@@ -208,6 +218,7 @@ def fit_probe(
         classes=classes,
         fit_seconds=elapsed,
         spec=describe_probe(),
+        unfitted_rows=int((~fittable).sum()),
     )
 
 

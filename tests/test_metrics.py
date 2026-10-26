@@ -63,7 +63,7 @@ def test_greater_is_better_directions():
 
 def test_supported_metrics_set():
     assert SUPPORTED_METRICS == {
-        "rmse", "rmsle", "rmspe", "mae", "logloss", "auc", "accuracy"
+        "rmse", "rmsle", "rmspe", "mae", "poisson_deviance", "logloss", "auc", "accuracy"
     }
 
 
@@ -114,3 +114,34 @@ def test_rmspe_is_relative_and_ignores_zero_valued_rows():
 def test_greater_is_better_unknown_metric_raises_value_error():
     with pytest.raises(ValueError):
         greater_is_better("bogus")
+
+
+def test_poisson_deviance_matches_sklearn_and_scores_zeros():
+    from sklearn.metrics import mean_poisson_deviance
+
+    y = np.array([0.0, 0.0, 3.0, 10.0])
+    pred = np.array([0.5, 2.0, 3.0, 8.0])
+    assert compute_metric("poisson_deviance", y, pred) == pytest.approx(
+        mean_poisson_deviance(y, pred)
+    )
+    assert greater_is_better("poisson_deviance") is False
+
+
+def test_poisson_deviance_floors_non_positive_predictions_instead_of_crashing():
+    """A squared-error member can predict <= 0; the deviance of that is undefined,
+    so it is charged a steep finite price rather than ending the comparison."""
+    y = np.array([0.0, 2.0])
+    score = compute_metric("poisson_deviance", y, np.array([-1.0, 2.0]))
+    assert np.isfinite(score)
+    assert score == compute_metric("poisson_deviance", y, np.array([0.0, 2.0]))
+
+
+def test_poisson_deviance_leaves_negative_true_values_unscored():
+    """A negative count is outside the metric's domain, excluded like rmspe's zeros."""
+    y = np.array([-5.0, 0.0, 3.0])
+    pred = np.array([100.0, 0.5, 2.0])
+    assert compute_metric("poisson_deviance", y, pred) == pytest.approx(
+        compute_metric("poisson_deviance", y[1:], pred[1:])
+    )
+    with pytest.raises(ValueError, match="none"):
+        compute_metric("poisson_deviance", np.array([-1.0]), np.array([1.0]))

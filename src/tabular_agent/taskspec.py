@@ -45,6 +45,23 @@ class TaskSpec:
     #: this class are for. Names come from the same validated menu 0021 defined;
     #: free-form code over the target is still impossible.
     target_transform: str | None = None
+    #: The loss a regression's models are fitted with: ``"squared_error"`` or
+    #: ``"poisson"``. The owner's statement that the target is a count (sales,
+    #: claims, visits) whose expected value is what should be predicted.
+    #:
+    #: A count is not a scale problem, so `target_transform` cannot express it.
+    #: Squared error on raw counts spends the model on the few large values, and
+    #: squared error on ``log1p`` predicts something closer to a geometric mean, so
+    #: every forecast for sparse, bursty demand comes out too low. A Poisson loss
+    #: fits the mean of the count directly, zeros included.
+    #:
+    #: `None` means derive it from the metric, as `target_transform` is: the
+    #: `poisson_deviance` metric implies ``"poisson"``, everything else
+    #: ``"squared_error"``. Setting ``"poisson"`` with no metric makes
+    #: `poisson_deviance` the metric, so the run ranks what it fits (0022). It
+    #: fixes the target scale at ``"none"``; the Poisson loss already works on
+    #: the log of the mean.
+    objective: str | None = None
     #: How far ahead this task actually forecasts: the gap between the end of
     #: history and the *earliest* row a prediction is asked for, in the ordering
     #: column's units (days, usually).
@@ -78,6 +95,9 @@ class ResolvedSpec:
     #: Always concrete after resolution — derived from the metric when the spec
     #: left it open, so no caller has to repeat the derivation.
     target_transform: str = "none"
+    #: ``"squared_error"`` or ``"poisson"`` for a regression; `None` for a
+    #: classifier, whose loss is fixed by the task type.
+    objective: str | None = None
     #: Carried through unresolved: nothing can fill it in, so `None` stays `None`
     #: and means "no lag offsets are legal".
     forecast_horizon: float | None = None
@@ -94,8 +114,14 @@ def detect_task_type(y: pd.Series) -> str:
     return "multiclass"
 
 
-def default_metric(task_type: str, y: pd.Series) -> str:
+#: The regression losses an owner can choose between (see `TaskSpec.objective`).
+OBJECTIVES = ("squared_error", "poisson")
+
+
+def default_metric(task_type: str, y: pd.Series, objective: str | None = None) -> str:
     if task_type == "regression":
+        if objective == "poisson":
+            return "poisson_deviance"
         if pd.api.types.is_numeric_dtype(y) and bool((y.dropna() >= 0).all()):
             return "rmsle"
         return "rmse"
@@ -106,8 +132,35 @@ def resolve_taskspec(spec: TaskSpec, y: pd.Series) -> ResolvedSpec:
     from .probe import default_target_transform
     from .target import TARGET_TRANSFORMS
 
-    task_type = spec.task_type or detect_task_type(y)
-    metric = spec.metric or default_metric(task_type, y)
+    # A declared count is a regression, whatever the detector would guess: a
+    # slow seller's daily sales take a handful of integer values and would
+    # otherwise be read as class labels.
+    task_type = spec.task_type or (
+        "regression" if spec.objective == "poisson" else detect_task_type(y)
+    )
+    if spec.objective is not None and spec.objective not in OBJECTIVES:
+        raise ValueError(
+            f"unknown objective: {spec.objective!r} (use one of {list(OBJECTIVES)})"
+        )
+    if spec.objective == "poisson" and task_type != "regression":
+        raise ValueError(
+            f"objective='poisson' applies to regression only; this is a {task_type} "
+            "task, whose loss is fixed by the task type"
+        )
+    metric = spec.metric or default_metric(task_type, y, spec.objective)
+    if task_type != "regression":
+        objective = None
+    elif spec.objective is not None:
+        objective = spec.objective
+    else:
+        objective = "poisson" if metric == "poisson_deviance" else "squared_error"
+    if objective == "poisson" and spec.target_transform not in (None, "none"):
+        raise ValueError(
+            f"target_transform={spec.target_transform!r} cannot be combined with "
+            "objective='poisson': the Poisson loss already fits the log of the "
+            "expected count, and fitting it on a transformed target would model "
+            "the mean of the transform instead. Leave target_transform unset."
+        )
     if spec.target_transform is not None and spec.target_transform not in TARGET_TRANSFORMS:
         raise ValueError(
             f"unknown target_transform: {spec.target_transform!r} "
@@ -119,7 +172,10 @@ def resolve_taskspec(spec: TaskSpec, y: pd.Series) -> ResolvedSpec:
             "gap to the earliest row you predict; zero would mean the row's own period "
             "is already observed, in which case there is nothing to forecast."
         )
-    target_transform = spec.target_transform or default_target_transform(metric, task_type)
+    if objective == "poisson":
+        target_transform = "none"
+    else:
+        target_transform = spec.target_transform or default_target_transform(metric, task_type)
     return ResolvedSpec(
         target=spec.target,
         task_type=task_type,
@@ -130,5 +186,6 @@ def resolve_taskspec(spec: TaskSpec, y: pd.Series) -> ResolvedSpec:
         n_splits=spec.n_splits,
         seed=spec.seed,
         target_transform=target_transform,
+        objective=objective,
         forecast_horizon=spec.forecast_horizon,
     )

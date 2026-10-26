@@ -635,3 +635,82 @@ def test_the_metric_reaches_the_model_through_train_cv():
 
     assert result.final_model[-1].search.scoring == "roc_auc"
     assert all(m[-1].search.scoring == "roc_auc" for m in result.models)
+
+
+def _count_data(n=600, seed=0):
+    rng = np.random.default_rng(seed)
+    X = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    y = pd.Series(rng.poisson(np.exp(0.3 + 0.8 * X["a"] - 0.5 * X["b"])).astype(float))
+    return X, y
+
+
+@pytest.mark.parametrize("model_type", ["lgbm", "xgb", "catboost", "elasticnet"])
+def test_every_family_fits_the_expected_count_under_a_poisson_objective(model_type):
+    """Predictions are counts (positive, on the target scale), and on count data the
+    Poisson fit beats the same family under squared error on Poisson deviance."""
+    X, y = _count_data()
+    folds = make_folds(y, "regression", n_splits=3, seed=0)
+    poisson = train_cv(X, y, folds, "regression", "poisson_deviance",
+                       model_type=model_type, objective="poisson")
+    squared = train_cv(X, y, folds, "regression", "poisson_deviance",
+                       model_type=model_type)
+
+    assert (poisson.oof > 0).all()
+    assert np.mean(poisson.fold_metrics) < np.mean(squared.fold_metrics)
+
+
+def test_params_cannot_override_the_owner_s_poisson_objective():
+    from tabular_agent.models import _make_model
+
+    lgbm = _make_model("lgbm", "regression", {"objective": "regression"}, 0, objective="poisson")
+    assert lgbm.get_params()["objective"] == "poisson"
+    cat = _make_model("catboost", "regression", {"objective": "RMSE"}, 0, objective="poisson")
+    assert cat.get_params()["loss_function"] == "Poisson"
+    assert "objective" not in cat.get_params()
+
+
+def test_a_poisson_fit_skips_negative_counts_but_still_predicts_them():
+    """Negative rows are left out of every fit, not refused: the run survives dirty
+    counts, the rows keep their out-of-fold predictions, and the fit says how many."""
+    X, y = _count_data()
+    y.iloc[:5] = -3.0
+    folds = make_folds(y, "regression", n_splits=3, seed=0)
+    result = train_cv(X, y, folds, "regression", "poisson_deviance", objective="poisson")
+
+    assert result.unfitted_rows == 5
+    assert np.isfinite(result.oof).all() and (result.oof > 0).all()
+    clean = train_cv(X.iloc[5:], y.iloc[5:], make_folds(y.iloc[5:], "regression",
+                     n_splits=3, seed=0), "regression", "poisson_deviance",
+                     objective="poisson")
+    assert clean.unfitted_rows == 0
+
+
+def test_a_poisson_fit_on_only_negative_counts_is_refused():
+    X, y = _count_data(n=30)
+    y[:] = -1.0
+    folds = make_folds(y, "regression", n_splits=3, seed=0)
+    with pytest.raises(ValueError, match="every target value on this table is negative"):
+        train_cv(X, y, folds, "regression", "rmse", objective="poisson")
+
+
+def test_a_poisson_objective_refuses_a_target_transform():
+    X, y = _count_data()
+    folds = make_folds(y, "regression", n_splits=3, seed=0)
+    with pytest.raises(ValueError, match="target_transform='log1p' cannot be used"):
+        train_cv(X, y, folds, "regression", "rmse", target_transform="log1p",
+                 objective="poisson")
+
+
+def test_a_poisson_bundle_predicts_counts_and_records_its_objective(tmp_path):
+    X, y = _count_data()
+    folds = make_folds(y, "regression", n_splits=3, seed=0)
+    result = train_cv(X, y, folds, "regression", "poisson_deviance", objective="poisson")
+    bundle_dir = save_bundle(
+        RunContext(str(tmp_path / "run")), Pipeline("regression"), [result.final_model],
+        np.array([1.0]), list(X.columns), "regression", objective="poisson",
+    )
+    bundle = load_bundle(bundle_dir)
+    assert bundle["objective"] == "poisson"
+    np.testing.assert_allclose(
+        predict_bundle(bundle, X), result.final_model.predict(X), rtol=1e-12
+    )

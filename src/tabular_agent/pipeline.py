@@ -137,7 +137,8 @@ class Pipeline:
 def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_names, task_type,
                 target_transform: str = "none",
                 reference_target=None,
-                training_table: str | None = None) -> str:
+                training_table: str | None = None,
+                objective: str | None = None) -> str:
     bundle_dir = run_ctx.path("bundle", "_")
     bundle_dir = os.path.dirname(bundle_dir)
     model_paths = []
@@ -154,6 +155,9 @@ def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_name
         # Fit used reference-forward and then f(y); prediction must reverse both.
         "target_transform": target_transform,
         "reference_target": normalize_reference_target(reference_target),
+        # The fitted models already carry their loss, so prediction needs nothing
+        # from this. It is recorded for `explain`, whose attribution space it sets.
+        "objective": objective,
     }
     # Retain the exact fitted table so Run.training_features can return its OOF
     # values instead of leaking through final target-informed encoders.
@@ -184,6 +188,8 @@ def load_bundle(bundle_dir: str) -> dict:
         # Missing fields are the direct-target defaults for old bundles.
         "target_transform": manifest.get("target_transform", "none"),
         "reference_target": manifest.get("reference_target"),
+        # Absent on bundles written before objectives existed: squared error.
+        "objective": manifest.get("objective"),
         # {name: the columns that file must carry}. Absent on every bundle
         # written before streams existed, which is what "needs nothing extra"
         # looks like.
