@@ -2868,6 +2868,17 @@ def _best_table_path(session: RunSession, run_journal: dict) -> str:
             "id": "work",
             "path": session.rel(session.data_path),
         })
+    if session.profile == "minimal":
+        # The minimal profile ranks by the ruler alone, with no uncertainty gate:
+        # it computes no paired interval, so the full profile's demonstrated-gain
+        # rule (0090) would reject every table and always ship the work table.
+        # The work table is a candidate like any other, so a table that scored
+        # worse than it cannot win.
+        scored = [t for t in candidates if t.get("probe_score") is not None]
+        if not scored:
+            return session.rel(session.data_path)
+        pick = max if greater_is_better(metric) else min
+        return pick(scored, key=lambda t: t["probe_score"])["path"]
     winner = stop.best_table(candidates, metric)
     return winner["path"] if winner else session.rel(session.data_path)
 

@@ -12,7 +12,9 @@ pytest.importorskip("pydantic_ai")
 from tabular_agent.harness import journal
 from tabular_agent.harness.agent import build_agent
 from tabular_agent.harness.session import RunSession
-from tabular_agent.harness.tools import finalize_run, inspect_data, transform_features
+from tabular_agent.harness.tools import (
+    _best_table_path, finalize_run, inspect_data, transform_features,
+)
 from tabular_agent.pipeline import load_bundle, predict_bundle
 from tabular_agent.taskspec import TaskSpec
 
@@ -150,6 +152,27 @@ def test_minimal_finalize_ships_one_model_without_cv_or_blend(tmp_path):
     report = open(os.path.join(session.run_dir, out["report_path"])).read().lower()
     for removed_concept in ("cross-validation", "bootstrap", "sealed", "standard error"):
         assert removed_concept not in report
+
+
+def test_minimal_selects_the_best_scored_table_without_an_interval(tmp_path):
+    # The minimal profile records no paired interval, so the full profile's
+    # demonstrated-gain gate would reject every table and ship the work table.
+    session = _session(tmp_path)
+    work = session.rel(session.data_path)
+    run_journal = {
+        "task": {"metric": "rmse"},
+        "work_probe": {"probe_score": 0.149},
+        "tables": [
+            {"id": "t1", "path": "tables/t1.parquet", "probe_score": 0.131},
+            {"id": "t2", "path": "tables/t2.parquet", "probe_score": 0.128},
+            {"id": "t3", "path": "tables/t3.parquet", "probe_score": None},
+        ],
+    }
+    assert _best_table_path(session, run_journal) == "tables/t2.parquet"
+
+    # A table that scored worse than the work table cannot win.
+    run_journal["tables"] = [{"id": "t1", "path": "tables/t1.parquet", "probe_score": 0.2}]
+    assert _best_table_path(session, run_journal) == work
 
 
 def test_minimal_finalize_retry_does_not_duplicate_journal_rows(tmp_path, monkeypatch):
