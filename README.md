@@ -180,6 +180,9 @@ plan.forecast_horizon = 42               # minimum lead predictions must support
 plan.future_known = ["Promo"]            # optional: serving columns whose values over the
                                          # horizon are known now (a planned promotion, a
                                          # weather forecast) — unlocks fit_future_covariate_window
+plan.objective = "poisson"               # optional: the target is a count; every model fits
+                                         # its expected value with a Poisson loss, and the
+                                         # run ranks on Poisson deviance unless you set a metric
 plan.accept_identifier_proposals()       # or reject_identifier_proposals()
 plan.reject_joins()                      # or accept_joins()
 
@@ -189,13 +192,23 @@ run = agent.run(plan)                     # builds features, evaluates, finalize
 Choose the public contract explicitly: `ta.Agent()` is for independent rows and
 requires `plan.split_on = False`; it does not expose history or time-aware
 stream tools. `ta.ForecastingAgent()` is for prediction into the future and
-requires both a time column and a positive horizon. It uses the same engine,
-encoders, sandbox, models, bundle and reports, while adding the temporal contract
-and tools: it can summarise a series' own past (`fit_history`) and, for a covariate
-you declare `future_known`, aggregate its horizon values forward — total irradiance
-over the delivered day, a rolling mean of forecast temperature — with
-`fit_future_covariate_window`. Categorical interactions and row-local transforms
-remain available in both.
+requires both a time column and a positive horizon. Both share the encoders,
+sandbox, bundle format and report; they differ in the tools the agent gets and in
+what ships:
+
+| | `ta.Agent()` (default `profile="minimal"`) | `ta.ForecastingAgent()` (always `profile="full"`) |
+|---|---|---|
+| Agent tools | 6: inspect, encode, group statistics, row filter, row-local transform, finalize | 13: the same, plus `fit_history`, `fit_stream_aggregate`, `fit_future_covariate_window`, `fit_reference_target`, and read-only tools for attribution, residuals and the run journal |
+| What ships | one fixed LightGBM (the model that ranked the tables), refitted on the selected table | a blend of lgbm, xgb, catboost and elasticnet fits, weighted by their cross-validation stability |
+| Splits | work / evaluation | work / validation, plus an optional sealed test slice (`holdout_fraction=`) scored once |
+| Report | evaluation score, trivial baseline, selected table | the above, plus the search's pick vs. what shipped and each model's optimism on the sealed slice |
+
+`fit_history` summarises a series' own past; for a covariate you declare
+`future_known`, `fit_future_covariate_window` aggregates its horizon values forward
+— total irradiance over the delivered day, a rolling mean of forecast temperature.
+For independent rows you can opt into the full profile's blend and sealed slice
+with `ta.Agent(profile="full", holdout_fraction=0.2)`; the time-aware tools stay
+forecast-only.
 
 You confirm by setting these attributes on the plan — plain Python, no wizard. If
 you forget one, `agent.run(plan)` refuses before doing any work and names exactly
@@ -229,33 +242,15 @@ no training rows, target values, fitted lookup values, or other raw data.
 
 The bundle takes the same raw rows you started with and replays the exact feature
 lineage — no separate preprocessing to reproduce. The report is written to be read
-without insider knowledge: it separates the search winner from what actually
-ships, and flags where a score is optimistic.
+without insider knowledge. With the default profile it states that the evaluation
+score was used to rank tables, so it is a search score rather than an independent
+estimate. With the full profile it also separates the search winner from what
+actually ships, and flags where a score is optimistic.
 
-### Learn from limitations across runs
-
-After a run is finalized, you can request a separate evidence-bound postmortem:
-
-    review = agent.review_capabilities(run)
-    print(review["overall_assessment"])
-
-    backlog = ta.capability_backlog([run, another_run])
-
-This is an explicit additional LLM call, not a hidden part of training. The
-reviewer receives sanitized aggregate evidence, has no tools, and cannot fit,
-score, re-rank, or ship a model. It classifies findings such as a missing generic
-capability, an agent miss, a tool defect, a model/selection limitation, or a
-data-contract problem. Every finding cites recorded evidence and includes a
-falsifiable hypothesis plus an alternative explanation.
-
-The result is written once to capability_review.json and added to the Markdown,
-JSON, and HTML reports under **What limited this run?**. Repeated reviews return
-that artifact rather than calling the model again. Across runs, matching
-fingerprints become proposed or recurring; they never become accepted product
-changes automatically. Acceptance still requires an owner-preregistered test on
-an unseen run.
-
-An excerpt from a real House Prices run:
+An excerpt from a real House Prices run with the full profile and a sealed test
+slice (`ta.Agent(profile="full", holdout_fraction=0.2)`). The default profile's
+report is shorter: evaluation score, baseline, the one model, the selected table,
+features and split, with no test score and no model table:
 
 ```text
 # Run Report
@@ -286,11 +281,34 @@ the precommitted, fold-spread-weighted blend scored 0.1259 on those rows — +0.
 > honest number the run has.
 ```
 
+### Learn from limitations across runs
+
+After a run is finalized, you can request a separate evidence-bound postmortem:
+
+    review = agent.review_capabilities(run)
+    print(review["overall_assessment"])
+
+    backlog = ta.capability_backlog([run, another_run])
+
+This is an explicit additional LLM call, not a hidden part of training. The
+reviewer receives sanitized aggregate evidence, has no tools, and cannot fit,
+score, re-rank, or ship a model. It classifies findings such as a missing generic
+capability, an agent miss, a tool defect, a model/selection limitation, or a
+data-contract problem. Every finding cites recorded evidence and includes a
+falsifiable hypothesis plus an alternative explanation.
+
+The result is written once to capability_review.json and added to the Markdown,
+JSON, and HTML reports under **What limited this run?**. Repeated reviews return
+that artifact rather than calling the model again. Across runs, matching
+fingerprints become proposed or recurring; they never become accepted product
+changes automatically. Acceptance still requires an owner-preregistered test on
+an unseen run.
+
 ## Explain a single prediction
 
 Ask *why this number for this row*, feature by feature — an exact, model-native
-attribution of the prediction the bundle actually ships (the weighted blend, not
-one member):
+attribution of the prediction the bundle actually ships (under the full profile,
+the weighted blend, not one member):
 
 ```python
 explanation = run.bundle.explain("path/to/new_rows.csv")
@@ -393,13 +411,18 @@ An OS-level sandbox (no network, no file access outside the work directory) woul
 close the rest. It is designed but deliberately not built yet:
 [`docs/sandbox-threat-model.md`](docs/sandbox-threat-model.md).
 
-## Long runs stay robust
+## Long runs end with a bundle
 
-A run executes in fresh episodes that read their state from the run journal rather
-than an ever-growing context, so a long or expensive search does not balloon in
-cost and can resume where it left off if interrupted. The mechanics live in the
-archived decision records 0024–0027
-([`research/archive/decisions/`](research/archive/decisions/)).
+All of a run's state lives in its run directory, not in the agent's context. A
+run is capped at 300 model requests; if the agent hits the cap, or stops without
+finalizing, `agent.run()` finalizes what the search built, so a long search ends
+with a bundle rather than an error.
+
+`agent.run()` starts a new run directory and runs the agent once. The harness can
+also brief a fresh agent on an existing run directory from its journal, which is
+what earlier multi-episode research runs used (archived decision records 0024–0027,
+[`research/archive/decisions/`](research/archive/decisions/)); the public API does
+not resume runs.
 
 ## What this is not
 
@@ -416,8 +439,9 @@ models and stacking them. This project is a deliberately different bet:
 - **An LLM reasons about your data.** It reads your column names and data
   description and writes bespoke, *semantic* features — not just generic
   preprocessing. The search is over features, not a model/hyperparameter grid.
-- **Trustworthy numbers over raw score.** Three splits, an honest report that
-  separates the search winner from what actually ships, leakage-safe out-of-fold
+- **Trustworthy numbers over raw score.** A split made before the agent sees any
+  data (plus an optional sealed test slice), an honest report that says what each
+  score can and cannot claim, leakage-safe out-of-fold
   encoders, and refusal to train on columns that won't exist at prediction time.
   Aggressive stacking can quietly flatter its own validation; this is built not to.
 - **Auditable and portable.** A replayable bundle, a readable report,
