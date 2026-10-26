@@ -650,7 +650,9 @@ class Agent:
         profile: str = "minimal",
         run_root: str | os.PathLike = "runs",
         val_fraction: float = 0.2,
-        holdout_fraction: float | None = None,
+        # Sealed before the run and scored once at finalize, so the report has
+        # one number the search could not tune against. None turns it off.
+        holdout_fraction: float | None = 0.2,
         fit_time_budget_s: float | None = None,
     ):
         self.model = model

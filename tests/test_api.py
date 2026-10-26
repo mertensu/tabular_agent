@@ -292,7 +292,8 @@ def test_facade_minimal_run_finalizes_and_predicts_end_to_end(tmp_path):
 
     training = run.training_features()
     assert training.columns.tolist() == ["x", "target"]
-    assert len(training) == 40
+    assert len(training) == 30  # 50 rows less 10 evaluation and 10 sealed audit
+    assert run.journal["holdout"]["n_rows"] == 10
 
     assert len(predictions) == 3
     assert np.isfinite(predictions).all()
@@ -503,3 +504,9 @@ def test_a_poisson_plan_ships_a_poisson_bundle_end_to_end(tmp_path, profile):
     assert (predictions > 0).all()
     explanation = run.bundle.explain(frame[["x"]].iloc[:5])
     assert explanation.space == "log(target)"
+
+
+def test_default_agent_seals_an_audit_slice():
+    # The default run reports one score nothing in the search could read.
+    assert ta.Agent(model=object()).holdout_fraction == 0.2
+    assert ta.ForecastingAgent(model=object()).holdout_fraction is None

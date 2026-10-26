@@ -74,11 +74,6 @@ class RunSession:
     ):
         if profile not in {"full", "minimal"}:
             raise ValueError(f"unknown run profile {profile!r}; use 'full' or 'minimal'")
-        if profile == "minimal" and holdout_fraction is not None:
-            raise ValueError(
-                "the minimal profile has one train/evaluation split; an internal "
-                "holdout belongs to an offline audit, not the product run"
-            )
         if profile == "minimal" and streams:
             raise ValueError(
                 "the minimal profile accepts one table; declared streams require "

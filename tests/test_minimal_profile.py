@@ -53,14 +53,44 @@ def test_minimal_agent_has_only_the_product_tools():
     assert set(agent._function_toolset.tools) == MINIMAL_TOOLS
 
 
-def test_minimal_profile_refuses_a_third_internal_split(tmp_path):
+def test_minimal_audit_slice_is_sealed_and_scored_once(tmp_path):
+    rng = np.random.default_rng(0)
+    n = 300
+    x = rng.normal(size=n)
+    df = pd.DataFrame({"x": x, "y": 3 * x + rng.normal(scale=0.2, size=n)})
     path = tmp_path / "data.csv"
-    pd.DataFrame({"x": range(30), "y": range(30)}).to_csv(path, index=False)
-    with pytest.raises(ValueError, match="one train/evaluation split"):
-        RunSession(
-            str(tmp_path / "run"), str(path), TaskSpec(target="y"),
-            profile="minimal", holdout_fraction=0.1,
-        )
+    df.to_csv(path, index=False)
+    session = RunSession(
+        str(tmp_path / "run"), str(path), TaskSpec(target="y", n_splits=3),
+        profile="minimal", holdout_fraction=0.2,
+    )
+    inspect_data(session)
+    # No agent tool can name the sealed rows.
+    with pytest.raises(ValueError):
+        session.resolve_table("data/holdout.parquet")
+
+    out = finalize_run(session)
+    assert out["audit_score"] is not None
+
+    j = journal.load(session.run_dir)
+    audit = j["holdout"]
+    assert audit["n_rows"] == 60
+    [shipped] = audit["scores"]
+    assert shipped["shipped"] and shipped["holdout_score"] == out["audit_score"]
+    assert shipped["val_score"] == out["evaluation_score"]
+    assert audit["baseline_holdout_score"] is not None
+
+    report = open(os.path.join(session.run_dir, out["report_path"])).read()
+    assert f"**Audit score (scored once):** {out['audit_score']:.6g}" in report
+    assert "/ 60 audit" in report
+
+
+def test_minimal_run_without_audit_slice_reports_none(tmp_path):
+    session = _session(tmp_path)
+    inspect_data(session)
+    out = finalize_run(session)
+    assert "audit_score" not in out
+    assert journal.load(session.run_dir).get("holdout") is None
 
 
 def test_explicitly_empty_serving_schema_is_enforced(tmp_path):

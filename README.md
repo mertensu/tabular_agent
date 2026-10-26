@@ -200,15 +200,14 @@ what ships:
 |---|---|---|
 | Agent tools | 6: inspect, encode, group statistics, row filter, row-local transform, finalize | 13: the same, plus `fit_history`, `fit_stream_aggregate`, `fit_future_covariate_window`, `fit_reference_target`, and read-only tools for attribution, residuals and the run journal |
 | What ships | one fixed LightGBM (the model that ranked the tables), refitted on the selected table | a blend of lgbm, xgb, catboost and elasticnet fits, weighted by their cross-validation stability |
-| Splits | work / evaluation | work / validation, plus an optional sealed test slice (`holdout_fraction=`) scored once |
-| Report | evaluation score, trivial baseline, selected table | the above, plus the search's pick vs. what shipped and each model's optimism on the sealed slice |
+| Splits | work / evaluation / sealed audit slice (20% by default, `holdout_fraction=None` turns it off) | work / validation, plus an optional sealed test slice (`holdout_fraction=`) |
+| Report | evaluation score, audit score (scored once), trivial baseline, selected table | the above, plus the search's pick vs. what shipped and each model's optimism on the sealed slice |
 
 `fit_history` summarises a series' own past; for a covariate you declare
 `future_known`, `fit_future_covariate_window` aggregates its horizon values forward
 — total irradiance over the delivered day, a rolling mean of forecast temperature.
-For independent rows you can opt into the full profile's blend and sealed slice
-with `ta.Agent(profile="full", holdout_fraction=0.2)`; the time-aware tools stay
-forecast-only.
+For independent rows you can opt into the full profile's blend with
+`ta.Agent(profile="full")`; the time-aware tools stay forecast-only.
 
 You confirm by setting these attributes on the plan — plain Python, no wizard. If
 you forget one, `agent.run(plan)` refuses before doing any work and names exactly
@@ -242,15 +241,16 @@ no training rows, target values, fitted lookup values, or other raw data.
 
 The bundle takes the same raw rows you started with and replays the exact feature
 lineage — no separate preprocessing to reproduce. The report is written to be read
-without insider knowledge. With the default profile it states that the evaluation
-score was used to rank tables, so it is a search score rather than an independent
-estimate. With the full profile it also separates the search winner from what
-actually ships, and flags where a score is optimistic.
+without insider knowledge. The evaluation score ranked the tables, so it is a
+search score and reads optimistic. The audit score comes from rows set aside before
+the run and scored once, after the table was chosen; it is the number to expect on
+new rows. With the full profile the report also separates the search winner from
+what actually ships, and shows each model's optimism.
 
 An excerpt from a real House Prices run with the full profile and a sealed test
-slice (`ta.Agent(profile="full", holdout_fraction=0.2)`). The default profile's
-report is shorter: evaluation score, baseline, the one model, the selected table,
-features and split, with no test score and no model table:
+slice (`ta.Agent(profile="full")`). The default profile's report is shorter:
+evaluation score, audit score, baseline, the one model, the selected table,
+features and split, with no model table:
 
 ```text
 # Run Report
@@ -440,7 +440,7 @@ models and stacking them. This project is a deliberately different bet:
   description and writes bespoke, *semantic* features — not just generic
   preprocessing. The search is over features, not a model/hyperparameter grid.
 - **Trustworthy numbers over raw score.** A split made before the agent sees any
-  data (plus an optional sealed test slice), an honest report that says what each
+  data, a sealed slice scored once at the end, an honest report that says what each
   score can and cannot claim, leakage-safe out-of-fold
   encoders, and refusal to train on columns that won't exist at prediction time.
   Aggressive stacking can quietly flatter its own validation; this is built not to.

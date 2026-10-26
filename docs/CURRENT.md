@@ -24,7 +24,9 @@ Core guarantees:
 
 Implemented shadow runtime contract:
 
-1. one train/evaluation split
+1. one train/evaluation split, plus a sealed audit slice (20% by default) scored
+   once at finalize, so the report carries one number the search could not tune
+   against (added 2026-10-26, `research/capacity_ship_minimal/`)
 2. one bounded model contract for table ranking and shipping
 3. cross-fitting only as leakage protection for fitted features
 4. three visible numbers: baseline score, evaluation score, gain vs incumbent

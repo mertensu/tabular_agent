@@ -3126,6 +3126,49 @@ def _score_on_holdout(
     return {"n_rows": len(load_table(holdout_path)), "scores": scored}
 
 
+def _score_minimal_audit(
+    session: RunSession, path: str, fit, baseline_model, spec, y_work: pd.Series,
+    exp_id: str, evaluation_score: float,
+) -> dict | None:
+    """Score the shipped model and the baseline once on the sealed slice (0023).
+
+    The minimal profile's counterpart of `_score_on_holdout`, called after the
+    table has been chosen, so the result can judge that choice and never make
+    it. Same record shape, so the journal and the dashboard read it unchanged.
+    """
+    holdout_path = session.holdout_path
+    if holdout_path is None:
+        return None
+    entry = {
+        "experiment_id": exp_id,
+        "model_type": PROBE_MODEL_TYPE,
+        "val_score": evaluation_score,
+        "selected": True,
+        "shipped": True,
+    }
+    try:
+        score, _, why_not, _ = _score_on_held_out(
+            session, holdout_path, path, [fit.model], fit.feature_names, spec,
+            y_work, target_transform=fit.target_transform,
+        )
+        baseline, _, _, _ = _score_on_held_out(
+            session, holdout_path, path, [baseline_model], fit.feature_names, spec,
+            y_work, target_transform="none",
+        )
+    except Exception as e:  # noqa: BLE001 - a run must still finalize
+        score, baseline, why_not = None, None, f"{type(e).__name__}: {e}"
+    if score is None:
+        entry["holdout_unavailable"] = why_not
+    else:
+        entry["holdout_score"] = round(score, 6)
+        entry["optimism"] = _gain(evaluation_score, score, spec.metric)
+    return {
+        "n_rows": len(load_table(holdout_path)),
+        "scores": [entry],
+        "baseline_holdout_score": None if baseline is None else round(baseline, 6),
+    }
+
+
 @contextlib.contextmanager
 def _minimal_finalize_lock(session: RunSession):
     """Serialize minimal finalization across processes without stale lock state."""
@@ -3258,6 +3301,12 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         "artifact_path": session.rel(exp_dir),
     }
 
+    audit = _score_minimal_audit(
+        session, path, fit, baseline_model, spec, y, exp_id, evaluation_score,
+    )
+    if audit is not None:
+        journal.set_holdout(session.run_dir, audit)
+
     pipeline = _load_lineage(path, spec.task_type)
     bundle_dir = save_bundle(
         session.ctx, pipeline, [fit.model], np.array([1.0]), fit.feature_names,
@@ -3288,9 +3337,21 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         f"- **Model:** {PROBE_MODEL_TYPE}",
         f"- **Selected table:** `{table_rel}`",
         f"- **Features:** {', '.join(fit.feature_names)}",
-        f"- **Split:** {split.get('n_work')} work / {split.get('n_val')} evaluation "
-        f"({split_mode})",
+        f"- **Split:** {split.get('n_work')} work / {split.get('n_val')} evaluation"
+        + (f" / {split.get('n_holdout')} audit" if audit is not None else "")
+        + f" ({split_mode})",
     ]
+    if audit is not None:
+        shipped = audit["scores"][0]
+        if shipped.get("holdout_score") is None:
+            report_lines.append(
+                f"- **Audit score:** unavailable ({shipped.get('holdout_unavailable')})"
+            )
+        else:
+            report_lines.insert(
+                report_lines.index(f"- **Evaluation score:** {evaluation_score:.6g}") + 1,
+                f"- **Audit score (scored once):** {shipped['holdout_score']:.6g}",
+            )
     composition = target_composition(split)
     if composition:
         report_lines.append(f"- **Target composition:** {composition}")
@@ -3298,6 +3359,14 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         "",
         "The evaluation rows were used repeatedly to rank candidate tables. This is",
         "an internal search score, not an independent estimate for a future population.",
+    ]
+    if audit is not None:
+        report_lines += [
+            "The audit rows were set aside before the run and scored once, after the",
+            "table was chosen; nothing in the run could read them. That is the number",
+            "to expect on new rows from the same population.",
+        ]
+    report_lines += [
         "The bundle replays the selected table's fitted lineage from raw rows.",
     ]
     text = "\n".join(report_lines)
@@ -3309,6 +3378,7 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         model_types=[PROBE_MODEL_TYPE],
         feature_names=fit.feature_names,
         split=split,
+        holdout=audit,
         attribution=credit,
         feature_catalog=describe_feature_rows(
             pipeline, fit.feature_names, input_columns=session.serving_columns
@@ -3329,6 +3399,7 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         "metric": spec.metric,
         "evaluation_score": evaluation_score,
         "baseline_score": baseline_score,
+        **({"audit_score": audit["scores"][0].get("holdout_score")} if audit else {}),
         "n_experiments": len(j["leaderboard"]),
         "bundle_dir": session.rel(bundle_dir),
         "report_path": session.rel(report_path),
