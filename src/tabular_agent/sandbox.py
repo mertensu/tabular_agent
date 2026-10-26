@@ -67,11 +67,14 @@ _EXTRA_ALLOWED = [
 
 # Model libraries: blocked with a message that tells the agent what to use
 # instead, so it does not loop trying variations.
+_MODELS_HINT = (
+    "You do not train models: finalize_run fits them on your best table."
+)
 _TRAINING_LIBS = {
-    "lightgbm": "train_tabular_model",
-    "xgboost": "train_tabular_model",
-    "catboost": "train_tabular_model",
-    "sklearn": "train_tabular_model (models) or fit_encoding (encoders)",
+    "lightgbm": _MODELS_HINT,
+    "xgboost": _MODELS_HINT,
+    "catboost": _MODELS_HINT,
+    "sklearn": _MODELS_HINT + " For fitted encoders use fit_encoding or fit_group_stats.",
 }
 
 
@@ -123,19 +126,24 @@ ALLOWED = set(sys.stdlib_module_names) | set(cfg["extra_allowed"])
 TRAINING = cfg["training_libs"]
 _real_import = builtins.__import__
 
-def _guarded_import(name, *a, **k):
+def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    # A relative import comes from inside a package that was itself checked
+    # when it was imported (``scipy.stats`` does ``from ._x import ...``); its
+    # ``name`` is relative, so the root test below would read it as "".
+    if level > 0:
+        return _real_import(name, globals, locals, fromlist, level)
     root = name.split(".")[0]
     if root in TRAINING:
         raise ImportError(
             "'%s' is not available in the sandbox: exploration code cannot "
-            "train models or learn state. -> use %s instead." % (root, TRAINING[root])
+            "train models or learn state. %s" % (root, TRAINING[root])
         )
     if root not in ALLOWED:
         raise ImportError(
             "'%s' is not in the sandbox import whitelist. Allowed: pandas, "
             "numpy, scipy, and the Python standard library." % root
         )
-    return _real_import(name, *a, **k)
+    return _real_import(name, globals, locals, fromlist, level)
 
 builtins.__import__ = _guarded_import
 

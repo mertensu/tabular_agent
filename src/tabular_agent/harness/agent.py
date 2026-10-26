@@ -707,7 +707,7 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "
 
         Both columns must already be numeric and serving-available on ``table``.
         A revealed-target lag is legal only when it was produced by
-        ``fit_target_history``; this tool consumes that guarded column
+        ``fit_history``; this tool consumes that guarded column
         but never reads hidden targets itself. A scale containing zero, missing or
         non-finite values is refused because the inverse would be undefined.
 

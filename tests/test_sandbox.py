@@ -18,7 +18,7 @@ def test_blocks_training_lib_with_teaching_hint():
     code = "def explore(df):\n    import lightgbm\n    return 1"
     with pytest.raises(SandboxError) as exc:
         run_readonly({"df": _df()}, code)
-    assert "train_tabular_model" in str(exc.value)
+    assert "finalize_run" in str(exc.value)
 
 
 def test_blocks_sklearn_with_teaching_hint():
@@ -26,7 +26,14 @@ def test_blocks_sklearn_with_teaching_hint():
     with pytest.raises(SandboxError) as exc:
         run_readonly({"df": _df()}, code)
     msg = str(exc.value)
-    assert "fit_encoding" in msg or "train_tabular_model" in msg
+    assert "fit_encoding" in msg and "finalize_run" in msg
+
+
+def test_allows_scipy_submodule_with_relative_imports():
+    # scipy.stats imports its own submodules relatively; the guard must not
+    # read those as a top-level import of "".
+    code = "def explore(df):\n    import scipy.stats\n    return float(scipy.stats.rankdata(df['a'])[0])"
+    assert run_readonly({"df": _df()}, code)["result"] == 1.0
 
 
 def test_blocks_non_whitelisted_import():

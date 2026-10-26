@@ -71,7 +71,7 @@ def test_cannot_train_a_model_here():
         "import lightgbm\n"
         "def transform_features(df):\n    return df\n"
     )
-    with pytest.raises(SandboxError, match="train_tabular_model"):
+    with pytest.raises(SandboxError, match="finalize_run"):
         transform_features(df, code)
 
 
