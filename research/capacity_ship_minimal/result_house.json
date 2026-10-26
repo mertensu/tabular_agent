@@ -1,0 +1,10 @@
+{
+  "dataset": "house",
+  "model": "fireworks/deepseek-v4.1-flash-1017",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/house/runs/20261026T184454Z-56b7569e",
+  "elapsed_min": 2.05,
+  "identifier_columns": [
+    "Id"
+  ],
+  "n_serving_columns": 80
+}

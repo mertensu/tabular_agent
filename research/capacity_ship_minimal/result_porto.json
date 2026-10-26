@@ -1,0 +1,10 @@
+{
+  "dataset": "porto",
+  "model": "fireworks/deepseek-v4.1-flash-1017",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/porto/runs/20261026T184500Z-099d4451",
+  "elapsed_min": 1.58,
+  "identifier_columns": [
+    "id"
+  ],
+  "n_serving_columns": 58
+}
