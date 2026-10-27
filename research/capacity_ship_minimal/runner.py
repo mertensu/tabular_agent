@@ -149,6 +149,11 @@ TAG_OVERRIDES = {
     # tried windows after a filter and was refused can be told from one that did not try.
     ("rossmann", "r8"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
                          "model": "deepseek-v4-pro-0813@eu"},
+    # r9: validation spans whole forecast horizons (r8's 43-day validation put
+    # whole-block windows on a different scale), the agent texts say windows can
+    # look back as well as forward, and the flash model again.
+    ("rossmann", "r9"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
+                         "model": "deepseek-v4.1-flash-1017@eu"},
 }
 
 
