@@ -303,3 +303,20 @@ def test_a_forecast_validation_period_spans_whole_horizons(tmp_path, forecast_pa
     val = load_table(s.val_path)
     assert val["date"].nunique() == 14
     assert load_table(s.data_path)["date"].max() < val["date"].min()
+
+
+def test_a_forecast_validation_period_spans_at_least_two_horizons(tmp_path, forecast_paths):
+    """5% of 240 days is 12 days; with a 10-day horizon one would be nearest, two is the floor."""
+    table, stream = forecast_paths
+    s = RunSession(str(tmp_path / "two"), table,
+                   TaskSpec(target="sales", n_splits=3, forecast_horizon=10.0),
+                   split_on="date", workflow="forecast", val_fraction=0.05)
+    assert load_table(s.val_path)["date"].nunique() == 20
+
+
+def test_data_too_short_for_two_horizons_validates_on_one(tmp_path, forecast_paths):
+    table, stream = forecast_paths
+    s = RunSession(str(tmp_path / "one"), table,
+                   TaskSpec(target="sales", n_splits=3, forecast_horizon=120.0),
+                   split_on="date", workflow="forecast", val_fraction=0.05)
+    assert load_table(s.val_path)["date"].nunique() == 120

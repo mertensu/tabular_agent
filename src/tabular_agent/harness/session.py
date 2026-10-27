@@ -489,23 +489,32 @@ class RunSession:
         it, is otherwise computed over fewer periods in validation than in
         training and at prediction time, and scored on a different scale than it
         was learned on. ``val_fraction`` sets the size; this rounds it to the
-        nearest whole number of horizons (at least one), covering the periods in
+        nearest whole number of horizons, covering the periods in
         ``(end - k * horizon, end]`` the way window encoders tile their blocks.
+
+        At least two horizons when the data allows it. Every table is kept or
+        dropped on its gain over validation, and with one horizon that gain is
+        one forecast's worth of evidence: a feature that helps across forecasts
+        is hard to tell from one that happened to help in this one. What ships
+        is refitted on the validation rows too (0092), so the longer period
+        costs the shipped model nothing. Data too short for two horizons plus
+        training gets one.
         """
         from ..encoders import to_periods
 
         periods = to_periods(ordered)
         horizon = float(self.spec.forecast_horizon)
         end = periods[val_end - 1]
-        k = max(1, int(round((end - periods[cut_work]) / horizon)))
-        cut = int(np.searchsorted(periods, end - k * horizon, side="right"))
-        if cut < MIN_SPLIT_ROWS:
-            raise ValueError(
-                f"cannot cut a validation period of {k} forecast horizon(s) "
-                f"({horizon:g} each in {self.split_on!r}) and keep {MIN_SPLIT_ROWS} "
-                "work rows: the data is shorter than one forecast plus training."
-            )
-        return cut
+        k = max(2, int(round((end - periods[cut_work]) / horizon)))
+        for k in range(k, 0, -1):
+            cut = int(np.searchsorted(periods, end - k * horizon, side="right"))
+            if cut >= MIN_SPLIT_ROWS:
+                return cut
+        raise ValueError(
+            f"cannot cut a validation period of one forecast horizon "
+            f"({horizon:g} in {self.split_on!r}) and keep {MIN_SPLIT_ROWS} "
+            "work rows: the data is shorter than one forecast plus training."
+        )
 
     @property
     def data_path(self) -> str:

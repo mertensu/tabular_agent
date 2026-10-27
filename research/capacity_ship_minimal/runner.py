@@ -157,6 +157,11 @@ TAG_OVERRIDES = {
     # r9 was cut off after 12 tables by a provider timeout; r10 repeats it unchanged.
     ("rossmann", "r10"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
                           "model": "deepseek-v4.1-flash-1017@eu"},
+    # r11 repeats r10 with validation spanning at least two forecast horizons (96
+    # days, not 48), so a table's gain is judged over two forecasts, and with
+    # derived key columns checked by replay.
+    ("rossmann", "r11"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
+                          "model": "deepseek-v4.1-flash-1017@eu"},
 }
 
 
