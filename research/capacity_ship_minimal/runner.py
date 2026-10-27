@@ -145,6 +145,10 @@ TAG_OVERRIDES = {
     # it with that note pared back too.
     ("rossmann", "r7"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
                          "model": "deepseek-v4-pro-0813@eu"},
+    # r8 repeats r7 with rejected tool calls recorded in the journal, so a run that
+    # tried windows after a filter and was refused can be told from one that did not try.
+    ("rossmann", "r8"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
+                         "model": "deepseek-v4-pro-0813@eu"},
 }
 
 
