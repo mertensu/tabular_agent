@@ -416,7 +416,9 @@ close the rest. It is designed but deliberately not built yet:
 All of a run's state lives in its run directory, not in the agent's context. A
 run is capped at 300 model requests; if the agent hits the cap, or stops without
 finalizing, `agent.run()` finalizes what the search built, so a long search ends
-with a bundle rather than an error.
+with a bundle rather than an error. If the run crashes instead (a tool bug, a
+provider outage), what was built is finalized too and the error is still raised;
+its note names the run directory, so `ta.Run(path)` opens the result.
 
 `agent.run()` starts a new run directory and runs the agent once. The harness can
 also brief a fresh agent on an existing run directory from its journal, which is

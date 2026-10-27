@@ -745,11 +745,33 @@ class Agent:
             profile=self.profile,
             workflow=self.workflow,
         )
-        run_agent(
-            session,
-            prompt or "Inspect the data, build honest useful features, and finalize the run.",
-            model=self._resolved_model(),
-        )
+        try:
+            run_agent(
+                session,
+                prompt or "Inspect the data, build honest useful features, and finalize the run.",
+                model=self._resolved_model(),
+            )
+        except Exception as error:
+            # The tables the agent built are on disk and the run dir is the whole
+            # state, so a crash mid-search (a tool bug, a provider outage) still
+            # ships what was built. The error is re-raised: it stays loud, and the
+            # note says where the finalized run is.
+            try:
+                self._package(session, plan, manifest, run_dir)
+            except Exception as finalize_error:  # noqa: BLE001 - reported on the original
+                error.add_note(
+                    f"Finalizing what the run built also failed: {finalize_error!r}"
+                )
+                raise
+            error.add_note(
+                "The agent run failed, but what it built was finalized: "
+                f"ta.Run({str(run_dir)!r})"
+            )
+            raise
+        return self._package(session, plan, manifest, run_dir)
+
+    def _package(self, session, plan: DataPlan, manifest: dict, run_dir: Path) -> Run:
+        """Finalize if the agent did not, then write the bundle's serving contract."""
         bundle_path = run_dir / "bundle"
         if not (bundle_path / "pipeline.json").exists():
             finalize_run(session)

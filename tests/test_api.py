@@ -261,6 +261,28 @@ def test_agent_run_delegates_to_session_and_finalizer(monkeypatch, tmp_path):
     assert called["model"] is agent.model
 
 
+def test_a_crashed_agent_run_is_still_finalized_and_the_error_raised(monkeypatch, tmp_path):
+    frame = pd.DataFrame({"x": np.linspace(0.0, 1.0, 50), "target": np.linspace(10.0, 20.0, 50)})
+    agent = ta.Agent(model=object(), run_root=tmp_path, profile="minimal")
+    plan = agent.inspect(frame)
+    plan.target = "target"
+    plan.serving_columns = ["x"]
+    plan.split_on = False
+
+    def crashing_run(session, prompt, model):
+        raise TypeError("a tool bug the agent could not be told about")
+
+    monkeypatch.setattr(public_api, "run_agent", crashing_run)
+    with pytest.raises(TypeError) as excinfo:
+        agent.run(plan)
+
+    [run_dir] = list(tmp_path.iterdir())
+    assert f"ta.Run({str(run_dir)!r})" in "\n".join(excinfo.value.__notes__)
+    run = ta.Run(run_dir)
+    assert np.isfinite(run.bundle.predict(frame[["x"]].iloc[:3])).all()
+    assert (run_dir / "bundle" / "api_plan.json").exists()
+
+
 def test_public_exports():
     assert ta.Agent is public_api.Agent
     assert ta.DataPlan is public_api.DataPlan
