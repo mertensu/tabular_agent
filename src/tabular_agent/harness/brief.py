@@ -157,9 +157,8 @@ def render_brief(session: RunSession) -> str | None:
     if getattr(session, "future_known", None):
         names = ", ".join(session.future_known)
         lines.append(
-            f"Future-known covariates declared: {names}. Their horizon values are "
-            "known at issue time, so aggregate them forward with "
-            "fit_future_covariate_window (the exogenous counterpart to fit_history)."
+            f"Future-known covariates declared: {names}. Use them with "
+            "fit_future_covariate_window."
         )
 
     idle = _never_trained(j)
