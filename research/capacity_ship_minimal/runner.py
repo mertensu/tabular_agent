@@ -127,6 +127,9 @@ DATASETS = {
 #: future-window tool reads values as numbers, so its holidays would read as missing.
 TAG_OVERRIDES = {
     ("rossmann", "r2"): {"future_known": ["Open", "Promo", "SchoolHoliday"]},
+    # r2 was stopped before finalizing. r3 repeats it after 0093, with trailing
+    # windows of these columns reaching back across the block start.
+    ("rossmann", "r3"): {"future_known": ["Open", "Promo", "SchoolHoliday"]},
 }
 
 
