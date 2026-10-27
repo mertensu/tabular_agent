@@ -374,3 +374,23 @@ None was scored on the test days: none shipped a calendar window.
   tried in any of these runs.
 - Unexplained: r8's two forward `Open` windows cost −0.046 on validation, far more
   than an uninformative feature should. Not checked whether that is real or a bug.
+
+## Rossmann r9–r10 (2026-10-27): whole-horizon validation, "can look back as well as forward"
+
+Both with deepseek-v4.1-flash-1017@eu, the calendar declared known in advance, and two
+changes since r8: validation spans whole forecast horizons (48 days, not 43; r8's
+whole-block windows had been scored on a different scale), and the run brief and tool
+description say the windows "can look back as well as forward". Not scored on the
+test days: neither shipped a calendar window.
+
+| run | calendar windows built | shipped |
+|---|---|---|
+| r9 (cut off after 12 tables by a provider timeout) | `Promo`: trailing 1/7/28 + forward 7/14 (−0.0024) | t8, 54 features |
+| r10 | `Promo`: week + trailing 7 + forward 7 (+0.0014); week + forward 7 (+0.0018). `Open`: group statistic only (+0.0003) | t14, 38 features |
+
+- With the one-clause nudge the agent built backward windows for the first time (both
+  runs), but over `Promo`. It never built short windows over `Open` in any run r4–r10.
+- r10's rejections show it reaching for "stores open on this date" as a row-local
+  transform (refused: batch-dependent) and for history keyed on a derived weekday
+  (refused by a name check; fixed in d8f4883: derived keys are checked by replay).
+- No later step cleared 0090's noise bar, so both runs shipped early tables.
