@@ -154,6 +154,9 @@ TAG_OVERRIDES = {
     # look back as well as forward, and the flash model again.
     ("rossmann", "r9"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
                          "model": "deepseek-v4.1-flash-1017@eu"},
+    # r9 was cut off after 12 tables by a provider timeout; r10 repeats it unchanged.
+    ("rossmann", "r10"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
+                          "model": "deepseek-v4.1-flash-1017@eu"},
 }
 
 
