@@ -464,3 +464,16 @@ def test_by_must_name_something():
             "reserve", [], "party", "visit_date", "booked_at", "visit_date",
             leads=[1],
         )
+
+
+def test_a_text_stream_value_is_refused_rather_than_read_as_missing():
+    from tabular_agent.encoders import StreamAggregateEncoder
+
+    days = pd.date_range("2017-01-01", periods=30)
+    table = pd.DataFrame({"store": "a", "date": days})
+    stream = pd.DataFrame({"store": "a", "date": days, "seen": days - pd.Timedelta(days=3),
+                           "kind": "walk-in"})
+    enc = StreamAggregateEncoder("s", ["store"], "kind", "date", "seen", "date",
+                                 leads=[7], stats=["sum"])
+    with pytest.raises(ValueError, match="need numbers"):
+        enc.fit(table, stream=stream)

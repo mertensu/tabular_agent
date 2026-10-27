@@ -602,6 +602,24 @@ def _as_datetime(values) -> pd.Series:
     )
 
 
+def _require_numeric_value(column: pd.Series, name: str) -> None:
+    """Refuse a value column these windows would silently turn into missing values.
+
+    Window statistics are arithmetic, and the encoders read their value through
+    ``pd.to_numeric(errors="coerce")``: a text column would not fail, it would
+    become NaN wherever a value is not a number, and the feature would quietly
+    describe something else — a holiday code '0'/'a'/'b' counts only the '0's.
+    Raised as ValueError so the agent gets a correction, not a crashed run.
+    """
+    if pd.api.types.is_numeric_dtype(column) or pd.api.types.is_bool_dtype(column):
+        return
+    raise ValueError(
+        f"value column {name!r} has dtype {column.dtype}, and window statistics need "
+        "numbers: its non-numeric values would silently become missing. Pass a "
+        "numeric column (e.g. a 0/1 indicator for one level), or encode it first."
+    )
+
+
 class HistoryEncoder:
     """A group's own recent past, frozen at fit time and replayed as trailing windows.
 
@@ -800,6 +818,7 @@ class HistoryEncoder:
                 f"value column {self.value!r} is not in this frame; columns are "
                 f"{list(df.columns)}"
             )
+        _require_numeric_value(df[self.value], self.value)
         values = pd.to_numeric(df[self.value], errors="coerce").to_numpy().astype(float)
         frame = pd.DataFrame({
             "key": self._keys(df),
@@ -1326,6 +1345,8 @@ class StreamAggregateEncoder:
                 f"fitting a stream aggregate needs the stream itself: pass "
                 f"stream=<the {self.stream!r} frame>."
             )
+        if self.value in stream.columns:
+            _require_numeric_value(stream[self.value], self.value)
         s = self._clean_stream(stream)
         if self.order not in df.columns:
             raise ValueError(
@@ -1534,9 +1555,9 @@ FUTURE_UNITS = ("hour", "day", "week", "month", "block")
 
 #: Window families for :class:`FutureWindowEncoder`. ``period`` groups a whole
 #: calendar unit (may look forward *within the delivered block*); ``trailing`` is
-#: a block-local causal rolling window that resets at the block start; ``forward``
-#: looks ahead of the row, bounded by the block end. All three are keyed within
-#: one series and one block and never reach across either.
+#: a causal rolling window that reaches back across the block start into the
+#: covariate's stored past (0093); ``forward`` looks ahead of the row, bounded by
+#: the block end. None of them crosses a series boundary.
 FUTURE_FAMILIES = ("period", "trailing", "forward")
 
 
@@ -1621,9 +1642,12 @@ class FutureWindowEncoder:
     standard, high-value forecasting family (M5, the Rossmann winner, Darts
     ``future_covariates``) that a purely backward tool structurally cannot express.
 
-    **The block boundary is the invariant.** Every aggregate is keyed within one
-    series and one *delivered serving block* and resets at the block start, never
-    crossing a series or a block boundary. A block is one stretch of the ordering
+    **The block boundary is the invariant for looking forward.** Period and
+    forward aggregates are keyed within one series and one *delivered serving
+    block*, never crossing the block end: nothing after it is delivered. Trailing
+    windows look backward, at the covariate's past, which is known, so they cross
+    the block start (into stored values at predict time, 0093); nothing crosses a
+    series boundary. A block is one stretch of the ordering
     column of length ``block_length`` (the forecast horizon), tiled backward from
     each series' end — because at serving the model is handed exactly one such
     block per series and must compute the same block-local statistic it computed
@@ -1646,8 +1670,13 @@ class FutureWindowEncoder:
     * **period** — a whole calendar unit (``day``/``week``/…, or ``block`` for the
       whole delivered block), which *may look forward within the delivered block*.
       ``day_irr_sum``, ``day_t2m_max``, ``day_daylight_frac``.
-    * **trailing** — a causal rolling window of ``window`` rows that resets at the
-      block start (``roll4_t2m``, ``roll16_irr``).
+    * **trailing** — a causal rolling window of ``window`` rows that reaches back
+      across the block start (``roll4_t2m``, ``roll16_irr``). The covariate's past
+      is known as well as its future, so the window is not cut where the block
+      begins: in training it reads the rows before it, and at predict time it
+      reads the series' last ``window - 1`` values, stored at fit (0093). The
+      block start is an artefact of how forecasts are delivered, not a boundary
+      of what is known about the covariate.
     * **forward** — a window of ``window`` rows starting at the row and running
       ahead, clipped at the block end (``next_3h_temp_mean``).
 
@@ -1665,8 +1694,20 @@ class FutureWindowEncoder:
     kind = "future_window"
 
     def __init__(self, by, value: str, order: str, block_length: float,
-                 aggregates=()):
+                 aggregates=(), lookback: bool = True):
         self.by = [str(c) for c in by]
+        #: Whether trailing windows reach back across the block start (0093).
+        #: ``False`` only for encoders serialized before it existed, which reset
+        #: there, so a bundle on disk keeps predicting what it predicted.
+        self.lookback = bool(lookback)
+        #: ``{series key: [periods, values]}``: the last ``window - 1`` covariate
+        #: values per series at fit, which a trailing window at the start of a
+        #: delivered block reads. Empty until fitted.
+        self.tail_: dict[str, list[list[float]]] = {}
+        #: Median spacing of the ordering column at fit, in periods. A stored tail
+        #: is used only when it ends within 1.5 spacings of the delivered rows:
+        #: older values are not the window's predecessors.
+        self.spacing_: float | None = None
         self.value = str(value)
         self.order = str(order)
         self.block_length = float(block_length)
@@ -1715,15 +1756,21 @@ class FutureWindowEncoder:
             keys = keys + _KEY_SEP + df[col].astype(str)
         return keys.to_numpy()
 
+    @property
+    def _lookback_rows(self) -> int:
+        """How many past values a trailing window can need beyond its own row."""
+        windows = [s["window"] for s in self.aggregates if s["family"] == "trailing"]
+        return max(windows) - 1 if windows and self.lookback else 0
+
     def _needs_calendar(self) -> bool:
         return any(
             s["family"] == "period" and s["unit"] != "block" for s in self.aggregates
         )
 
     def fit(self, df: pd.DataFrame, y=None) -> "FutureWindowEncoder":
-        # Nothing is stored: every aggregate is recomputed from the delivered frame
-        # at predict time. fit exists for parity with the encoder protocol and to
-        # fail early on a frame that is missing the columns the recipe reads.
+        # Every aggregate is recomputed from the delivered frame at predict time.
+        # The one thing stored is each series' most recent covariate values, for
+        # trailing windows that reach back across the start of a delivered block.
         missing = [c for c in [*self.by, self.order, self.value] if c not in df.columns]
         if missing:
             raise ValueError(
@@ -1731,7 +1778,55 @@ class FutureWindowEncoder:
                 "frame. The series key, the ordering column and the covariate are "
                 "all read at fit and at predict time, so they have to exist in both."
             )
+        _require_numeric_value(df[self.value], self.value)
+        self.tail_ = {}
+        periods = to_periods(df[self.order])
+        steps = np.diff(np.unique(periods[np.isfinite(periods)]))
+        self.spacing_ = float(np.median(steps)) if len(steps) else None
+        keep = self._lookback_rows
+        if keep:
+            frame = pd.DataFrame({
+                "k": self._keys(df), "p": periods,
+                "v": pd.to_numeric(df[self.value], errors="coerce").to_numpy(dtype=float),
+            }).dropna(subset=["p"]).sort_values(["k", "p"], kind="stable")
+            for key, part in frame.groupby("k", sort=False):
+                part = part.tail(keep)
+                self.tail_[str(key)] = [part["p"].tolist(), part["v"].tolist()]
         return self
+
+    def _with_stored_past(self, work: pd.DataFrame) -> pd.DataFrame:
+        """``work`` with each series' stored tail prepended where it is contiguous.
+
+        Prepended rows get negative ``_src`` so they can be dropped after the
+        rolling windows have read them. A tail is used only for the values strictly
+        before the series' first delivered row, and only if the newest of those is
+        within 1.5 spacings of it: a gap means the stored values are not the
+        window's predecessors, and the window then starts where the rows do.
+        """
+        if not self.tail_ or self.spacing_ is None:
+            return work
+        first = work.groupby("_key")["_p"].min()
+        parts, src = [work], -1
+        for key, start in first.items():
+            stored = self.tail_.get(str(key))
+            if not stored:
+                continue
+            p = np.asarray(stored[0], dtype=float)
+            v = np.asarray(stored[1], dtype=float)
+            before = p < start
+            if not before.any() or start - p[before].max() > 1.5 * self.spacing_:
+                continue
+            n = int(before.sum())
+            parts.append(pd.DataFrame({
+                "_src": np.arange(src, src - n, -1), "_key": key,
+                "_p": p[before], "_v": v[before],
+            }))
+            src -= n
+        if len(parts) == 1:
+            return work
+        ext = pd.concat(parts, ignore_index=True)
+        return ext.sort_values(["_key", "_p", "_src"], kind="stable").set_index(
+            "_src", drop=False)
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         out = df.copy()
@@ -1767,6 +1862,7 @@ class FutureWindowEncoder:
         with np.errstate(invalid="ignore"):
             block = np.floor((gmax - work["_p"].to_numpy()) / self.block_length + 1e-9)
         work["_block"] = block
+        past = self._with_stored_past(work) if self.lookback else work
 
         results: dict[str, pd.Series] = {}
         for spec in self.aggregates:
@@ -1778,15 +1874,23 @@ class FutureWindowEncoder:
                     gkey = [work["_key"], work["_block"],
                             _calendar_key(work["_dt"], spec["unit"])]
                 results[name] = work["_v"].groupby(gkey, dropna=True).transform(spec["stat"])
-            else:
+            elif spec["family"] == "trailing":
+                w, stat = spec["window"], spec["stat"]
+                fn = lambda s, w=w, stat=stat: getattr(s.rolling(w, min_periods=1), stat)()
+                if self.lookback:
+                    # Per series only, across block starts, with the stored past
+                    # in front of the delivered rows; then back to the real rows.
+                    ext = past
+                    rolled = ext["_v"].groupby(ext["_key"]).transform(fn)
+                    results[name] = rolled[rolled.index >= 0]
+                else:  # serialized before 0093: resets at every block start
+                    bkey = [work["_key"], work["_block"]]
+                    results[name] = work["_v"].groupby(bkey, dropna=True).transform(fn)
+            else:  # forward: reverse, take a causal window, reverse back
                 bkey = [work["_key"], work["_block"]]
                 w, stat = spec["window"], spec["stat"]
-                if spec["family"] == "trailing":
-                    fn = lambda s, w=w, stat=stat: getattr(
-                        s.rolling(w, min_periods=1), stat)()
-                else:  # forward: reverse, take a causal window, reverse back
-                    fn = lambda s, w=w, stat=stat: getattr(
-                        s[::-1].rolling(w, min_periods=1), stat)()[::-1]
+                fn = lambda s, w=w, stat=stat: getattr(
+                    s[::-1].rolling(w, min_periods=1), stat)()[::-1]
                 results[name] = work["_v"].groupby(bkey, dropna=True).transform(fn)
 
         # Restore the caller's row order: results are indexed by `_src` (the
@@ -1804,12 +1908,20 @@ class FutureWindowEncoder:
             "order": self.order,
             "block_length": self.block_length,
             "aggregates": [dict(spec) for spec in self.aggregates],
+            "lookback": self.lookback,
+            "tail": self.tail_,
+            "spacing": self.spacing_,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "FutureWindowEncoder":
-        return cls(d["by"], d["value"], d["order"], d["block_length"],
-                   d.get("aggregates", ()))
+        # `lookback` absent is an encoder written before 0093: its trailing windows
+        # reset at the block start, and the model it ships with was trained on that.
+        enc = cls(d["by"], d["value"], d["order"], d["block_length"],
+                  d.get("aggregates", ()), lookback=d.get("lookback", False))
+        enc.tail_ = {str(k): [list(v[0]), list(v[1])] for k, v in (d.get("tail") or {}).items()}
+        enc.spacing_ = d.get("spacing")
+        return enc
 
 
 ENCODER_CLASSES: dict[str, type] = {

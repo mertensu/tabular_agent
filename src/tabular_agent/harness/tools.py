@@ -1574,10 +1574,11 @@ def fit_future_covariate_window(
     look *forward* across the horizon, which a backward, target-bound tool cannot.
 
     Only a column the run declared `future_known` is eligible; anything else is
-    refused with the reason (the target, an undeclared covariate). Every aggregate
-    is keyed within one series and one delivered serving block and resets at the
-    block start, so at serving — where the model is handed exactly one block per
-    series — it computes the same block-local statistic it did in training.
+    refused with the reason (the target, an undeclared covariate). Forward-looking
+    aggregates stay within one series and one delivered serving block, so at
+    serving — where the model is handed exactly one block per series — they compute
+    the same statistic they did in training. Trailing windows read the covariate's
+    past across the block start, from the stored tail at serving (0093).
     """
     refusal = _refuse_if_finished(session)
     if refusal is not None:
@@ -1676,11 +1677,13 @@ def fit_future_covariate_window(
     n_series = int(pd.unique(encoder._keys(df)).size)
 
     note = (
-        "This table is scored above; build on it to keep the new columns. Every "
-        "aggregate is keyed within one series and one delivered serving block "
-        f"(one forecast horizon, {spec.forecast_horizon:g} in {order!r}) and resets "
-        "at the block start, so at serving — where you are handed exactly one block "
-        "per series — it recomputes the same block-local statistic. No fold freeze "
+        "This table is scored above; build on it to keep the new columns. Period "
+        "and forward aggregates stay within one series and one delivered serving "
+        f"block (one forecast horizon, {spec.forecast_horizon:g} in {order!r}), so at "
+        "serving — where you are handed exactly one block per series — they "
+        "recompute the same statistic. Trailing windows reach back across the block "
+        "start into the covariate's past, which the encoder stores at fit, so "
+        "'over the last N rows' means the same in training and at serving. No fold freeze "
         "is involved: a future covariate is known across the horizon, so a forward "
         "or whole-block aggregate of it is the same number in training and at "
         "serving and reads no target. REALISM CAVEAT: if these covariate values are "

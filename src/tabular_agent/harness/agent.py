@@ -587,11 +587,11 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "
         is not the same as one *known* at issue time in production, and only the
         run's owner can assert which it is.
 
-        Every aggregate is keyed within one series and one delivered serving block
-        (one forecast horizon long) and resets at the block start. At serving you
-        are handed exactly one such block per series, so the same block-local
-        statistic is recomputed from the delivered rows alone — no target, no
-        stored freeze.
+        Period and forward aggregates stay within one series and one delivered
+        serving block (one forecast horizon long): at serving you are handed
+        exactly one such block per series, and nothing after it. Trailing windows
+        look back across the block start into the covariate's own past, which the
+        encoder stores when it is fitted. No target is read.
 
         Args:
             value: The future-known covariate to aggregate. Must be a column the
@@ -602,7 +602,8 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "
                   whole delivered block), which may look forward *within the
                   delivered block*, e.g. total irradiance this day.
                 - {"family": "trailing", "window": 4, "stat": "mean"} — a causal
-                  rolling window of `window` rows that resets at the block start.
+                  rolling window of `window` rows over the covariate's past,
+                  reaching back before the block start (e.g. holidays last week).
                 - {"family": "forward", "window": 12, "stat": "mean"} — a window of
                   `window` rows starting at the row and running ahead, clipped at
                   the block end, e.g. mean forecast temperature over the next 3h.

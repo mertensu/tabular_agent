@@ -7,7 +7,7 @@ was rejected, and what it cost. They are written for someone who knows data
 science but has never seen this codebase — project-specific vocabulary is
 explained where it first matters.
 
-This directory holds the twelve that still carry the product: its architecture,
+This directory holds the fourteen that still carry the product: its architecture,
 its safety invariants, how it measures, what it ships, and its public contracts.
 The other eighty — measurements, refuted mechanisms, dataset findings, plans that
 were superseded — are in [`research/archive/decisions/`](../../research/archive/decisions/),
@@ -73,12 +73,14 @@ Vocabulary used throughout:
 - [0044 — What ships is the average of the terminal fits, not the best of them](0044-what-ships-is-the-average-not-the-argmax.md)
   *(still standing; its equal weighting was superseded by
   [0080](../../research/archive/decisions/0080-a-blend-weight-a-member-cannot-inflate-decided-before-the-seal.md))*
+- [0092 — What ships is refitted on every row the search could use](0092-what-ships-is-refitted-on-every-row-the-search-could-use.md)
 
 ### Public contracts
 
 - [0083 — Learned features are a reusable artifact](0083-learned-features-are-a-reusable-artifact.md)
 - [0088 — A run may propose a capability gap, but not change the product](0088-a-run-may-propose-a-capability-gap-but-not-change-the-product.md)
 - [0089 — Forecasting is an explicit public contract, not an inferred mode](0089-forecasting-is-an-explicit-public-contract.md)
+- [0093 — A known covariate's past is known too](0093-a-known-covariates-past-is-known-too.md)
 
 ## Related reading
 

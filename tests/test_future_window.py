@@ -113,11 +113,17 @@ def test_aggregates_never_cross_a_series_boundary():
 
 
 def test_a_delivered_block_reproduces_training_exactly():
-    """Serving-legality: the last block served alone == what training computed."""
+    """Serving-legality: the next block served alone == what training computes for it.
+
+    The encoder is fitted on the past only, as a shipped one is; the block that
+    follows is then delivered on its own, with nothing before it in the frame.
+    Every family must give it the values a frame holding the whole series gives.
+    """
     df = _panel(series=1, blocks=3)
-    enc = _encoder(by=()).fit(df)  # single series
+    past, block = df.iloc[:-BLOCK_ROWS], df.iloc[-BLOCK_ROWS:]
+    enc = _encoder(by=()).fit(past)  # single series
     trained = enc.transform(df)[enc.output_columns]
-    served = df.iloc[-BLOCK_ROWS:][["time", "T2m", "Gb(i)"]].copy()  # serving cols only
+    served = block[["time", "T2m", "Gb(i)"]].copy()  # serving cols only
     replayed = enc.transform(served)[enc.output_columns]
     pd.testing.assert_frame_equal(
         trained.iloc[-BLOCK_ROWS:].reset_index(drop=True),
@@ -126,22 +132,68 @@ def test_a_delivered_block_reproduces_training_exactly():
     )
 
 
-def test_trailing_resets_and_forward_is_bounded_at_the_block_edge():
+def test_trailing_reaches_back_and_forward_is_bounded_at_the_block_edge():
     df = _panel(series=1, blocks=2)
     enc = FutureWindowEncoder([], "T2m", "time", HORIZON, [
         {"family": "trailing", "window": 4, "stat": "count"},
         {"family": "forward", "window": 4, "stat": "count"},
-    ])
+    ]).fit(df)
     x = enc.transform(df)
-    # first row of the newest block has a trailing count of 1 (window reset), and
-    # the last row of a block has a forward count of 1 (nothing ahead in-block).
-    # newest block is block 0 = the final BLOCK_ROWS rows.
+    # Newest block is block 0 = the final BLOCK_ROWS rows. Its first row reads the
+    # three rows before the block: the covariate's past is known (0093). Its last
+    # row looks ahead at nothing: nothing past the block end is delivered.
     block0 = x.iloc[-BLOCK_ROWS:]
-    assert block0["T2m_roll4_count"].iloc[0] == 1
+    assert block0["T2m_roll4_count"].iloc[0] == 4
     assert block0["T2m_fwd4_count"].iloc[-1] == 1
-    # mid-block the windows are full
-    assert block0["T2m_roll4_count"].iloc[10] == 4
+    # Only the series' very first row has no past at all.
+    assert x["T2m_roll4_count"].iloc[0] == 1
     assert block0["T2m_fwd4_count"].iloc[10] == 4
+
+
+def test_a_served_block_alone_reads_the_stored_past():
+    df = _panel(series=2, blocks=2)
+    past = df.groupby("dataset_id").head(BLOCK_ROWS)
+    block = df.groupby("dataset_id").tail(BLOCK_ROWS)
+    enc = FutureWindowEncoder(["dataset_id"], "T2m", "time", HORIZON, [
+        {"family": "trailing", "window": 4, "stat": "mean"},
+    ]).fit(past)
+    served = enc.transform(block[["dataset_id", "time", "T2m"]])
+    for sid in (1, 2):
+        rows = df[df.dataset_id == sid]
+        first = rows.index[BLOCK_ROWS]
+        expected = rows.loc[first - 3:first, "T2m"].mean()  # three stored + itself
+        assert served.loc[first, "dataset_id_T2m_roll4_mean"] == pytest.approx(expected)
+
+
+def test_a_stored_past_that_is_not_adjacent_is_not_used():
+    """A gap between the stored tail and the delivered rows: start from the rows."""
+    df = _panel(series=1, blocks=3)
+    enc = FutureWindowEncoder([], "T2m", "time", HORIZON, [
+        {"family": "trailing", "window": 4, "stat": "count"},
+    ]).fit(df.iloc[:BLOCK_ROWS])
+    served = enc.transform(df.iloc[-BLOCK_ROWS:][["time", "T2m"]])
+    assert served["T2m_roll4_count"].iloc[0] == 1
+
+
+def test_an_encoder_written_before_lookback_still_resets():
+    """A bundle on disk keeps predicting what its model was trained against."""
+    df = _panel(series=1, blocks=2)
+    enc = FutureWindowEncoder([], "T2m", "time", HORIZON, [
+        {"family": "trailing", "window": 4, "stat": "count"},
+    ]).fit(df)
+    legacy = enc.to_dict()
+    for key in ("lookback", "tail", "spacing"):
+        legacy.pop(key)
+    x = FutureWindowEncoder.from_dict(legacy).transform(df)
+    assert x["T2m_roll4_count"].iloc[-BLOCK_ROWS] == 1
+
+
+def test_a_text_covariate_is_refused_rather_than_read_as_missing():
+    df = _panel(series=1, blocks=1)
+    df["holiday"] = np.where(np.arange(len(df)) % 50 == 0, "a", "0")
+    with pytest.raises(ValueError, match="need numbers"):
+        fit_future_covariate_window(df, [], "holiday", "time", HORIZON,
+                                    [{"family": "period", "unit": "block", "stat": "sum"}])
 
 
 def test_dst_duplicate_timestamps_keep_source_order():

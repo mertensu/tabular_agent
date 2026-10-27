@@ -707,3 +707,17 @@ def test_windows_are_frozen_per_fold_like_everything_else(panel, ordered_folds):
     # Later rows in the block are further past the freeze, so their windows hold
     # less — the same degradation `_latest_ago` reports as a growing age.
     assert counts.iloc[-1] < counts.iloc[0]
+
+
+def test_a_text_history_value_is_refused_rather_than_read_as_missing():
+    from tabular_agent.cv import make_folds
+    from tabular_agent.encoders import fit_history
+
+    days = pd.date_range("2017-01-01", periods=120)
+    df = pd.DataFrame({"store": "a", "date": days,
+                       "flag": np.where(np.arange(120) % 7 == 0, "x", "0"),
+                       "y": np.arange(120.0)})
+    folds = make_folds(df["y"], "regression", n_splits=3, order=df["date"].to_numpy())
+    with pytest.raises(ValueError, match="need numbers"):
+        fit_history(df, ["store"], "flag", "date", folds=folds, forecast_horizon=1.0,
+                    windows=[[28, "mean"]])
