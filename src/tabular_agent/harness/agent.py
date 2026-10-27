@@ -593,6 +593,10 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "
         look back across the block start into the covariate's own past, which the
         encoder stores when it is fitted. No target is read.
 
+        Build these windows before any filter_rows step, never after: a window
+        counts neighbouring rows, the filter only applies in training, and a
+        table that already went through a filter is refused here.
+
         Args:
             value: The future-known covariate to aggregate. Must be a column the
                 plan declared in `future_known`.

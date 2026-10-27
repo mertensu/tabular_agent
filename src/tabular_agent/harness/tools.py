@@ -1638,6 +1638,24 @@ def fit_future_covariate_window(
             "covariate all have to be serving columns."
         )
 
+    # A window describes a row's neighbours. A training-only filter has removed
+    # some of them here, but it does not run at prediction time, where the request
+    # holds every row: a window counted over these rows would mean something else
+    # in training than in production, and a column the filter selected on (keep
+    # open days, say) would be constant. Built before the filter, the window sees
+    # the same rows in both places, so that is the order this asks for.
+    if any(step.get("train_only") for step in _load_lineage(path, spec.task_type).steps):
+        raise ValueError(
+            f"{session.rel(path)} was built after a training-only row filter "
+            "(filter_rows), so some rows are missing from it. A window counts "
+            "neighbouring rows, and at prediction time the filter does not run: every "
+            "row of the forecast request is there. The same window would cover "
+            "different rows in training and in production. Build the future-covariate "
+            "windows on a table without a filter in its history (for example the work "
+            "table or the table before your filter), then apply filter_rows to the "
+            "result."
+        )
+
     train_features, encoder = _fit_future_covariate_window(
         df, by, value, order, spec.forecast_horizon, aggregates,
     )
