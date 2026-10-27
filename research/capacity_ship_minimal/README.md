@@ -310,3 +310,23 @@ calendar days in training (closed days skipped) than at prediction, where the fi
 does not run and the request holds every day. A training-only filter before a
 row-counted window step changes what the window means between training and
 prediction. Any dataset with a training-only filter and a window step can hit this.
+
+## Rossmann r4 (2026-10-27): after the window/filter ordering fix — not scored
+
+Same setup as r3, after future-covariate windows were refused on a filtered table.
+23 tables. The agent tried a filter on closed days once (t7, −0.0015) and dropped
+it; every window after that was built on unfiltered tables. `SchoolHoliday` windows
+on t14 gave the run's best table (t16, +0.0022, 0.1236 on validation). `Promo`
+windows: −0.0053, −0.0004. It tried `Open` (t21, −0.0030), but as 364- and 112-day
+means: a store's usual opening rate, not the short windows around a closure that
+were worth +0.0064 offline.
+
+**What shipped is t5** (target encodings, transforms, one sales history; 69
+features): no later step beat its source by more than the noise bar of 0090, so
+none of the calendar windows shipped. The evaluation on the test days and the
+Kaggle files were skipped, since the shipped table holds none of what r4 was run
+to test.
+
+Reading: the ordering fix changed what the agent built, but on this run the agent
+did not find the closure windows, and the gains it did find were too small for the
+validation rows to confirm.
