@@ -1,0 +1,36 @@
+{
+  "tag": "r1",
+  "run_evaluation_score": 0.5131538368359753,
+  "refit_run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/restaurant/refit_r1",
+  "refit_rows": 223349,
+  "refit_lgbm_es_rounds": 914,
+  "audit_scores": {
+    "shipped": 0.611162,
+    "shipped_uncut_reservations": 0.584207,
+    "refit_all_rows": 0.524899,
+    "refit_all_rows_lgbm_es": 0.524333
+  },
+  "vs_shipped": {
+    "shipped_uncut_reservations": {
+      "gain": 0.026955,
+      "ci95": [
+        0.02192,
+        0.03261
+      ]
+    },
+    "refit_all_rows": {
+      "gain": 0.086263,
+      "ci95": [
+        0.073797,
+        0.099395
+      ]
+    },
+    "refit_all_rows_lgbm_es": {
+      "gain": 0.086829,
+      "ci95": [
+        0.074689,
+        0.099867
+      ]
+    }
+  }
+}

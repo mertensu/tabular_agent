@@ -1,0 +1,107 @@
+{
+  "dataset": "restaurant",
+  "metric": "rmsle",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/restaurant/runs/20261027T075232Z-f59fc2c3",
+  "selected_table": "tables/t5.parquet",
+  "n_selected_features": 53,
+  "n_work_features": 9,
+  "n_work_rows": 179415,
+  "n_audit_rows": 28031,
+  "run_evaluation_score": 0.5131538368359753,
+  "audit_scores": {
+    "shipped": 0.611162,
+    "probe": 0.607012,
+    "lgbm_es": 0.599833,
+    "catboost_es": 0.608044,
+    "work_probe": 0.795679,
+    "work_lgbm_es": 0.795537,
+    "work_catboost_es": 0.795963
+  },
+  "vs_shipped": {
+    "probe": {
+      "gain": 0.00415,
+      "ci95": [
+        0.001292,
+        0.00704
+      ]
+    },
+    "lgbm_es": {
+      "gain": 0.011329,
+      "ci95": [
+        0.008301,
+        0.014261
+      ]
+    },
+    "catboost_es": {
+      "gain": 0.003118,
+      "ci95": [
+        0.000256,
+        0.006113
+      ]
+    },
+    "work_probe": {
+      "gain": -0.184517,
+      "ci95": [
+        -0.201599,
+        -0.167278
+      ]
+    },
+    "work_lgbm_es": {
+      "gain": -0.184376,
+      "ci95": [
+        -0.201534,
+        -0.167063
+      ]
+    },
+    "work_catboost_es": {
+      "gain": -0.184801,
+      "ci95": [
+        -0.202033,
+        -0.167544
+      ]
+    }
+  },
+  "feature_gain": {
+    "at_probe": {
+      "gain": 0.188667,
+      "ci95": [
+        0.17138,
+        0.206166
+      ]
+    },
+    "at_lgbm_es": {
+      "gain": 0.195704,
+      "ci95": [
+        0.17934,
+        0.212637
+      ]
+    },
+    "at_catboost_es": {
+      "gain": 0.187919,
+      "ci95": [
+        0.171171,
+        0.204989
+      ]
+    }
+  },
+  "fits": {
+    "probe_refit_max_abs_diff": 164.04180472584665,
+    "shipped_members": 7,
+    "lgbm_es": {
+      "rounds": 170,
+      "seconds": 3.6
+    },
+    "catboost_es": {
+      "rounds": 712,
+      "seconds": 10.6
+    },
+    "work_lgbm_es": {
+      "rounds": 552,
+      "seconds": 6.3
+    },
+    "work_catboost_es": {
+      "rounds": 2056,
+      "seconds": 12.3
+    }
+  }
+}

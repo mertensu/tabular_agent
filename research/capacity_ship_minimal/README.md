@@ -71,6 +71,8 @@ run would be needed before generalising beyond these two tables.
 
 - `runner.py` — carves the audit slice, runs `ta.Agent()`, writes `result_<ds>.json`.
 - `evaluate.py` — fits the arms, scores them, writes `arms_<ds>_<tag>.json`.
+- `restaurant_diag.py` — Restaurant only: reservation skew vs stale fit, writes
+  `diag_restaurant_<tag>.json`.
 - `rerank.py` — refits every table the run scored with each ruler, writes
   `rerank_<ds>_<tag>.json` (added after r1, for: does the probe pick the table a
   fitted model would?).
@@ -169,3 +171,38 @@ fitted model does, and on these four runs most of what it ranks are near-ties
 whose differences do not replicate. The model shipped mattered more than the
 table chosen. Two datasets, one agent model (DeepSeek v4.1 flash), two runs
 each.
+
+## Restaurant r1 (2026-10-27): `ForecastingAgent`, full profile
+
+Audit slice: the last 39 days (2017-03-15 to 04-22, 28,031 rows), with reservation
+columns rebuilt from bookings made before the cut, as serving rows see them. The
+agent saw 224,077 rows up to 2017-03-14; its run split those into 179,415 work and
+44,662 evaluation rows. Store-level bootstrap. rmsle, lower is better.
+
+| | raw table (9 numeric) | selected t5 (53 cols) |
+|---|---|---|
+| shipped blend (7 members) | – | 0.6112 |
+| probe | 0.7957 | 0.6070 |
+| lgbm_es | 0.7955 | 0.5998 |
+| catboost_es | 0.7960 | 0.6080 |
+
+- Features: +0.19 over the raw table under every model (the raw table has no store
+  id and no weekday, so this is a weak baseline).
+- The blend is worse than each single model: lgbm_es +0.011 [0.008, 0.014].
+- Rank agreement probe vs lgbm_es 0.89, vs catboost_es 0.66.
+- The run's own evaluation score was 0.513.
+
+**Where the 0.098 between 0.513 and 0.611 went** (`restaurant_diag.py`):
+
+| shipped bundle, scored on the audit days | rmsle | vs shipped |
+|---|---|---|
+| as shipped, reservations as of the cut | 0.6112 | |
+| same bundle, every booking counted | 0.5842 | +0.027 [0.022, 0.033] |
+| lineage and blend refitted on all 224k rows | 0.5249 | +0.086 [0.074, 0.099] |
+| same refit, lgbm_es | 0.5243 | +0.087 [0.075, 0.100] |
+
+The shipped models and their history encoders are fitted on the work rows only,
+which end about three months before the audit days. Refitting the same lineage on
+every row the run had closes most of the gap; what remains (0.525 vs 0.513) is
+about what the reservation skew and selection would explain. The skew costs 0.027.
+After the refit the blend and lgbm_es are equal.
