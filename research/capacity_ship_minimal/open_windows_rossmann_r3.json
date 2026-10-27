@@ -1,0 +1,67 @@
+{
+  "tag": "r3",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/rossmann/runs/20261027T104117Z-e7327a78",
+  "windows": [
+    {
+      "family": "trailing",
+      "window": 2,
+      "stat": "min"
+    },
+    {
+      "family": "trailing",
+      "window": 7,
+      "stat": "sum"
+    },
+    {
+      "family": "forward",
+      "window": 2,
+      "stat": "min"
+    },
+    {
+      "family": "forward",
+      "window": 7,
+      "stat": "sum"
+    }
+  ],
+  "n_train_rows": 798454,
+  "n_test_rows": 53520,
+  "test_scores": {
+    "shipped_blend": 0.121433,
+    "base": 0.126851,
+    "open": 0.120421,
+    "open_calendar": 0.114452
+  },
+  "vs_base": {
+    "open": {
+      "gain": 0.00643,
+      "ci95": [
+        0.005654,
+        0.007306
+      ]
+    },
+    "open_calendar": {
+      "gain": 0.012399,
+      "ci95": [
+        0.011233,
+        0.013619
+      ]
+    }
+  },
+  "fits": {
+    "base": {
+      "n_features": 77,
+      "rounds": 327,
+      "seconds": 14.9
+    },
+    "open": {
+      "n_features": 81,
+      "rounds": 479,
+      "seconds": 20.4
+    },
+    "open_calendar": {
+      "n_features": 89,
+      "rounds": 724,
+      "seconds": 28.9
+    }
+  }
+}

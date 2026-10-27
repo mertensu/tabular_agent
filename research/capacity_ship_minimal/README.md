@@ -268,3 +268,45 @@ Restaurant's previous best was 0.5498 private; median 0.5322, top 10% 0.5182.
 Rossmann median 0.1297: still about the median. On Restaurant the latest 39 days
 are worth 0.030 on Kaggle; on Rossmann the extra 48 days did not help (−0.001
 private, −0.009 public), unexplained.
+
+## Rossmann r3 (2026-10-27): known-in-advance calendar declared, after 0093
+
+Same 48 test days as r1. `Open`, `Promo`, `SchoolHoliday` declared known in advance;
+trailing windows reach back across the block start (0093). rmspe, lower is better.
+
+| | r1 | r3 |
+|---|---|---|
+| shipped (refit) | **0.1162** | 0.1214 |
+| same models, training rows only | 0.1237 | 0.1196 |
+| refit vs training-only | +0.0075 [0.0058, 0.0093] | **−0.0018 [−0.0027, −0.0008]** |
+| Kaggle private / public, refit on all rows | 0.1328 / 0.1289 | **0.1312** / 0.1306 |
+| Kaggle private / public, as shipped | 0.1319 / 0.1198 | 0.1377 / 0.1265 |
+
+- The agent built two future-window tables (`Promo` on t5: −0.015; `SchoolHoliday` on
+  t10: −0.001); neither shipped, and it never tried `Open`. All 7 blend members trained.
+- **The refit hurt here**, against 0092's registered prediction 1. Different table and
+  run from r1; one reading, not explained.
+
+### Offline: windows over the calendar on r3's table (`rossmann_open_windows.py`)
+
+Windows per store, computed on every row (closed days included) with the product's
+encoder: closed yesterday / tomorrow (2-row min), open days in the last / next 7.
+One LightGBM, early-stopping protocol of `evaluate.py`; store-level bootstrap.
+
+| | test days | vs r3's table |
+|---|---|---|
+| r3's table | 0.1269 | |
+| + `Open` windows | 0.1204 | +0.0064 [0.0057, 0.0073] |
+| + `Open`, `SchoolHoliday`, `Promo` windows | **0.1145** | +0.0124 [0.0112, 0.0136] |
+| r3 shipped blend | 0.1214 | |
+
+The calendar windows are worth more than anything else measured on Rossmann in this
+directory, and a single model with them beats every shipped blend.
+
+**Why the agent's windows failed, and a product gap.** r3's lineage starts with a
+training-only filter dropping closed days; its future-window tables came after it.
+Over the filtered rows `Open` is constant, and a window counted in rows covers more
+calendar days in training (closed days skipped) than at prediction, where the filter
+does not run and the request holds every day. A training-only filter before a
+row-counted window step changes what the window means between training and
+prediction. Any dataset with a training-only filter and a window step can hit this.
