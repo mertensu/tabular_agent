@@ -430,3 +430,15 @@ training rows only) on our own test days:
 - r4's and r7's 0090 picks stopped short, and on the test days they are the worst picks
   of the seven runs (0.160, 0.155).
 - These are probe scores, not the shipped refitted blend; seven runs from one dataset.
+
+**Kaggle (r11, private / public).** Both files use the shipped 7-model recipe and blend
+weights, refitted on all training rows (`submit.py rossmann r11 [t24]`):
+
+| table | validation probe | Kaggle private / public |
+|---|---|---|
+| t8 (shipped by 0090) | 0.1426 | **0.1316** / 0.1278 |
+| t24 (best probe score) | 0.1250 | 0.1318 / **0.1234** |
+
+The 0.018 validation lead of t24 is gone on the private board (−0.0002) and is
++0.0044 on the public one. Picking by the probe argmax alone would not have helped
+here. The alternative rule's pick (t20) was not submitted.
