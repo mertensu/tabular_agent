@@ -1,0 +1,10 @@
+{
+  "dataset": "rossmann",
+  "tag": "r1",
+  "model": "fireworks/deepseek-v4.1-flash-1017",
+  "git_commit": "b8c6b59c948104dd45db8ae93efc6b7ba360dc5d",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/rossmann/runs/20261027T091554Z-f737e662",
+  "elapsed_min": 18.6,
+  "identifier_columns": [],
+  "n_serving_columns": 16
+}

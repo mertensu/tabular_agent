@@ -1,0 +1,127 @@
+{
+  "dataset": "rossmann",
+  "metric": "rmspe",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/rossmann/runs/20261027T091554Z-f737e662",
+  "selected_table": "refit/t14.parquet",
+  "n_selected_features": 108,
+  "n_work_features": 11,
+  "n_work_rows": 798508,
+  "fitted_on": {
+    "fitted_on": "work+validation",
+    "n_rows": 798508,
+    "training_table": "refit/t14.parquet",
+    "refit_of": [
+      "e2",
+      "e3",
+      "e4",
+      "e5",
+      "e6"
+    ]
+  },
+  "n_audit_rows": 53520,
+  "run_evaluation_score": 0.123819612691494,
+  "audit_scores": {
+    "shipped": 0.116238,
+    "probe": 0.120498,
+    "shipped_work_fit": 0.123706,
+    "lgbm_es": 0.121784,
+    "catboost_es": 0.121284,
+    "work_probe": 0.211037,
+    "work_lgbm_es": 0.146922,
+    "work_catboost_es": 0.176052
+  },
+  "vs_shipped": {
+    "probe": {
+      "gain": -0.00426,
+      "ci95": [
+        -0.005122,
+        -0.003432
+      ]
+    },
+    "shipped_work_fit": {
+      "gain": -0.007468,
+      "ci95": [
+        -0.009335,
+        -0.005813
+      ]
+    },
+    "lgbm_es": {
+      "gain": -0.005546,
+      "ci95": [
+        -0.006432,
+        -0.004667
+      ]
+    },
+    "catboost_es": {
+      "gain": -0.005046,
+      "ci95": [
+        -0.005792,
+        -0.00432
+      ]
+    },
+    "work_probe": {
+      "gain": -0.094799,
+      "ci95": [
+        -0.100963,
+        -0.088616
+      ]
+    },
+    "work_lgbm_es": {
+      "gain": -0.030684,
+      "ci95": [
+        -0.034221,
+        -0.02743
+      ]
+    },
+    "work_catboost_es": {
+      "gain": -0.059814,
+      "ci95": [
+        -0.064612,
+        -0.05511
+      ]
+    }
+  },
+  "feature_gain": {
+    "at_probe": {
+      "gain": 0.090539,
+      "ci95": [
+        0.084353,
+        0.096774
+      ]
+    },
+    "at_lgbm_es": {
+      "gain": 0.025138,
+      "ci95": [
+        0.021913,
+        0.028582
+      ]
+    },
+    "at_catboost_es": {
+      "gain": 0.054768,
+      "ci95": [
+        0.050341,
+        0.05949
+      ]
+    }
+  },
+  "fits": {
+    "probe_refit_max_abs_diff": 4349.826949318569,
+    "shipped_members": 5,
+    "lgbm_es": {
+      "rounds": 361,
+      "seconds": 32.7
+    },
+    "catboost_es": {
+      "rounds": 851,
+      "seconds": 102.8
+    },
+    "work_lgbm_es": {
+      "rounds": 5000,
+      "seconds": 95.2
+    },
+    "work_catboost_es": {
+      "rounds": 5000,
+      "seconds": 247.0
+    }
+  }
+}

@@ -2,6 +2,8 @@
 
     uv run python research/capacity_ship_minimal/runner.py house [tag]
     uv run python research/capacity_ship_minimal/runner.py porto [tag]
+    uv run python research/capacity_ship_minimal/runner.py restaurant [tag]
+    uv run python research/capacity_ship_minimal/runner.py rossmann [tag]
 
 ``tag`` (default r1) names the repeat; every repeat shares one audit slice.
 
@@ -71,10 +73,36 @@ DATASETS = {
         "group": "air_store_id",
         "audit_days": 39,
         "future_known": ["holiday_flg"],
+        "prep": "prep_restaurant",
+        "identifiers": "accept",
         "prompt": (
             "Build the best model you can for this dataset of daily restaurant "
             "visitor counts. The target is visitors. Work until you stop making "
             "progress, then finalize."
+        ),
+    },
+    "rossmann": {
+        # Forecasting like Restaurant: the latest 48 days sealed (the length of the
+        # competition's test block). Agent settings as in the earlier Rossmann
+        # ForecastingAgent repeats (research/rossmann_forecasting_agent/), so the
+        # reading is comparable to them; no future_known declared, as there.
+        "source": REPO / "rossmann_store_sales",
+        "target": "Sales",
+        "metric": "rmspe",
+        "forecast": True,
+        "split_on": "Date",
+        "group": "Store",
+        "audit_days": 48,
+        "future_known": [],
+        "prep": "prep_rossmann",
+        "identifiers": "reject",
+        "forecast_horizon": 48.0,
+        "agent": {"val_fraction": 0.05, "fit_time_budget_s": 20 * 60},
+        "prompt": (
+            "Build the best safe, replayable model you can for this daily store-sales "
+            "dataset. The target is Sales. The unseen competition block spans 48 days "
+            "and no Sales values are revealed while it is forecast. Work until further "
+            "feature ideas stop producing real progress, then finalize the run."
         ),
     },
     "porto": {
@@ -89,6 +117,16 @@ DATASETS = {
             "then finalize."
         ),
     },
+}
+
+
+#: Per-repeat changes to a dataset's setup, so one repeat differs from another in
+#: exactly the named way. Rossmann r2: the calendar columns the competition's test
+#: file gives for the whole forecast block, declared known in advance (r1 declared
+#: none). StateHoliday is left out: it is text ('0', 'a', 'b', 'c'), and the
+#: future-window tool reads values as numbers, so its holidays would read as missing.
+TAG_OVERRIDES = {
+    ("rossmann", "r2"): {"future_known": ["Open", "Promo", "SchoolHoliday"]},
 }
 
 
@@ -135,10 +173,11 @@ def _carve_forecast(cfg: dict, files: Path, audit_path: Path) -> None:
     when = train[cfg["split_on"]]
     cut = when.max().normalize() - pd.Timedelta(days=cfg["audit_days"] - 1)
     work, audit = train[when < cut], train[when >= cut].copy()
-    rebuilt = _reservations_as_of(cut)
-    cols = [c for c in rebuilt.columns if c not in ("air_store_id", "visit_date")]
-    audit = audit.drop(columns=cols).merge(
-        rebuilt, on=["air_store_id", "visit_date"], how="left")[train.columns]
+    if cfg["prep"] == "prep_restaurant":
+        rebuilt = _reservations_as_of(cut)
+        cols = [c for c in rebuilt.columns if c not in ("air_store_id", "visit_date")]
+        audit = audit.drop(columns=cols).merge(
+            rebuilt, on=["air_store_id", "visit_date"], how="left")[train.columns]
     work.to_parquet(files / "train.parquet", index=False)
     test = pd.read_parquet(cfg["source"] / "test_joined.parquet").head(5)
     test.to_parquet(files / "test.parquet", index=False)
@@ -172,13 +211,14 @@ def carve(name: str) -> Path:
 
 
 def main(name: str, tag: str = "r1") -> int:
-    cfg = DATASETS[name]
+    cfg = {**DATASETS[name], **TAG_OVERRIDES.get((name, tag), {})}
     files = carve(name)
     # holdout_fraction=None: the audit slice carved above is this experiment's
     # sealed rows, and r1 ran before the product sealed one of its own.
     forecast = cfg.get("forecast", False)
     cls = ta.ForecastingAgent if forecast else ta.Agent
-    agent = cls(model=agent_model(), run_root=OUT / name / "runs", holdout_fraction=None)
+    agent = cls(model=agent_model(), run_root=OUT / name / "runs", holdout_fraction=None,
+                **cfg.get("agent", {}))
     plan = agent.inspect(files)
     plan.target = cfg["target"]
     plan.metric = cfg["metric"]
@@ -187,14 +227,18 @@ def main(name: str, tag: str = "r1") -> int:
     # Only columns the training table has: a serving file's own row id is not one.
     train_cols = set(plan.tables[plan.training_table]["columns"])
     plan.serving_columns = [c for c in (plan.proposed_serving_columns or []) if c in train_cols]
-    plan.accept_identifier_proposals()
+    if cfg.get("identifiers", "accept") == "accept":
+        plan.accept_identifier_proposals()
+    else:
+        plan.reject_identifier_proposals()
     if forecast:
-        sys.path.insert(0, str(REPO / "scripts"))
-        from prep_restaurant import ABOUT, COLUMN_NOTES, FORECAST_HORIZON
+        import importlib
 
-        plan.notes, plan.column_notes = ABOUT, COLUMN_NOTES
+        sys.path.insert(0, str(REPO / "scripts"))
+        prep = importlib.import_module(cfg["prep"])
+        plan.notes, plan.column_notes = prep.ABOUT, prep.COLUMN_NOTES
         plan.split_on = cfg["split_on"]
-        plan.forecast_horizon = FORECAST_HORIZON
+        plan.forecast_horizon = cfg.get("forecast_horizon", getattr(prep, "FORECAST_HORIZON", None))
         plan.future_known = cfg["future_known"]
     else:
         plan.split_on = False
@@ -207,10 +251,13 @@ def main(name: str, tag: str = "r1") -> int:
         "dataset": name,
         "tag": tag,
         "model": MODEL,
+        "git_commit": __import__("subprocess").check_output(
+            ["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip(),
         "run_dir": str(run.run_dir),
         "elapsed_min": round((time.time() - started) / 60, 2),
         "identifier_columns": plan.identifier_columns,
         "n_serving_columns": len(plan.serving_columns),
+        "future_known": list(plan.future_known or []),
     }
     (HERE / f"result_{name}_{tag}.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2), flush=True)

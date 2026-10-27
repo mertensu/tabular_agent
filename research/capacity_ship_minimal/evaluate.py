@@ -17,8 +17,11 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
+import joblib
+
 from tabular_agent.api import Run
-from tabular_agent.harness.tools import _feature_frame
+from tabular_agent.harness.tools import _feature_frame, _load_lineage
+from tabular_agent.pipeline import predict_bundle
 from tabular_agent.metrics import compute_metric, greater_is_better
 from tabular_agent.probe import default_target_transform, fit_probe, probe_predict
 from tabular_agent.target import apply_target, invert_target
@@ -93,6 +96,37 @@ def capacity_arm(make, X, y, Xa, binary, transform, order=None):
     return np.asarray(preds, dtype=float), rounds, round(time.monotonic() - started, 1)
 
 
+def refitted(run: Run) -> bool:
+    """Whether the bundle was refitted on work + evaluation rows before shipping (0092)."""
+    return (run.bundle._bundle.get("fitted_on") or {}).get("fitted_on") == "work+validation"
+
+
+def fitted_rows(run: Run) -> pd.DataFrame:
+    """The raw rows the shipped bundle was fitted on: work, plus evaluation after 0092."""
+    root = Path(run.run_dir) / "data"
+    work = pd.read_parquet(root / "work.parquet")
+    if not refitted(run):
+        return work
+    return pd.concat([work, pd.read_parquet(root / "val.parquet")], ignore_index=True)
+
+
+def work_fit_predict(run: Run, raw: pd.DataFrame) -> np.ndarray | None:
+    """What the bundle would predict had it shipped its work-only fits (pre-0092)."""
+    if not refitted(run):
+        return None
+    b = run.bundle._bundle
+    root = Path(run.run_dir)
+    name = Path(b["training_table"]).name
+    source = root / "tables" / name
+    if not source.exists():
+        source = root / "data" / name
+    models = [joblib.load(root / "experiments" / e / "final_model.joblib")
+              for e in b["fitted_on"]["refit_of"]]
+    work_bundle = {**b, "pipeline": _load_lineage(str(source), b["task_type"]),
+                   "models": models}
+    return np.asarray(predict_bundle(work_bundle, run.bundle._prepare(raw)), dtype=float)
+
+
 def score(metric, y, p):
     if metric == "rmsle":
         p = np.clip(p, 0, None)
@@ -143,8 +177,14 @@ def main(name: str, tag: str = "r1") -> int:
     X_sel, y_sel = selected.drop(columns=[target]), selected[target]
     Xa_sel = run.bundle.feature_table(audit.drop(columns=[target]))[list(X_sel.columns)]
 
-    work = pd.read_parquet(Path(run.run_dir) / "data" / "work.parquet")
+    # The rows the shipped bundle was fitted on, so the raw-table arms see the same.
+    work = fitted_rows(run)
     X_work, _ = _feature_frame(work, target)
+    # Only columns a served row will have: a raw column the run's serving contract
+    # excludes (Rossmann's Customers) is a leak no shipped model could use.
+    serving = run.bundle._plan.get("serving_columns")
+    if serving:
+        X_work = X_work[[c for c in X_work.columns if c in serving]]
     y_work = work[target]
     Xa_work = audit[list(X_work.columns)]
 
@@ -170,6 +210,9 @@ def main(name: str, tag: str = "r1") -> int:
     if forecast:
         preds["probe"] = refit_preds
         meta["shipped_members"] = len(run.bundle._bundle.get("models") or [])
+    work_fit = work_fit_predict(run, audit.drop(columns=[target]))
+    if work_fit is not None:
+        preds["shipped_work_fit"] = work_fit[:, -1] if work_fit.ndim == 2 else work_fit
 
     for arm, make in (("lgbm_es", _lgbm(binary)), ("catboost_es", _catboost(binary))):
         preds[arm], rounds, secs = capacity_arm(make, X_sel, y_sel, Xa_sel, binary, transform,
@@ -192,6 +235,7 @@ def main(name: str, tag: str = "r1") -> int:
         "n_selected_features": int(X_sel.shape[1]),
         "n_work_features": int(X_work.shape[1]),
         "n_work_rows": int(len(X_sel)),
+        "fitted_on": run.bundle._bundle.get("fitted_on"),
         "n_audit_rows": int(len(audit)),
         "run_evaluation_score": (run.journal.get("best") or {}).get("val_score"),
         "audit_scores": {arm: round(score(metric, y_audit, p), 6) for arm, p in preds.items()},

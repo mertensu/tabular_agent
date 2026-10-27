@@ -1,0 +1,10 @@
+{
+  "dataset": "restaurant",
+  "tag": "r2",
+  "model": "fireworks/deepseek-v4.1-flash-1017",
+  "git_commit": "b8c6b59c948104dd45db8ae93efc6b7ba360dc5d",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/restaurant/runs/20261027T090141Z-80eb236b",
+  "elapsed_min": 9.73,
+  "identifier_columns": [],
+  "n_serving_columns": 16
+}

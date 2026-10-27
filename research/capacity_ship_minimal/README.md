@@ -206,3 +206,65 @@ which end about three months before the audit days. Refitting the same lineage o
 every row the run had closes most of the gap; what remains (0.525 vs 0.513) is
 about what the reservation skew and selection would explain. The skew costs 0.027.
 After the refit the blend and lgbm_es are equal.
+
+## Restaurant r2 (2026-10-27): the refit inside the product (0092)
+
+Same 39 test days, same agent model, a fresh run. This run's finalize refitted the
+selected table's features (6 steps) and all 7 blend members on its 224,077
+training + validation rows before shipping; nothing was re-chosen. rmsle, lower is
+better; store-level bootstrap.
+
+| | r1 | r2 |
+|---|---|---|
+| what shipped | 0.6112 (training rows only) | **0.5225** (refit) |
+| the same blend, training rows only | 0.6112 | 0.5678 |
+| r1's offline refit replay (`restaurant_diag.py`) | 0.5249 | |
+| the run's own validation score | 0.513 | 0.510 |
+
+- Refit vs the same blend fitted on training rows only: **+0.045 [0.031, 0.062]**.
+  Smaller than r1's offline +0.086, on a different table (24 tables, t21 selected).
+- What ships now lands 0.012 from the run's own validation score, where r1 was
+  0.098 away: the rest of r1's gap was stale fits, not selection.
+- Capacity on the refit table: lgbm_es +0.0015 [−0.006, 0.014], catboost_es
+  +0.0038 [−0.003, 0.016] against the shipped blend; neither clear of noise. After
+  the refit, the blend, the probe and the capacity fits are level.
+- Kaggle files: `_runs/capacity_ship_minimal/restaurant/submission_r2_all_rows.csv`
+  (refitted on every training-file row, including our test days, after they were
+  scored; the one to submit) and `submission_r2_shipped.csv` (the bundle as shipped).
+
+## Rossmann r1 (2026-10-27): `ForecastingAgent`, refit inside the product
+
+Test days: the last 48 of the training file (2015-06-14 to 07-31, 53,520 rows);
+the agent saw everything before. Settings as in `research/rossmann_forecasting_agent/`
+(validation 5%, 20-minute fit budget). Selected t14 (108 features, 8 steps incl. a
+training-only filter), refitted on 798,508 training + validation rows. rmspe,
+lower is better; store-level bootstrap.
+
+| | test days |
+|---|---|
+| what shipped (refit, 5-member blend) | **0.1162** |
+| the same blend, training rows only | 0.1237 |
+| probe / lgbm_es / catboost_es on the refit table | 0.1205 / 0.1218 / 0.1213 |
+| raw columns, best arm (lgbm_es) | 0.1469 |
+| the run's own validation score | 0.1238 |
+
+- Refit vs training-only: **+0.0075 [0.0058, 0.0093]**.
+- The blend beats every single model by 0.004–0.006 (all intervals exclude zero).
+- Features over raw columns: +0.025 at lgbm_es, +0.091 at the probe.
+- Both xgb configurations dropped out of the blend: an agent transform produces
+  `inf`, which xgboost refuses. The reason is not recorded in the journal or report.
+- An earlier version of `evaluate.py` let `Customers` into the raw-column arms (it
+  is not a serving column); they read 0.076 then. Fixed: raw arms use serving
+  columns only. No other dataset in this directory had such a column.
+
+## Kaggle (2026-10-27), private / public
+
+| | Restaurant r2 | Rossmann r1 |
+|---|---|---|
+| refit on every training-file row (our test days included, after scoring) | **0.5181** / 0.4840 (~105/2150) | 0.1328 / 0.1289 (~1774/3300) |
+| bundle as shipped | 0.5481 / 0.5017 (~1413/2150) | **0.1319** / 0.1198 (~1728/3300) |
+
+Restaurant's previous best was 0.5498 private; median 0.5322, top 10% 0.5182.
+Rossmann median 0.1297: still about the median. On Restaurant the latest 39 days
+are worth 0.030 on Kaggle; on Rossmann the extra 48 days did not help (−0.001
+private, −0.009 public), unexplained.
