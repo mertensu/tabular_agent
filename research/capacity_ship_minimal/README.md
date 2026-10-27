@@ -442,3 +442,17 @@ weights, refitted on all training rows (`submit.py rossmann r11 [t24]`):
 The 0.018 validation lead of t24 is gone on the private board (−0.0002) and is
 +0.0044 on the public one. Picking by the probe argmax alone would not have helped
 here. The alternative rule's pick (t20) was not submitted.
+
+**Kaggle, the alternative rule's picks (2026-10-27, private / public).** Same recipe for
+each pair: the shipped 7-model blend and weights, refitted on all training rows
+(`submit.py rossmann <tag> [table]`).
+
+| run | 0090 ships | alternative ships | private | public | offline test gain |
+|---|---|---|---|---|---|
+| r4 | t5: 0.1410 / 0.1201 | t16: **0.1290** / **0.1140** | +0.0120 | +0.0061 | +0.0224 |
+| r7 | t10: 0.1364 / 0.1249 | t18: **0.1321** / **0.1230** | +0.0042 | +0.0019 | +0.0144 |
+
+Both runs where the offline check was clearest carry over to Kaggle in the same
+direction, at about half the size. r4's t16 (0.1290 private) is the best Rossmann
+submission of this experiment. Not yet scored: r10 (offline −0.0034) and r11's t20
+(+0.0024).
