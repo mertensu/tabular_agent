@@ -11,6 +11,8 @@ from pathlib import Path
 import sys
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -31,12 +33,21 @@ SEED = 0
 N_BOOT = 2000
 
 
-def _stopped_rounds(make, X, y_fit, binary):
-    """Rounds at which a fit on 85% of the work rows stopped improving on the other 15%."""
-    tr, va = train_test_split(
-        np.arange(len(X)), test_size=STOP_FRACTION, random_state=SEED,
-        stratify=y_fit if binary else None,
-    )
+def _stopped_rounds(make, X, y_fit, binary, order=None):
+    """Rounds at which a fit on 85% of the work rows stopped improving on the other 15%.
+
+    With ``order`` (a time column) the 15% are the latest rows, as the run's own
+    split is, so the stopping slice is the future of what the fit trains on.
+    """
+    if order is not None:
+        ranked = np.argsort(np.asarray(order), kind="stable")
+        n_stop = int(round(len(ranked) * STOP_FRACTION))
+        tr, va = ranked[:-n_stop], ranked[-n_stop:]
+    else:
+        tr, va = train_test_split(
+            np.arange(len(X)), test_size=STOP_FRACTION, random_state=SEED,
+            stratify=y_fit if binary else None,
+        )
     model = make(MAX_ROUNDS)
     model.fit(X.iloc[tr], y_fit.iloc[tr], **_eval_kwargs(model, X.iloc[va], y_fit.iloc[va]))
     import lightgbm as lgb
@@ -70,11 +81,11 @@ def _catboost(binary):
                          verbose=False, allow_writing_files=False)
 
 
-def capacity_arm(make, X, y, Xa, binary, transform):
+def capacity_arm(make, X, y, Xa, binary, transform, order=None):
     """Early-stopped rounds on an inner slice, then a refit on every work row."""
     y_fit = pd.Series(apply_target(transform, y) if transform != "none" else y)
     started = time.monotonic()
-    rounds = _stopped_rounds(make, X, y_fit, binary)
+    rounds = _stopped_rounds(make, X, y_fit, binary, order)
     model = make(rounds).fit(X, y_fit)
     preds = model.predict_proba(Xa)[:, 1] if binary else model.predict(Xa)
     if transform != "none":
@@ -88,14 +99,24 @@ def score(metric, y, p):
     return compute_metric(metric, y, p)
 
 
-def paired(metric, y, base, other):
-    """Bootstrap the difference other - base, signed so positive is better."""
+def paired(metric, y, base, other, groups=None):
+    """Bootstrap the difference other - base, signed so positive is better.
+
+    With ``groups`` whole groups are resampled (a store's days are not independent
+    draws), otherwise single rows.
+    """
     rng = np.random.default_rng(SEED)
     sign = 1 if greater_is_better(metric) else -1
     y, base, other = map(np.asarray, (y, base, other))
+    if groups is not None:
+        codes, uniq = pd.factorize(np.asarray(groups))
+        members = [np.flatnonzero(codes == g) for g in range(len(uniq))]
     diffs = []
     for _ in range(N_BOOT):
-        i = rng.integers(0, len(y), len(y))
+        if groups is None:
+            i = rng.integers(0, len(y), len(y))
+        else:
+            i = np.concatenate([members[g] for g in rng.integers(0, len(members), len(members))])
         if len(np.unique(y[i])) < 2 and metric == "auc":
             continue
         diffs.append(sign * (score(metric, y[i], other[i]) - score(metric, y[i], base[i])))
@@ -105,6 +126,10 @@ def paired(metric, y, base, other):
 
 
 def main(name: str, tag: str = "r1") -> int:
+    from runner import DATASETS
+
+    cfg = DATASETS[name]
+    forecast = cfg.get("forecast", False)
     result = json.loads((HERE / f"result_{name}_{tag}.json").read_text())
     run = Run(result["run_dir"])
     task = run.journal["task"]
@@ -123,27 +148,40 @@ def main(name: str, tag: str = "r1") -> int:
     y_work = work[target]
     Xa_work = audit[list(X_work.columns)]
 
+    # Ordered runs stop early on their latest rows; grouped audits resample groups.
+    sel_table = pd.read_parquet(Path(run.run_dir) / run.bundle._bundle["training_table"])
+    order_sel = sel_table[cfg["split_on"]] if forecast else None
+    order_work = work[cfg["split_on"]] if forecast else None
+    groups = audit[cfg["group"]] if cfg.get("group") else None
+
     shipped = np.asarray(run.bundle.predict(audit.drop(columns=[target])), dtype=float)
     if shipped.ndim == 2:
         shipped = shipped[:, -1]
 
-    preds, meta = {"probe": shipped}, {}
-    # The probe refitted here must reproduce what shipped, or the comparison is off.
+    # The minimal profile ships the probe; the full profile ships a blend, and the
+    # probe is then one more arm. Either way every comparison is against what shipped.
+    base = "shipped" if forecast else "probe"
+    preds, meta = {base: shipped}, {}
     refit = fit_probe(X_sel, y_sel, task_type, metric, transform)
     refit_preds = np.asarray(probe_predict(refit, Xa_sel, task_type), dtype=float)
     if refit_preds.ndim == 2:
         refit_preds = refit_preds[:, -1]
     meta["probe_refit_max_abs_diff"] = float(np.max(np.abs(refit_preds - shipped)))
+    if forecast:
+        preds["probe"] = refit_preds
+        meta["shipped_members"] = len(run.bundle._bundle.get("models") or [])
 
     for arm, make in (("lgbm_es", _lgbm(binary)), ("catboost_es", _catboost(binary))):
-        preds[arm], rounds, secs = capacity_arm(make, X_sel, y_sel, Xa_sel, binary, transform)
+        preds[arm], rounds, secs = capacity_arm(make, X_sel, y_sel, Xa_sel, binary, transform,
+                                                order_sel)
         meta[arm] = {"rounds": rounds, "seconds": secs}
 
     work_probe = fit_probe(X_work, y_work, task_type, metric, transform)
     wp = np.asarray(probe_predict(work_probe, Xa_work, task_type), dtype=float)
     preds["work_probe"] = wp[:, -1] if wp.ndim == 2 else wp
     for arm, make in (("work_lgbm_es", _lgbm(binary)), ("work_catboost_es", _catboost(binary))):
-        preds[arm], rounds, secs = capacity_arm(make, X_work, y_work, Xa_work, binary, transform)
+        preds[arm], rounds, secs = capacity_arm(make, X_work, y_work, Xa_work, binary, transform,
+                                                order_work)
         meta[arm] = {"rounds": rounds, "seconds": secs}
 
     out = {
@@ -157,13 +195,14 @@ def main(name: str, tag: str = "r1") -> int:
         "n_audit_rows": int(len(audit)),
         "run_evaluation_score": (run.journal.get("best") or {}).get("val_score"),
         "audit_scores": {arm: round(score(metric, y_audit, p), 6) for arm, p in preds.items()},
-        "vs_probe": {arm: paired(metric, y_audit, preds["probe"], p)
-                     for arm, p in preds.items() if arm != "probe"},
+        f"vs_{base}": {arm: paired(metric, y_audit, preds[base], p, groups)
+                       for arm, p in preds.items() if arm != base},
         "feature_gain": {
-            "at_probe": paired(metric, y_audit, preds["work_probe"], preds["probe"]),
-            "at_lgbm_es": paired(metric, y_audit, preds["work_lgbm_es"], preds["lgbm_es"]),
+            "at_probe": paired(metric, y_audit, preds["work_probe"], preds["probe"], groups),
+            "at_lgbm_es": paired(metric, y_audit, preds["work_lgbm_es"], preds["lgbm_es"],
+                                 groups),
             "at_catboost_es": paired(metric, y_audit, preds["work_catboost_es"],
-                                     preds["catboost_es"]),
+                                     preds["catboost_es"], groups),
         },
         "fits": meta,
     }

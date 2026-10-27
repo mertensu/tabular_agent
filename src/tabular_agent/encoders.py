@@ -403,6 +403,17 @@ class GroupStatsEncoder:
                 f"value column {self.value!r} is not in this frame; columns are "
                 f"{list(df.columns)}"
             )
+        column = df[self.value]
+        if self.stat not in ("count", "nunique") and not (
+            pd.api.types.is_numeric_dtype(column) or pd.api.types.is_bool_dtype(column)
+        ):
+            # Raised as ValueError so the agent gets a correction, not a crashed run.
+            raise ValueError(
+                f"value column {self.value!r} has dtype {column.dtype}, and "
+                f"stat={self.stat!r} needs numbers. Use 'count' or 'nunique', or "
+                "derive a numeric column first (for a date, e.g. days since a fixed "
+                "reference day) with transform_features."
+            )
         stats = df.groupby(self._keys(df).to_numpy(), sort=False)[self.value].agg(self.stat)
         # NaN groups are dropped rather than stored: a one-row group has no
         # standard deviation, and leaving it out means the lookup falls through

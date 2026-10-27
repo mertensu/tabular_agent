@@ -61,6 +61,22 @@ DATASETS = {
             "producing real progress, then finalize."
         ),
     },
+    "restaurant": {
+        # Forecasting: ForecastingAgent, full profile, the latest 39 days sealed.
+        "source": REPO / "restaurant_visitor",
+        "target": "visitors",
+        "metric": "rmsle",
+        "forecast": True,
+        "split_on": "visit_date",
+        "group": "air_store_id",
+        "audit_days": 39,
+        "future_known": ["holiday_flg"],
+        "prompt": (
+            "Build the best model you can for this dataset of daily restaurant "
+            "visitor counts. The target is visitors. Work until you stop making "
+            "progress, then finalize."
+        ),
+    },
     "porto": {
         "source": REPO / "seguro_driver_prediction",
         "target": "target",
@@ -91,6 +107,44 @@ def agent_model():
     )
 
 
+def _reservations_as_of(cut: pd.Timestamp) -> pd.DataFrame:
+    """The prep script's reservation columns, counting only bookings made before ``cut``.
+
+    The competition's forecast rows only ever see bookings made before the forecast
+    was issued; training rows see every booking. Rebuilding the audit rows this way
+    makes them look like serving rows rather than like more training rows.
+    """
+    src = REPO / "restaurant_visitor"
+    parts = []
+    for prefix in ("air", "hpg"):
+        r = pd.read_parquet(src / f"{prefix}_reserve_stream.parquet")
+        r = r[r["reserve_datetime"] < cut].copy()
+        r["visit_date"] = r["visit_datetime"].dt.normalize()
+        r["lead_days"] = (r["visit_date"] - r["reserve_datetime"].dt.normalize()).dt.days
+        parts.append(r.groupby(["air_store_id", "visit_date"]).agg(**{
+            f"{prefix}_reserve_visitors": ("reserve_visitors", "sum"),
+            f"{prefix}_reserve_count": ("reserve_visitors", "size"),
+            f"{prefix}_reserve_lead_days": ("lead_days", "mean"),
+        }))
+    return parts[0].join(parts[1], how="outer").reset_index()
+
+
+def _carve_forecast(cfg: dict, files: Path, audit_path: Path) -> None:
+    """Agent gets everything before the last ``audit_days``; the audit slice is those days."""
+    train = pd.read_parquet(cfg["source"] / "train_joined.parquet")
+    when = train[cfg["split_on"]]
+    cut = when.max().normalize() - pd.Timedelta(days=cfg["audit_days"] - 1)
+    work, audit = train[when < cut], train[when >= cut].copy()
+    rebuilt = _reservations_as_of(cut)
+    cols = [c for c in rebuilt.columns if c not in ("air_store_id", "visit_date")]
+    audit = audit.drop(columns=cols).merge(
+        rebuilt, on=["air_store_id", "visit_date"], how="left")[train.columns]
+    work.to_parquet(files / "train.parquet", index=False)
+    test = pd.read_parquet(cfg["source"] / "test_joined.parquet").head(5)
+    test.to_parquet(files / "test.parquet", index=False)
+    audit.to_parquet(audit_path, index=False)
+
+
 def carve(name: str) -> Path:
     """Write the agent's folder (80% of train + the serving schema) and the audit slice."""
     cfg = DATASETS[name]
@@ -100,6 +154,9 @@ def carve(name: str) -> Path:
     if audit_path.exists():
         return files
     files.mkdir(parents=True, exist_ok=True)
+    if cfg.get("forecast"):
+        _carve_forecast(cfg, files, audit_path)
+        return files
     train = pd.read_csv(cfg["source"] / "train.csv", low_memory=False)
     work, audit = train_test_split(
         train, test_size=AUDIT_FRACTION, random_state=AUDIT_SEED,
@@ -119,16 +176,28 @@ def main(name: str, tag: str = "r1") -> int:
     files = carve(name)
     # holdout_fraction=None: the audit slice carved above is this experiment's
     # sealed rows, and r1 ran before the product sealed one of its own.
-    agent = ta.Agent(model=agent_model(), run_root=OUT / name / "runs",
-                     holdout_fraction=None)
+    forecast = cfg.get("forecast", False)
+    cls = ta.ForecastingAgent if forecast else ta.Agent
+    agent = cls(model=agent_model(), run_root=OUT / name / "runs", holdout_fraction=None)
     plan = agent.inspect(files)
     plan.target = cfg["target"]
     plan.metric = cfg["metric"]
     if name == "porto":
         plan.notes = PORTO_ABOUT
-    plan.serving_columns = list(plan.proposed_serving_columns or [])
+    # Only columns the training table has: a serving file's own row id is not one.
+    train_cols = set(plan.tables[plan.training_table]["columns"])
+    plan.serving_columns = [c for c in (plan.proposed_serving_columns or []) if c in train_cols]
     plan.accept_identifier_proposals()
-    plan.split_on = False
+    if forecast:
+        sys.path.insert(0, str(REPO / "scripts"))
+        from prep_restaurant import ABOUT, COLUMN_NOTES, FORECAST_HORIZON
+
+        plan.notes, plan.column_notes = ABOUT, COLUMN_NOTES
+        plan.split_on = cfg["split_on"]
+        plan.forecast_horizon = FORECAST_HORIZON
+        plan.future_known = cfg["future_known"]
+    else:
+        plan.split_on = False
     plan.reject_joins()
     plan.validate()
 

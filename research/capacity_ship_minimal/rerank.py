@@ -35,6 +35,10 @@ def _last_column(p):
 
 
 def main(name: str, tag: str = "r1") -> int:
+    from runner import DATASETS
+
+    cfg = DATASETS[name]
+    split_on = cfg.get("split_on") if cfg.get("forecast") else None
     result = json.loads((HERE / f"result_{name}_{tag}.json").read_text())
     run = Run(result["run_dir"])
     j = run.journal
@@ -68,7 +72,8 @@ def main(name: str, tag: str = "r1") -> int:
         for arm, make in (("lgbm_es", _lgbm(binary)), ("catboost_es", _catboost(binary))):
             # One fit, predicting both row sets: stack them and split the output.
             both = pd.concat([Xv, Xa], ignore_index=True)
-            preds, _, _ = capacity_arm(make, X, y, both, binary, transform)
+            preds, _, _ = capacity_arm(make, X, y, both, binary, transform,
+                                       df[split_on] if split_on else None)
             row[f"{arm}_val"] = score(metric, val[target], preds[: len(Xv)])
             row[f"{arm}_audit"] = score(metric, audit[target], preds[len(Xv):])
         rows.append({k: (round(v, 6) if isinstance(v, float) else v) for k, v in row.items()})

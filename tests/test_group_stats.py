@@ -177,3 +177,23 @@ def test_forward_chaining_leaves_the_first_block_without_a_value():
     oof, final = fit_group_stats(df, ["g"], "v", "mean", folds=folds)
 
     assert oof[final.output_column].isna().sum() > 0
+
+
+@pytest.mark.parametrize("stat", ["min", "mean"])
+def test_a_non_numeric_value_is_refused_with_a_correction(stat):
+    # A TypeError here ended a whole run; a ValueError reaches the agent as a retry.
+    df = pd.DataFrame({
+        "g": ["a", "a", "b"],
+        "day": pd.to_datetime(["2017-01-01", "2017-01-02", "2017-01-03"]),
+    })
+    with pytest.raises(ValueError, match="needs numbers"):
+        GroupStatsEncoder(["g"], "day", stat).fit(df)
+
+
+def test_count_of_a_non_numeric_value_is_still_allowed():
+    df = pd.DataFrame({
+        "g": ["a", "a", "b"],
+        "day": pd.to_datetime(["2017-01-01", "2017-01-02", "2017-01-03"]),
+    })
+    enc = GroupStatsEncoder(["g"], "day", "count").fit(df)
+    assert enc.mapping_ == {"a": 2.0, "b": 1.0}
