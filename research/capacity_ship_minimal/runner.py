@@ -137,6 +137,10 @@ TAG_OVERRIDES = {
     # over Open (short windows around a closed day) that r4's agent missed?
     ("rossmann", "r5"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
                          "model": "deepseek-v4-pro-0813@eu"},
+    # r5 was stopped. r6 repeats it after the agent's texts stopped telling it to
+    # aggregate future-known columns forward only.
+    ("rossmann", "r6"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
+                         "model": "deepseek-v4-pro-0813@eu"},
 }
 
 
