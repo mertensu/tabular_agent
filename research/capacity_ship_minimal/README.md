@@ -330,3 +330,25 @@ to test.
 Reading: the ordering fix changed what the agent built, but on this run the agent
 did not find the closure windows, and the gains it did find were too small for the
 validation rows to confirm.
+
+### Could r4's ruler have seen the closure windows? (`ruler_check.py`)
+
+The windows of `rossmann_open_windows.py`, judged the way r4 judges a table: the
+200-tree ruler fitted on r4's training rows, scored on its 48 validation days,
+compared with `compare_predictions` and 0090's selection rule.
+
+| added to | windows | gain on validation | block spread | passes 0090 |
+|---|---|---|---|---|
+| t5 (shipped) | `Open` | +0.0031 (5 of 5 blocks positive) | 0.0015 | yes |
+| t16 (best) | `Open` | +0.0035 (4 of 5) | 0.0038 | no, just under |
+| t5 | `Open` + `SchoolHoliday` + `Promo` | −0.0035 | 0.0106 | no |
+| t16 | `Open` + `SchoolHoliday` + `Promo` | −0.0017 | 0.0080 | no |
+
+- `Open` closure windows: the ruler sees about half their test-day gain, consistently;
+  on t5 they would have shipped. The agent's miss is its choice of window (it built
+  364/112-day means), not the harness.
+- The full calendar set: +0.0124 on the test days, a small loss with a wide spread on
+  the validation days. No agent could have shipped it. Not tested why; candidates are
+  season (the validation days hold little summer school holiday, the test days a lot)
+  and the ruler's fixed 200 trees (early stopping chose ~720 rounds for that set).
+  A fixed validation stretch can only judge features whose effect falls inside it.

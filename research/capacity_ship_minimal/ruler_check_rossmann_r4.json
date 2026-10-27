@@ -1,0 +1,93 @@
+{
+  "tag": "r4",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/rossmann/runs/20261027T113050Z-3ed3e483",
+  "n_val_rows": 47945,
+  "tables": {
+    "t16": {
+      "base_score": 0.123591,
+      "open": {
+        "score": 0.120125,
+        "interval": {
+          "gain": 0.003466,
+          "block_gains": [
+            0.007088,
+            -0.002212,
+            0.003255,
+            0.00809,
+            0.001379
+          ],
+          "block_sd": 0.003772,
+          "sign_stable": false,
+          "blocks_favouring_a": 4,
+          "n_blocks": 5,
+          "n_rows": 47945,
+          "mode": "ordered_blocks"
+        },
+        "would_be_selectable": false
+      },
+      "open_calendar": {
+        "score": 0.125314,
+        "interval": {
+          "gain": -0.001723,
+          "block_gains": [
+            0.007494,
+            -0.008269,
+            -0.012677,
+            -0.001589,
+            0.00684
+          ],
+          "block_sd": 0.008014,
+          "sign_stable": false,
+          "blocks_favouring_a": 2,
+          "n_blocks": 5,
+          "n_rows": 47945,
+          "mode": "ordered_blocks"
+        },
+        "would_be_selectable": false
+      }
+    },
+    "t5": {
+      "base_score": 0.130425,
+      "open": {
+        "score": 0.127363,
+        "interval": {
+          "gain": 0.003062,
+          "block_gains": [
+            0.005188,
+            0.000709,
+            0.003099,
+            0.004119,
+            0.002322
+          ],
+          "block_sd": 0.001531,
+          "sign_stable": true,
+          "blocks_favouring_a": 5,
+          "n_blocks": 5,
+          "n_rows": 47945,
+          "mode": "ordered_blocks"
+        },
+        "would_be_selectable": true
+      },
+      "open_calendar": {
+        "score": 0.133877,
+        "interval": {
+          "gain": -0.003452,
+          "block_gains": [
+            0.008331,
+            -0.006321,
+            -0.022192,
+            -0.000719,
+            0.004005
+          ],
+          "block_sd": 0.010595,
+          "sign_stable": false,
+          "blocks_favouring_a": 2,
+          "n_blocks": 5,
+          "n_rows": 47945,
+          "mode": "ordered_blocks"
+        },
+        "would_be_selectable": false
+      }
+    }
+  }
+}
