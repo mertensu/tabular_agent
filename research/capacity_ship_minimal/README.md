@@ -352,3 +352,25 @@ compared with `compare_predictions` and 0090's selection rule.
   season (the validation days hold little summer school holiday, the test days a lot)
   and the ruler's fixed 200 trees (early stopping chose ~720 rounds for that set).
   A fixed validation stretch can only judge features whose effect falls inside it.
+
+## Rossmann r5–r8 (2026-10-27): does the agent find the closure windows?
+
+All with `Open`, `Promo`, `SchoolHoliday` declared known in advance, same 48 test days.
+None was scored on the test days: none shipped a calendar window.
+
+| run | agent model | agent texts | calendar windows built | shipped |
+|---|---|---|---|---|
+| r5 (stopped) | deepseek-v4-pro | "aggregate them forward" in 4 places | `Promo`, `Open`, `SchoolHoliday`: forward only | – |
+| r6 (stopped) | deepseek-v4-pro | 3 of 4 pared back | `Promo`, `SchoolHoliday`: forward only | – |
+| r7 | deepseek-v4-pro | all neutral | none (filtered early; refusals not recorded yet) | t10 |
+| r8 | deepseek-v4-pro | all neutral, rejections recorded | `Promo` fwd 7/14/28 + block (+0.0001); `Open` fwd 14 + block (−0.046) | t13 |
+
+- The agent texts had steered forward (system instructions, run brief, tool
+  description, inspect_data note); all four now only name the columns and the tool.
+- r8's journal records its rejections: a sandbox timeout and history windows shorter
+  than the horizon. No window call was refused, so the ordering rule blocked nothing.
+- With neutral texts and nothing in the way, the model still built only forward
+  windows: the backward side (closed yesterday, reopened after a closure) was never
+  tried in any of these runs.
+- Unexplained: r8's two forward `Open` windows cost −0.046 on validation, far more
+  than an uninformative feature should. Not checked whether that is real or a bug.
