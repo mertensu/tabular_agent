@@ -141,6 +141,33 @@ def _unavailable_at_predict_time(session: RunSession, df: pd.DataFrame) -> list[
     ]
 
 
+def _not_producible_at_predict_time(
+    session: RunSession, path: str, columns: list[str]
+) -> list[str]:
+    """Which of ``columns`` the table at ``path`` cannot rebuild at prediction time.
+
+    A replay, for `_refuse_if_unservable`'s reason: most usable columns are
+    derived, and a derived column is in no serving schema. ``dow`` computed from a
+    date by a stored transform exists at prediction time because the transform
+    runs there; a name check against the serving columns refuses it all the same.
+    So the table's lineage is replayed over raw rows holding only the columns that
+    will exist, and a column counts as unavailable only if it does not come out.
+    """
+    if session.serving_columns is None or not columns:
+        return []
+    spec = session.resolved()
+    raw = load_table(session.data_path).head(SERVING_PROBE_ROWS)
+    absent = _unavailable_at_predict_time(session, raw)
+    probe = raw.drop(columns=absent + [spec.target], errors="ignore")
+    try:
+        produced = _load_lineage(path, spec.task_type).transform(
+            probe, streams=_run_streams(session)
+        )
+    except Exception:  # noqa: BLE001 - unreplayable: no column can be vouched for
+        return list(columns)
+    return [c for c in columns if c not in produced.columns]
+
+
 def _run_streams(session: RunSession) -> dict:
     """The run's declared streams, loaded, for replaying a lineage inside the run.
 
@@ -990,9 +1017,7 @@ def fit_group_stats(
     # *key*, not the feature. A group statistic keyed on a column that will not
     # exist can never be looked up, so the table would be built, trained on, and
     # refused as unservable three calls later for a reason stated here in one.
-    unavailable_keys = [
-        c for c in by if c in _unavailable_at_predict_time(session, df)
-    ]
+    unavailable_keys = _not_producible_at_predict_time(session, path, by)
     if unavailable_keys:
         raise ValueError(
             f"cannot group by {unavailable_keys}: these columns will not exist when a "
@@ -1031,7 +1056,7 @@ def fit_group_stats(
 
     column = new_columns[0]
     n_missing = int(out[column].isna().sum())
-    value_unavailable = value in _unavailable_at_predict_time(session, df)
+    value_unavailable = bool(_not_producible_at_predict_time(session, path, [value]))
     note = (
         "This table is scored above; build on it to keep the new column. The values "
         "here are out-of-fold; the statistics fitted on all rows are kept in the "
@@ -1126,9 +1151,7 @@ def fit_history(
             f"refusing to group by the target column {spec.target!r}: the group key "
             "has to exist at predict time and the target never does"
         )
-    unavailable_keys = [
-        c for c in [*by, order] if c in _unavailable_at_predict_time(session, df)
-    ]
+    unavailable_keys = _not_producible_at_predict_time(session, path, [*by, order])
     if unavailable_keys:
         raise ValueError(
             f"cannot key history on {unavailable_keys}: these columns will not exist "
@@ -1413,9 +1436,7 @@ def fit_stream_aggregate(
             f"refusing to group by the target column {spec.target!r}: the group key "
             "has to exist at predict time and the target never does"
         )
-    unavailable_keys = [
-        c for c in [*by, order] if c in _unavailable_at_predict_time(session, df)
-    ]
+    unavailable_keys = _not_producible_at_predict_time(session, path, [*by, order])
     if unavailable_keys:
         raise ValueError(
             f"cannot key a stream aggregate on {unavailable_keys}: these columns will "
@@ -1625,9 +1646,7 @@ def fit_future_covariate_window(
     missing = [c for c in [*by, value, order] if c not in df.columns]
     if missing:
         raise ValueError(f"columns not in {session.rel(path)}: {missing}")
-    unavailable = [
-        c for c in [*by, value, order] if c in _unavailable_at_predict_time(session, df)
-    ]
+    unavailable = _not_producible_at_predict_time(session, path, [*by, value, order])
     if unavailable:
         raise ValueError(
             f"cannot build future-covariate windows on {unavailable}: these columns "
