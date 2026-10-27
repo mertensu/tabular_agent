@@ -394,3 +394,39 @@ test days: neither shipped a calendar window.
   transform (refused: batch-dependent) and for history keyed on a derived weekday
   (refused by a name check; fixed in d8f4883: derived keys are checked by replay).
 - No later step cleared 0090's noise bar, so both runs shipped early tables.
+
+## Rossmann r11 (2026-10-27): two-horizon validation; the selection rule checked offline
+
+r10's setup with validation spanning at least two forecast horizons (96 days, not 48;
+22408a5) and derived keys checked by replay. 30 minutes, 25 tables. It built `Open`
+windows for the first time (t16: trailing 28 mean, forward 7 mean, forward 14 min;
+−0.0024) and holiday-calendar flags from its own knowledge (t15, +0.0060). It shipped
+t8 (probe 0.1426 on validation) although the run reached t24 (0.1250).
+
+The longer validation did not lower the bar: 0090's `block_sd` is the spread of the
+gain between periods, which more days estimate but do not shrink (0.002–0.011, as in
+r10). What blocked t9…t24 is that each step is compared with its immediate source
+only, and each step was inside its own spread while the chain was not.
+
+**Offline check (`selection_check.py`, no LLM):** the alternative rule is that a table
+passes when its gain over its *nearest passing ancestor* (its source while none has
+passed) exceeds the spread of that comparison. It was applied to the stored validation
+predictions of every run, and both picks were scored by the ruler (200-tree probe,
+training rows only) on our own test days:
+
+| run | 0090 ships | alternative ships | test probe, 0090 → alternative | test gain, 5 blocks |
+|---|---|---|---|---|
+| r1 | t14 | t10 | 0.1271 → 0.1268 | +0.0003 (3/5, inside spread) |
+| r3 | t10 | t10 | 0.1252 | – |
+| r4 | t5 | t16 | 0.1601 → **0.1377** | **+0.0224 (5/5)** |
+| r7 | t10 | t18 | 0.1554 → **0.1411** | **+0.0144 (5/5)** |
+| r8 | t13 | t13 | 0.1304 | – |
+| r10 | t14 | t21 | 0.1330 → 0.1364 | −0.0034 (3/5; one block −0.017) |
+| r11 | t8 | t20 | 0.1319 → 0.1295 | +0.0024 (4/5, beyond spread) |
+
+- Better on test in 3 of 5 runs where the picks differ, two of them by a lot. One is
+  neutral and one is slightly worse but inside noise. It is not simply looser: in r1 it
+  shipped an earlier table.
+- r4's and r7's 0090 picks stopped short, and on the test days they are the worst picks
+  of the seven runs (0.160, 0.155).
+- These are probe scores, not the shipped refitted blend; seven runs from one dataset.

@@ -492,13 +492,14 @@ class RunSession:
         nearest whole number of horizons, covering the periods in
         ``(end - k * horizon, end]`` the way window encoders tile their blocks.
 
-        At least two horizons when the data allows it. Every table is kept or
-        dropped on its gain over validation, and with one horizon that gain is
-        one forecast's worth of evidence: a feature that helps across forecasts
-        is hard to tell from one that happened to help in this one. What ships
-        is refitted on the validation rows too (0092), so the longer period
-        costs the shipped model nothing. Data too short for two horizons plus
-        training gets one.
+        At least two horizons when the data allows it, so a table is judged on
+        more than one forecast's stretch of the calendar. This does not lower
+        the noise bar a gain must clear (0090's ``block_sd`` is the spread of
+        the gain between periods, which more periods estimate but do not
+        shrink); it makes the gain an average over more of the conditions the
+        model will forecast into. What ships is refitted on the validation rows
+        too (0092), so the longer period costs the shipped model nothing. Data
+        too short for two horizons plus training gets one.
         """
         from ..encoders import to_periods
 

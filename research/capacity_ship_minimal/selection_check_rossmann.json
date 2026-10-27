@@ -1,0 +1,1051 @@
+{
+  "r1": {
+    "val_days": 43,
+    "current": {
+      "id": "t14",
+      "val_probe": 0.12382
+    },
+    "chain": {
+      "id": "t10",
+      "val_probe": 0.1317
+    },
+    "best_probe": "t17",
+    "chain_passing": [
+      "t2",
+      "t3",
+      "t5",
+      "t7",
+      "t8",
+      "t10",
+      "t11"
+    ],
+    "verdicts": {
+      "t2": {
+        "anchor": "t1",
+        "gain": 0.021744,
+        "block_sd": 0.001474,
+        "passes": true
+      },
+      "t3": {
+        "anchor": "t2",
+        "gain": 0.042678,
+        "block_sd": 0.005787,
+        "passes": true
+      },
+      "t4": {
+        "anchor": "t3",
+        "gain": 0.001922,
+        "block_sd": 0.005116,
+        "passes": false
+      },
+      "t5": {
+        "anchor": "t2",
+        "gain": 0.050321,
+        "block_sd": 0.009554,
+        "passes": true
+      },
+      "t6": {
+        "anchor": "t5",
+        "gain": -0.007642,
+        "block_sd": 0.005228,
+        "passes": false
+      },
+      "t7": {
+        "anchor": "t5",
+        "gain": 0.003577,
+        "block_sd": 0.002319,
+        "passes": true
+      },
+      "t8": {
+        "anchor": "t7",
+        "gain": 0.011282,
+        "block_sd": 0.009218,
+        "passes": true
+      },
+      "t9": {
+        "anchor": "t8",
+        "gain": -0.015434,
+        "block_sd": 0.006565,
+        "passes": false
+      },
+      "t10": {
+        "anchor": "t8",
+        "gain": 0.010843,
+        "block_sd": 0.004108,
+        "passes": true
+      },
+      "t11": {
+        "anchor": "t8",
+        "gain": 0.009996,
+        "block_sd": 0.006283,
+        "passes": true
+      },
+      "t12": {
+        "anchor": "t10",
+        "gain": -0.007321,
+        "block_sd": 0.004934,
+        "passes": false
+      },
+      "t13": {
+        "anchor": "t10",
+        "gain": 0.004693,
+        "block_sd": 0.010568,
+        "passes": false
+      },
+      "t14": {
+        "anchor": "t10",
+        "gain": 0.00788,
+        "block_sd": 0.010469,
+        "passes": false
+      },
+      "t15": {
+        "anchor": "t10",
+        "gain": 0.00586,
+        "block_sd": 0.012568,
+        "passes": false
+      },
+      "t16": {
+        "anchor": "t10",
+        "gain": -0.015612,
+        "block_sd": 0.01092,
+        "passes": false
+      },
+      "t17": {
+        "anchor": "t10",
+        "gain": 0.009365,
+        "block_sd": 0.011481,
+        "passes": false
+      }
+    },
+    "test_probe": {
+      "current": 0.127102,
+      "chain": 0.126799
+    },
+    "test_chain_vs_current": {
+      "gain": 0.000303,
+      "block_gains": [
+        0.002837,
+        -0.00249,
+        0.003584,
+        -0.004961,
+        0.002217
+      ],
+      "block_sd": 0.003357,
+      "sign_stable": false,
+      "blocks_favouring_a": 3,
+      "n_blocks": 5,
+      "n_rows": 53520,
+      "mode": "ordered_blocks"
+    }
+  },
+  "r3": {
+    "val_days": 43,
+    "current": {
+      "id": "t10",
+      "val_probe": 0.120672
+    },
+    "chain": {
+      "id": "t10",
+      "val_probe": 0.120672
+    },
+    "best_probe": "t10",
+    "chain_passing": [
+      "t4",
+      "t5",
+      "t10"
+    ],
+    "verdicts": {
+      "t4": {
+        "anchor": "t3",
+        "gain": 0.055921,
+        "block_sd": 0.002944,
+        "passes": true
+      },
+      "t5": {
+        "anchor": "t4",
+        "gain": 0.019096,
+        "block_sd": 0.005042,
+        "passes": true
+      },
+      "t6": {
+        "anchor": "t5",
+        "gain": -4.8e-05,
+        "block_sd": 0.004803,
+        "passes": false
+      },
+      "t7": {
+        "anchor": "t5",
+        "gain": -0.000138,
+        "block_sd": 0.001733,
+        "passes": false
+      },
+      "t8": {
+        "anchor": "t5",
+        "gain": -0.014788,
+        "block_sd": 0.004531,
+        "passes": false
+      },
+      "t9": {
+        "anchor": "t5",
+        "gain": -0.001961,
+        "block_sd": 0.004643,
+        "passes": false
+      },
+      "t10": {
+        "anchor": "t5",
+        "gain": 0.001557,
+        "block_sd": 0.001318,
+        "passes": true
+      },
+      "t11": {
+        "anchor": "t10",
+        "gain": -0.003795,
+        "block_sd": 0.008138,
+        "passes": false
+      },
+      "t12": {
+        "anchor": "t10",
+        "gain": -0.001137,
+        "block_sd": 0.001312,
+        "passes": false
+      },
+      "t13": {
+        "anchor": "t10",
+        "gain": -0.001225,
+        "block_sd": 0.001181,
+        "passes": false
+      },
+      "t14": {
+        "anchor": "t10",
+        "gain": -3e-06,
+        "block_sd": 0.001905,
+        "passes": false
+      }
+    },
+    "test_probe": {
+      "current": 0.125167,
+      "chain": 0.125167
+    }
+  },
+  "r4": {
+    "val_days": 43,
+    "current": {
+      "id": "t5",
+      "val_probe": 0.130425
+    },
+    "chain": {
+      "id": "t16",
+      "val_probe": 0.123591
+    },
+    "best_probe": "t18",
+    "chain_passing": [
+      "t2",
+      "t3",
+      "t5",
+      "t9",
+      "t16"
+    ],
+    "verdicts": {
+      "t2": {
+        "anchor": "t1",
+        "gain": 0.073128,
+        "block_sd": 0.006566,
+        "passes": true
+      },
+      "t3": {
+        "anchor": "t2",
+        "gain": 0.010864,
+        "block_sd": 0.006759,
+        "passes": true
+      },
+      "t4": {
+        "anchor": "t3",
+        "gain": 0.008707,
+        "block_sd": 0.008931,
+        "passes": false
+      },
+      "t5": {
+        "anchor": "t3",
+        "gain": 0.020202,
+        "block_sd": 0.004912,
+        "passes": true
+      },
+      "t6": {
+        "anchor": "t5",
+        "gain": 0.002969,
+        "block_sd": 0.003122,
+        "passes": false
+      },
+      "t7": {
+        "anchor": "t5",
+        "gain": 0.001469,
+        "block_sd": 0.003139,
+        "passes": false
+      },
+      "t8": {
+        "anchor": "t5",
+        "gain": -0.002327,
+        "block_sd": 0.0074,
+        "passes": false
+      },
+      "t9": {
+        "anchor": "t5",
+        "gain": 0.003343,
+        "block_sd": 0.002234,
+        "passes": true
+      },
+      "t10": {
+        "anchor": "t9",
+        "gain": -0.001332,
+        "block_sd": 0.001716,
+        "passes": false
+      },
+      "t11": {
+        "anchor": "t9",
+        "gain": 0.0,
+        "block_sd": 0.0,
+        "passes": false
+      },
+      "t12": {
+        "anchor": "t9",
+        "gain": -0.005021,
+        "block_sd": 0.004074,
+        "passes": false
+      },
+      "t13": {
+        "anchor": "t9",
+        "gain": -0.001025,
+        "block_sd": 0.005058,
+        "passes": false
+      },
+      "t14": {
+        "anchor": "t9",
+        "gain": 0.001284,
+        "block_sd": 0.002043,
+        "passes": false
+      },
+      "t15": {
+        "anchor": "t9",
+        "gain": 0.000899,
+        "block_sd": 0.00432,
+        "passes": false
+      },
+      "t16": {
+        "anchor": "t9",
+        "gain": 0.003491,
+        "block_sd": 0.000835,
+        "passes": true
+      },
+      "t17": {
+        "anchor": "t16",
+        "gain": -0.000381,
+        "block_sd": 0.003279,
+        "passes": false
+      },
+      "t18": {
+        "anchor": "t16",
+        "gain": 0.000182,
+        "block_sd": 0.001865,
+        "passes": false
+      },
+      "t19": {
+        "anchor": "t16",
+        "gain": 6e-06,
+        "block_sd": 0.003226,
+        "passes": false
+      },
+      "t20": {
+        "anchor": "t16",
+        "gain": -0.001543,
+        "block_sd": 0.002369,
+        "passes": false
+      },
+      "t21": {
+        "anchor": "t16",
+        "gain": -0.003003,
+        "block_sd": 0.003581,
+        "passes": false
+      },
+      "t22": {
+        "anchor": "t16",
+        "gain": -0.000527,
+        "block_sd": 0.004322,
+        "passes": false
+      },
+      "t23": {
+        "anchor": "t16",
+        "gain": -0.001922,
+        "block_sd": 0.002164,
+        "passes": false
+      }
+    },
+    "test_probe": {
+      "current": 0.160129,
+      "chain": 0.137726
+    },
+    "test_chain_vs_current": {
+      "gain": 0.022404,
+      "block_gains": [
+        0.00476,
+        0.035956,
+        0.03944,
+        0.009911,
+        0.011983
+      ],
+      "block_sd": 0.014353,
+      "sign_stable": true,
+      "blocks_favouring_a": 5,
+      "n_blocks": 5,
+      "n_rows": 53520,
+      "mode": "ordered_blocks"
+    }
+  },
+  "r7": {
+    "val_days": 43,
+    "current": {
+      "id": "t10",
+      "val_probe": 0.134341
+    },
+    "chain": {
+      "id": "t18",
+      "val_probe": 0.130226
+    },
+    "best_probe": "t12",
+    "chain_passing": [
+      "t3",
+      "t5",
+      "t8",
+      "t10",
+      "t14",
+      "t18"
+    ],
+    "verdicts": {
+      "t3": {
+        "anchor": "t2",
+        "gain": 0.074027,
+        "block_sd": 0.00543,
+        "passes": true
+      },
+      "t4": {
+        "anchor": "t3",
+        "gain": -0.000722,
+        "block_sd": 0.005244,
+        "passes": false
+      },
+      "t5": {
+        "anchor": "t3",
+        "gain": 0.006791,
+        "block_sd": 0.003699,
+        "passes": true
+      },
+      "t6": {
+        "anchor": "t5",
+        "gain": -0.003344,
+        "block_sd": 0.004323,
+        "passes": false
+      },
+      "t7": {
+        "anchor": "t5",
+        "gain": -0.005382,
+        "block_sd": 0.005577,
+        "passes": false
+      },
+      "t8": {
+        "anchor": "t5",
+        "gain": 0.00781,
+        "block_sd": 0.005909,
+        "passes": true
+      },
+      "t9": {
+        "anchor": "t8",
+        "gain": 0.0,
+        "block_sd": 0.0,
+        "passes": false
+      },
+      "t10": {
+        "anchor": "t8",
+        "gain": 0.003804,
+        "block_sd": 0.002681,
+        "passes": true
+      },
+      "t11": {
+        "anchor": "t10",
+        "gain": 0.0,
+        "block_sd": 0.0,
+        "passes": false
+      },
+      "t12": {
+        "anchor": "t10",
+        "gain": 0.005067,
+        "block_sd": 0.005607,
+        "passes": false
+      },
+      "t13": {
+        "anchor": "t10",
+        "gain": 0.005067,
+        "block_sd": 0.005607,
+        "passes": false
+      },
+      "t14": {
+        "anchor": "t10",
+        "gain": 0.00393,
+        "block_sd": 0.001665,
+        "passes": true
+      },
+      "t15": {
+        "anchor": "t10",
+        "gain": 0.005067,
+        "block_sd": 0.005607,
+        "passes": false
+      },
+      "t16": {
+        "anchor": "t10",
+        "gain": 0.000741,
+        "block_sd": 0.00203,
+        "passes": false
+      },
+      "t17": {
+        "anchor": "t10",
+        "gain": 0.005067,
+        "block_sd": 0.005607,
+        "passes": false
+      },
+      "t18": {
+        "anchor": "t10",
+        "gain": 0.004115,
+        "block_sd": 0.002536,
+        "passes": true
+      }
+    },
+    "test_probe": {
+      "current": 0.15544,
+      "chain": 0.141065
+    },
+    "test_chain_vs_current": {
+      "gain": 0.014375,
+      "block_gains": [
+        0.012195,
+        0.015222,
+        0.011673,
+        0.009975,
+        0.021046
+      ],
+      "block_sd": 0.003899,
+      "sign_stable": true,
+      "blocks_favouring_a": 5,
+      "n_blocks": 5,
+      "n_rows": 53520,
+      "mode": "ordered_blocks"
+    }
+  },
+  "r8": {
+    "val_days": 43,
+    "current": {
+      "id": "t13",
+      "val_probe": 0.129819
+    },
+    "chain": {
+      "id": "t13",
+      "val_probe": 0.129819
+    },
+    "best_probe": "t13",
+    "chain_passing": [
+      "t3",
+      "t4",
+      "t5",
+      "t7",
+      "t9",
+      "t12",
+      "t13"
+    ],
+    "verdicts": {
+      "t3": {
+        "anchor": "t2",
+        "gain": 0.00957,
+        "block_sd": 0.001374,
+        "passes": true
+      },
+      "t4": {
+        "anchor": "t3",
+        "gain": 0.006675,
+        "block_sd": 0.004848,
+        "passes": true
+      },
+      "t5": {
+        "anchor": "t4",
+        "gain": 0.055951,
+        "block_sd": 0.00529,
+        "passes": true
+      },
+      "t6": {
+        "anchor": "t5",
+        "gain": 7.9e-05,
+        "block_sd": 0.006548,
+        "passes": false
+      },
+      "t7": {
+        "anchor": "t5",
+        "gain": 0.006075,
+        "block_sd": 0.003618,
+        "passes": true
+      },
+      "t8": {
+        "anchor": "t5",
+        "gain": 0.002438,
+        "block_sd": 0.003207,
+        "passes": false
+      },
+      "t9": {
+        "anchor": "t5",
+        "gain": 0.008417,
+        "block_sd": 0.003031,
+        "passes": true
+      },
+      "t10": {
+        "anchor": "t9",
+        "gain": -0.000836,
+        "block_sd": 0.002581,
+        "passes": false
+      },
+      "t11": {
+        "anchor": "t9",
+        "gain": 0.0,
+        "block_sd": 0.0,
+        "passes": false
+      },
+      "t12": {
+        "anchor": "t9",
+        "gain": 0.015415,
+        "block_sd": 0.004636,
+        "passes": true
+      },
+      "t13": {
+        "anchor": "t12",
+        "gain": 0.003573,
+        "block_sd": 0.002054,
+        "passes": true
+      },
+      "t14": {
+        "anchor": "t13",
+        "gain": 0.0,
+        "block_sd": 0.0,
+        "passes": false
+      },
+      "t15": {
+        "anchor": "t13",
+        "gain": -0.001782,
+        "block_sd": 0.004641,
+        "passes": false
+      },
+      "t16": {
+        "anchor": "t13",
+        "gain": -0.001518,
+        "block_sd": 0.004218,
+        "passes": false
+      },
+      "t17": {
+        "anchor": "t13",
+        "gain": -0.00401,
+        "block_sd": 0.003111,
+        "passes": false
+      },
+      "t18": {
+        "anchor": "t13",
+        "gain": -0.045985,
+        "block_sd": 0.01046,
+        "passes": false
+      },
+      "t19": {
+        "anchor": "t13",
+        "gain": 0.0,
+        "block_sd": 0.0,
+        "passes": false
+      }
+    },
+    "test_probe": {
+      "current": 0.130401,
+      "chain": 0.130401
+    }
+  },
+  "r10": {
+    "val_days": 48,
+    "current": {
+      "id": "t14",
+      "val_probe": 0.128031
+    },
+    "chain": {
+      "id": "t21",
+      "val_probe": 0.124554
+    },
+    "best_probe": "t24",
+    "chain_passing": [
+      "t5",
+      "t8",
+      "t14",
+      "t16",
+      "t21",
+      "t29"
+    ],
+    "verdicts": {
+      "t3": {
+        "anchor": "t2",
+        "gain": -0.004871,
+        "block_sd": 0.0048,
+        "passes": false
+      },
+      "t4": {
+        "anchor": "t2",
+        "gain": -0.004657,
+        "block_sd": 0.004152,
+        "passes": false
+      },
+      "t5": {
+        "anchor": "t2",
+        "gain": 0.063281,
+        "block_sd": 0.008857,
+        "passes": true
+      },
+      "t6": {
+        "anchor": "t5",
+        "gain": 0.0,
+        "block_sd": 0.0,
+        "passes": false
+      },
+      "t7": {
+        "anchor": "t5",
+        "gain": 0.010294,
+        "block_sd": 0.015363,
+        "passes": false
+      },
+      "t8": {
+        "anchor": "t5",
+        "gain": 0.031659,
+        "block_sd": 0.010768,
+        "passes": true
+      },
+      "t9": {
+        "anchor": "t8",
+        "gain": 0.002285,
+        "block_sd": 0.006759,
+        "passes": false
+      },
+      "t10": {
+        "anchor": "t8",
+        "gain": -0.000832,
+        "block_sd": 0.006877,
+        "passes": false
+      },
+      "t11": {
+        "anchor": "t8",
+        "gain": -0.000716,
+        "block_sd": 0.007285,
+        "passes": false
+      },
+      "t12": {
+        "anchor": "t8",
+        "gain": 0.000894,
+        "block_sd": 0.005661,
+        "passes": false
+      },
+      "t14": {
+        "anchor": "t13",
+        "gain": 0.094106,
+        "block_sd": 0.01055,
+        "passes": true
+      },
+      "t16": {
+        "anchor": "t15",
+        "gain": 0.079043,
+        "block_sd": 0.015443,
+        "passes": true
+      },
+      "t17": {
+        "anchor": "t14",
+        "gain": 0.001086,
+        "block_sd": 0.002335,
+        "passes": false
+      },
+      "t18": {
+        "anchor": "t14",
+        "gain": -0.000199,
+        "block_sd": 0.003204,
+        "passes": false
+      },
+      "t19": {
+        "anchor": "t14",
+        "gain": -0.015905,
+        "block_sd": 0.020367,
+        "passes": false
+      },
+      "t20": {
+        "anchor": "t14",
+        "gain": 0.002093,
+        "block_sd": 0.003225,
+        "passes": false
+      },
+      "t21": {
+        "anchor": "t14",
+        "gain": 0.003477,
+        "block_sd": 0.001182,
+        "passes": true
+      },
+      "t22": {
+        "anchor": "t21",
+        "gain": 0.000293,
+        "block_sd": 0.001386,
+        "passes": false
+      },
+      "t23": {
+        "anchor": "t21",
+        "gain": -0.001191,
+        "block_sd": 0.00474,
+        "passes": false
+      },
+      "t24": {
+        "anchor": "t21",
+        "gain": 0.000397,
+        "block_sd": 0.003633,
+        "passes": false
+      },
+      "t25": {
+        "anchor": "t21",
+        "gain": -0.00579,
+        "block_sd": 0.004942,
+        "passes": false
+      },
+      "t26": {
+        "anchor": "t21",
+        "gain": -0.002195,
+        "block_sd": 0.002487,
+        "passes": false
+      },
+      "t27": {
+        "anchor": "t21",
+        "gain": -0.001037,
+        "block_sd": 0.004033,
+        "passes": false
+      },
+      "t28": {
+        "anchor": "t21",
+        "gain": -0.001541,
+        "block_sd": 0.001707,
+        "passes": false
+      },
+      "t29": {
+        "anchor": "t14",
+        "gain": 0.002895,
+        "block_sd": 0.001245,
+        "passes": true
+      },
+      "t30": {
+        "anchor": "t29",
+        "gain": -0.001013,
+        "block_sd": 0.002002,
+        "passes": false
+      }
+    },
+    "test_probe": {
+      "current": 0.133008,
+      "chain": 0.136406
+    },
+    "test_chain_vs_current": {
+      "gain": -0.003398,
+      "block_gains": [
+        0.00063,
+        0.001315,
+        -0.017059,
+        -0.000634,
+        0.001372
+      ],
+      "block_sd": 0.007129,
+      "sign_stable": false,
+      "blocks_favouring_a": 3,
+      "n_blocks": 5,
+      "n_rows": 53520,
+      "mode": "ordered_blocks"
+    }
+  },
+  "r11": {
+    "val_days": 96,
+    "current": {
+      "id": "t8",
+      "val_probe": 0.142591
+    },
+    "chain": {
+      "id": "t20",
+      "val_probe": 0.126448
+    },
+    "best_probe": "t24",
+    "chain_passing": [
+      "t3",
+      "t5",
+      "t6",
+      "t8",
+      "t10",
+      "t17",
+      "t18",
+      "t19",
+      "t20"
+    ],
+    "verdicts": {
+      "t3": {
+        "anchor": "t2",
+        "gain": 0.061311,
+        "block_sd": 0.006848,
+        "passes": true
+      },
+      "t4": {
+        "anchor": "t3",
+        "gain": -0.001103,
+        "block_sd": 0.005088,
+        "passes": false
+      },
+      "t5": {
+        "anchor": "t3",
+        "gain": 0.005986,
+        "block_sd": 0.00159,
+        "passes": true
+      },
+      "t6": {
+        "anchor": "t3",
+        "gain": 0.024283,
+        "block_sd": 0.009645,
+        "passes": true
+      },
+      "t7": {
+        "anchor": "t6",
+        "gain": -0.000674,
+        "block_sd": 0.002559,
+        "passes": false
+      },
+      "t8": {
+        "anchor": "t6",
+        "gain": 0.005807,
+        "block_sd": 0.001326,
+        "passes": true
+      },
+      "t9": {
+        "anchor": "t8",
+        "gain": 0.0094,
+        "block_sd": 0.010594,
+        "passes": false
+      },
+      "t10": {
+        "anchor": "t8",
+        "gain": 0.009944,
+        "block_sd": 0.009602,
+        "passes": true
+      },
+      "t11": {
+        "anchor": "t8",
+        "gain": 0.007616,
+        "block_sd": 0.011604,
+        "passes": false
+      },
+      "t12": {
+        "anchor": "t10",
+        "gain": 0.000221,
+        "block_sd": 0.00363,
+        "passes": false
+      },
+      "t13": {
+        "anchor": "t10",
+        "gain": -0.006119,
+        "block_sd": 0.005687,
+        "passes": false
+      },
+      "t14": {
+        "anchor": "t10",
+        "gain": -0.012278,
+        "block_sd": 0.008454,
+        "passes": false
+      },
+      "t15": {
+        "anchor": "t8",
+        "gain": 0.015379,
+        "block_sd": 0.015806,
+        "passes": false
+      },
+      "t16": {
+        "anchor": "t8",
+        "gain": 0.006976,
+        "block_sd": 0.009373,
+        "passes": false
+      },
+      "t17": {
+        "anchor": "t8",
+        "gain": 0.015502,
+        "block_sd": 0.015099,
+        "passes": true
+      },
+      "t18": {
+        "anchor": "t8",
+        "gain": 0.015474,
+        "block_sd": 0.013267,
+        "passes": true
+      },
+      "t19": {
+        "anchor": "t8",
+        "gain": 0.014258,
+        "block_sd": 0.009721,
+        "passes": true
+      },
+      "t20": {
+        "anchor": "t8",
+        "gain": 0.016142,
+        "block_sd": 0.013663,
+        "passes": true
+      },
+      "t21": {
+        "anchor": "t20",
+        "gain": 0.000423,
+        "block_sd": 0.00097,
+        "passes": false
+      },
+      "t22": {
+        "anchor": "t20",
+        "gain": 0.000423,
+        "block_sd": 0.00097,
+        "passes": false
+      },
+      "t23": {
+        "anchor": "t20",
+        "gain": 0.000788,
+        "block_sd": 0.002133,
+        "passes": false
+      },
+      "t24": {
+        "anchor": "t20",
+        "gain": 0.001406,
+        "block_sd": 0.00214,
+        "passes": false
+      },
+      "t25": {
+        "anchor": "t20",
+        "gain": -0.00066,
+        "block_sd": 0.003391,
+        "passes": false
+      }
+    },
+    "test_probe": {
+      "current": 0.131932,
+      "chain": 0.129548
+    },
+    "test_chain_vs_current": {
+      "gain": 0.002384,
+      "block_gains": [
+        0.003528,
+        0.002943,
+        0.004323,
+        0.001615,
+        -1e-05
+      ],
+      "block_sd": 0.001527,
+      "sign_stable": false,
+      "blocks_favouring_a": 4,
+      "n_blocks": 5,
+      "n_rows": 53520,
+      "mode": "ordered_blocks"
+    }
+  }
+}
