@@ -2,6 +2,12 @@
 
     uv run python research/capacity_ship_minimal/submit.py restaurant r2
     uv run python research/capacity_ship_minimal/submit.py rossmann r1
+    uv run python research/capacity_ship_minimal/submit.py rossmann r11 t24
+
+With a table id, writes only `submission_<tag>_<table>_all_rows.csv`: the shipped
+recipe (model types, parameters, blend weights) fitted on that table of the run
+instead of the shipped one, refitted on all rows the same way. For reading what
+another selection would have shipped; the weights stay the shipped table's.
 
 Writes two files under `_runs/capacity_ship_minimal/<name>/`:
 
@@ -30,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from runner import DATASETS, HERE, OUT  # noqa: E402
 
 from tabular_agent.api import Run  # noqa: E402
-from tabular_agent.harness.tools import _fit_recipe, _load_lineage  # noqa: E402
+from tabular_agent.harness.tools import _feature_frame, _fit_recipe, _load_lineage  # noqa: E402
 from tabular_agent.models import fit_final_model  # noqa: E402
 from tabular_agent.pipeline import predict_bundle  # noqa: E402
 from tabular_agent.refit import refit_lineage  # noqa: E402
@@ -39,7 +45,7 @@ from tabular_agent.taskspec import ResolvedSpec  # noqa: E402
 ID = {"restaurant": "id", "rossmann": "Id"}
 
 
-def all_rows_bundle(run: Run, cfg: dict) -> dict:
+def all_rows_bundle(run: Run, cfg: dict, table_id: str | None = None) -> dict:
     """The shipped bundle's recipe refitted on every training row, audit included."""
     b = run.bundle._bundle
     j = run.journal
@@ -60,17 +66,21 @@ def all_rows_bundle(run: Run, cfg: dict) -> dict:
     assert set(rows.columns) == set(work.columns), (set(rows.columns) ^ set(work.columns))
     rows = rows[list(work.columns)]
 
-    name = Path(b["training_table"]).name
+    name = f"{table_id}.parquet" if table_id else Path(b["training_table"]).name
     source = Path(run.run_dir) / "tables" / name
     if not source.exists():
         source = Path(run.run_dir) / "data" / name
     table, pipeline = refit_lineage(_load_lineage(str(source), spec.task_type), rows, spec,
                                     order=split["split_on"])
+    features = None
+    if table_id:
+        features = list(_feature_frame(pd.read_parquet(source), cfg["target"])[0].columns)
     models = []
     for exp_id in b["fitted_on"]["refit_of"]:
         meta = json.loads((Path(run.run_dir) / "experiments" / exp_id / "meta.json").read_text())
         # `_fit_recipe` reads only the run's seed off the session.
         r = _fit_recipe(SimpleNamespace(resolved=lambda: spec), meta)
+        r["feature_names"] = features or r["feature_names"]
         models.append(fit_final_model(
             table[r["feature_names"]], table[spec.target], spec.task_type, spec.metric,
             model_type=r["model_type"], params=r["params"] or None, seed=r["seed"],
@@ -78,10 +88,11 @@ def all_rows_bundle(run: Run, cfg: dict) -> dict:
             objective=spec.objective,
         ))
     return {**b, "pipeline": pipeline, "models": models,
+            "feature_names": features or b["feature_names"],
             "fitted_on": {"fitted_on": "all training rows", "n_rows": int(len(table))}}
 
 
-def main(name: str, tag: str) -> int:
+def main(name: str, tag: str, table_id: str | None = None) -> int:
     cfg = DATASETS[name]
     result = json.loads((HERE / f"result_{name}_{tag}.json").read_text())
     run = Run(result["run_dir"])
@@ -89,11 +100,17 @@ def main(name: str, tag: str) -> int:
     raw = test.drop(columns=[ID[name]])
     dest = OUT / name
 
-    shipped = np.asarray(run.bundle.predict(raw), dtype=float)
-    refit = all_rows_bundle(run, cfg)
-    all_rows = np.asarray(predict_bundle(refit, run.bundle._prepare(raw)), dtype=float)
+    if table_id:
+        refit = all_rows_bundle(run, cfg, table_id)
+        files = ((f"{table_id}_all_rows",
+                  np.asarray(predict_bundle(refit, run.bundle._prepare(raw)), dtype=float)),)
+    else:
+        shipped = np.asarray(run.bundle.predict(raw), dtype=float)
+        refit = all_rows_bundle(run, cfg)
+        all_rows = np.asarray(predict_bundle(refit, run.bundle._prepare(raw)), dtype=float)
+        files = (("shipped", shipped), ("all_rows", all_rows))
 
-    for label, preds in (("shipped", shipped), ("all_rows", all_rows)):
+    for label, preds in files:
         preds = np.clip(preds, 0, None)
         path = dest / f"submission_{tag}_{label}.csv"
         pd.DataFrame({ID[name]: test[ID[name]], cfg["target"]: preds}).to_csv(path, index=False)
@@ -102,4 +119,4 @@ def main(name: str, tag: str) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(*sys.argv[1:3]))
+    raise SystemExit(main(*sys.argv[1:4]))
