@@ -757,18 +757,16 @@ def inspect_data(session: RunSession, table: str | None = None) -> dict:
         # about — the note says so, so the refusal is not a surprise.
         **({"columns_not_available_at_predict_time": unavailable}
            if unavailable else {}),
-        # Only when the run declares them (0091). Serving columns whose values over
-        # the forecast horizon are known at issue time, so a *forward* aggregate of
-        # them is legal where the target's is not. Named here because no other tool
+        # Only when the run declares them (0091). Serving columns whose values are
+        # known before and after the forecast start, so windows over them may cross
+        # it in either direction (0093). Named here because no other tool
         # reports the declaration and the agent otherwise cannot know which columns
         # fit_future_covariate_window will accept.
         **({"future_known_columns": list(session.future_known),
             "future_known_note": (
-                "These serving columns' values over the forecast horizon are "
-                "declared known at issue time. Aggregate them forward across the "
-                "horizon with fit_future_covariate_window (whole-day totals, "
-                "block-local rolling means, next-N-rows windows) — fit_history "
-                "cannot, being backward and target-bound. CAVEAT: if these are the "
+                "These serving columns' values are declared known before and after "
+                "the forecast start; fit_future_covariate_window builds windows over "
+                "them. CAVEAT: if these are the "
                 "realised future rather than a forecast as known at each historical "
                 "issue time, a model trained on them leans on information a "
                 "production forecast issued at the cutoff would not have."
