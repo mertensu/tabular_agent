@@ -130,6 +130,9 @@ TAG_OVERRIDES = {
     # r2 was stopped before finalizing. r3 repeats it after 0093, with trailing
     # windows of these columns reaching back across the block start.
     ("rossmann", "r3"): {"future_known": ["Open", "Promo", "SchoolHoliday"]},
+    # r4 repeats r3 after future-covariate windows are refused on a table that
+    # went through a training-only filter (windows first, then the filter).
+    ("rossmann", "r4"): {"future_known": ["Open", "Promo", "SchoolHoliday"]},
 }
 
 
