@@ -596,6 +596,7 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "
         average of its own group's *target* past. This gives it aggregates of a
         covariate whose values over the forecast horizon are **known at issue
         time** — a weather forecast, a planned promotion, a published price.
+        Its windows can look back as well as forward.
 
         Only a column the run declared `future_known` is eligible; the target and
         any undeclared column are refused, because a value merely *present* over

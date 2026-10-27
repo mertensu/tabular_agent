@@ -158,7 +158,7 @@ def render_brief(session: RunSession) -> str | None:
         names = ", ".join(session.future_known)
         lines.append(
             f"Future-known covariates declared: {names}. Use them with "
-            "fit_future_covariate_window."
+            "fit_future_covariate_window; its windows can look back as well as forward."
         )
 
     idle = _never_trained(j)
