@@ -417,6 +417,8 @@ class RunSession:
                     )
             else:
                 cut_val = n
+            if self.workflow == "forecast":
+                cut_work = self._whole_horizons(values[order], cut_work, cut_val)
             val_pos = order[cut_work:cut_val]
             holdout_pos = order[cut_val:]
         else:
@@ -478,6 +480,32 @@ class RunSession:
             save_parquet(df.iloc[np.sort(holdout_pos)].reset_index(drop=True), holdout_path)
         self._split = (work_path, val_path, holdout_path if self.holdout_fraction else None)
         return self._split
+
+    def _whole_horizons(self, ordered, cut_work: int, val_end: int) -> int:
+        """Move the work/validation cut so validation spans whole forecast horizons.
+
+        Validation rehearses a forecast, so it has to be at least one forecast
+        long: a window over the whole delivered block, or anything counted across
+        it, is otherwise computed over fewer periods in validation than in
+        training and at prediction time, and scored on a different scale than it
+        was learned on. ``val_fraction`` sets the size; this rounds it to the
+        nearest whole number of horizons (at least one), covering the periods in
+        ``(end - k * horizon, end]`` the way window encoders tile their blocks.
+        """
+        from ..encoders import to_periods
+
+        periods = to_periods(ordered)
+        horizon = float(self.spec.forecast_horizon)
+        end = periods[val_end - 1]
+        k = max(1, int(round((end - periods[cut_work]) / horizon)))
+        cut = int(np.searchsorted(periods, end - k * horizon, side="right"))
+        if cut < MIN_SPLIT_ROWS:
+            raise ValueError(
+                f"cannot cut a validation period of {k} forecast horizon(s) "
+                f"({horizon:g} each in {self.split_on!r}) and keep {MIN_SPLIT_ROWS} "
+                "work rows: the data is shorter than one forecast plus training."
+            )
+        return cut
 
     @property
     def data_path(self) -> str:

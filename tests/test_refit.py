@@ -292,3 +292,14 @@ def test_a_failed_refit_ships_the_work_fit_and_says_why(tmp_path, iid_session, m
     record = journal.load(iid_session.run_dir)["holdout"]
     assert "refit_unavailable" in record["shipped_refit"]
     assert result["holdout_score"] == result["work_fit_holdout_score"]
+
+
+def test_a_forecast_validation_period_spans_whole_horizons(tmp_path, forecast_paths):
+    """5% of 240 days is 12 days; with a 7-day horizon validation becomes 14 days."""
+    table, stream = forecast_paths
+    s = RunSession(str(tmp_path / "whole"), table,
+                   TaskSpec(target="sales", n_splits=3, forecast_horizon=7.0),
+                   split_on="date", workflow="forecast", val_fraction=0.05)
+    val = load_table(s.val_path)
+    assert val["date"].nunique() == 14
+    assert load_table(s.data_path)["date"].max() < val["date"].min()
