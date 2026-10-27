@@ -133,16 +133,20 @@ TAG_OVERRIDES = {
     # r4 repeats r3 after future-covariate windows are refused on a table that
     # went through a training-only filter (windows first, then the filter).
     ("rossmann", "r4"): {"future_known": ["Open", "Promo", "SchoolHoliday"]},
+    # r5 repeats r4 with a larger agent model: does it find the closure windows
+    # over Open (short windows around a closed day) that r4's agent missed?
+    ("rossmann", "r5"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
+                         "model": "deepseek-v4-pro-0813@eu"},
 }
 
 
-def agent_model():
+def agent_model(name: str = MODEL):
     """The gateway model with thinking on, as the archived DeepSeek runs used."""
     from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
     from pydantic_ai.providers.openai import OpenAIProvider
 
     return OpenAIChatModel(
-        MODEL,
+        name,
         provider=OpenAIProvider(base_url=REQUESTY_BASE_URL, api_key=load_api_key()),
         settings=OpenAIChatModelSettings(
             max_tokens=GATEWAY_MAX_OUTPUT_TOKENS,
@@ -223,7 +227,8 @@ def main(name: str, tag: str = "r1") -> int:
     # sealed rows, and r1 ran before the product sealed one of its own.
     forecast = cfg.get("forecast", False)
     cls = ta.ForecastingAgent if forecast else ta.Agent
-    agent = cls(model=agent_model(), run_root=OUT / name / "runs", holdout_fraction=None,
+    agent = cls(model=agent_model(cfg.get("model", MODEL)), run_root=OUT / name / "runs",
+                holdout_fraction=None,
                 **cfg.get("agent", {}))
     plan = agent.inspect(files)
     plan.target = cfg["target"]
@@ -256,7 +261,7 @@ def main(name: str, tag: str = "r1") -> int:
     result = {
         "dataset": name,
         "tag": tag,
-        "model": MODEL,
+        "model": cfg.get("model", MODEL),
         "git_commit": __import__("subprocess").check_output(
             ["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip(),
         "run_dir": str(run.run_dir),
