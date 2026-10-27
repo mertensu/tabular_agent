@@ -9,6 +9,7 @@ import os
 from typing import Any
 
 from .metrics import greater_is_better
+from .report import shipped_holdout
 
 SCHEMA_VERSION = 1
 
@@ -60,9 +61,24 @@ def build_dashboard_data(
                 "val_score", "holdout_score", "optimism",
             )
         })
-    shipped = next((row for row in scores if row.get("shipped")), None)
-    if shipped is None:
-        shipped = next((row for row in scores if row.get("selected")), None)
+    refit = (holdout or {}).get("shipped_refit") or {}
+    if refit.get("holdout_score") is not None:
+        # What the bundle predicts with. The work-fit row of the same
+        # configuration stays, relabelled, as the one the search scored.
+        for row in scores:
+            if row.get("shipped"):
+                row["shipped"], row["shipped_config"] = False, True
+        scores.append({
+            "experiment_id": refit.get("experiment_id"),
+            "model_type": refit.get("model_type"),
+            "selected": False,
+            "shipped": True,
+            "refit": True,
+            "val_score": None,
+            "holdout_score": refit["holdout_score"],
+            "optimism": None,
+        })
+    shipped = shipped_holdout(holdout)
     test_score = None if shipped is None else shipped.get("holdout_score")
     gain = (
         selection_score - baseline_score
@@ -208,8 +224,10 @@ def _model_rows(data: dict) -> str:
         roles = []
         if row.get("selected"):
             roles.append("search pick")
+        if row.get("shipped_config"):
+            roles.append("shipped config, training rows only")
         if row.get("shipped"):
-            roles.append("shipped")
+            roles.append("shipped, refit on training + validation" if row.get("refit") else "shipped")
         optimism = row.get("optimism")
         optimism_bar = ""
         if optimism is not None:

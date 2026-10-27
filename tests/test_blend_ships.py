@@ -301,7 +301,8 @@ def test_the_report_names_the_blend_and_prints_the_gap(sealed):
     assert "inverse-fold-spread-weighted blend" in text
     assert "Every terminal fit still ships" in text
     assert "equal-weight blend" not in text
-    assert "(shipped)" in text and "(search's pick)" in text
+    assert "(shipped config, training rows only)" in text and "(search's pick)" in text
+    assert "(shipped, refit)" in text
     # A blend was never cross-validated, so the report must neither print folds
     # for it nor send the reader to a CV score it does not have.
     assert "## Per-fold metrics" not in text

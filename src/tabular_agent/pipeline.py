@@ -138,7 +138,8 @@ def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_name
                 target_transform: str = "none",
                 reference_target=None,
                 training_table: str | None = None,
-                objective: str | None = None) -> str:
+                objective: str | None = None,
+                fitted_on: dict | None = None) -> str:
     bundle_dir = run_ctx.path("bundle", "_")
     bundle_dir = os.path.dirname(bundle_dir)
     model_paths = []
@@ -163,6 +164,11 @@ def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_name
     # values instead of leaking through final target-informed encoders.
     if training_table is not None:
         manifest["training_table"] = training_table
+    # Which rows the models and the lineage's fitted state came from. A run ranks
+    # on work-only fits and ships a refit on work + validation; whoever loads the
+    # bundle later should not have to read the journal to know which they hold.
+    if fitted_on is not None:
+        manifest["fitted_on"] = dict(fitted_on)
     # Derived from the steps, never passed in. A bundle that needs a second input
     # has to say so where somebody will read it — the alternative is a file that
     # predicts only when the caller happens to know, and a `streams=` argument
@@ -196,6 +202,8 @@ def load_bundle(bundle_dir: str) -> dict:
         "streams": manifest.get("streams", {}),
         # Optional: bundles written before reusable features remain valid.
         "training_table": manifest.get("training_table"),
+        # Absent on bundles written before the refit: fitted on work rows only.
+        "fitted_on": manifest.get("fitted_on"),
     }
 
 

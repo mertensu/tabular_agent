@@ -35,7 +35,7 @@ from ..encoders import to_periods as _to_periods
 from ..inspect import profile_dataframe, profile_stream
 from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
-from ..models import _make_model, predict_model, train_cv
+from ..models import _make_model, fit_final_model, predict_model, train_cv
 from ..pipeline import Pipeline, save_bundle
 from ..probe import PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_probe, probe_predict
 from ..blend import apply_blend, blend_weights
@@ -43,9 +43,11 @@ from ..report import (
     accuracy_interval,
     build_report,
     shipped_holdout,
+    work_fit_holdout,
     target_composition,
     write_report,
 )
+from ..refit import refit_lineage
 from ..rows import select_rows
 from ..sandbox import SandboxError, run_readonly
 from ..target import (
@@ -2224,6 +2226,9 @@ def train_tabular_model(
         "id": exp_id,
         "model_type": model_type,
         "params": params or {},
+        # The probe fit's seed is not the run's, so it is recorded rather than
+        # assumed: refitting before shipping has to reproduce this fit exactly.
+        "seed": model_seed,
         "target_transform": target_transform,
         "reference_target": reference_target,
         "task_type": spec.task_type,
@@ -3000,6 +3005,119 @@ def _blend_members(session: RunSession, terminal: list[dict]) -> list[dict]:
     ]
 
 
+#: Where the shipped refit's training table lives. Outside ``tables/`` on
+#: purpose: it holds validation rows, so `resolve_table` must never admit it.
+REFIT_DIR = "refit"
+REFIT_ID = "shipped_refit"
+
+
+def _refit_for_shipping(session: RunSession, table_rel: str, fits: list[dict]) -> dict:
+    """Refit the selected table's lineage and the shipped models on work + validation.
+
+    Everything a run *chose* was chosen on the work rows: the table, the
+    parameters of each step in its lineage, the blend's members and weights. None
+    of that is revisited here. What is redone is the *fitting* — encoders, stored
+    history, out-of-fold values, model weights — on every row the search could
+    use, because the validation rows are the most recent ones and a model that
+    never saw them serves from a stale past.
+
+    ``fits`` are the shipped models' recipes: ``model_type``, ``params``,
+    ``seed``, ``target_transform``, ``reference_target``, ``feature_names``. The
+    sealed slice is not in the rows, so it can still judge what ships.
+    """
+    spec = session.resolved()
+    path = session.resolve_table(table_rel)
+    rows = pd.concat(
+        [load_table(session.data_path), load_table(session.val_path)], ignore_index=True,
+    )
+    table, pipeline = refit_lineage(
+        _load_lineage(path, spec.task_type), rows, spec,
+        order=session.split_on, streams=_run_streams(session),
+    )
+    y = table[spec.target]
+    models = []
+    for fit in fits:
+        missing = [c for c in fit["feature_names"] if c not in table.columns]
+        if missing:
+            raise ValueError(f"the refitted lineage did not produce {missing[:5]}")
+        models.append(fit_final_model(
+            table[list(fit["feature_names"])], y, spec.task_type, spec.metric,
+            model_type=fit["model_type"], params=fit.get("params") or None,
+            seed=fit["seed"], target_transform=fit.get("target_transform", "none"),
+            reference_target=fit.get("reference_target"), objective=spec.objective,
+        ))
+    out_path = session.ctx.path(REFIT_DIR, os.path.basename(path))
+    save_parquet(table, out_path)
+    with open(_lineage_path(out_path), "w") as f:
+        json.dump(pipeline.to_dict(), f, indent=2)
+    return {
+        "table": session.rel(out_path),
+        "path": out_path,
+        "pipeline": pipeline,
+        "models": models,
+        "n_rows": int(len(table)),
+    }
+
+
+def _fit_recipe(session: RunSession, meta: dict) -> dict:
+    """What `_refit_for_shipping` needs to reproduce one experiment's final fit."""
+    seed = meta.get("seed")
+    if seed is None:
+        # Experiments written before the seed was recorded: the probe fit is the
+        # only one that ran under its own seed.
+        probe_fit = (meta["model_type"] == PROBE_MODEL_TYPE
+                     and dict(meta.get("params") or {}) == dict(PROBE_PARAMS))
+        seed = PROBE_SEED if probe_fit else session.resolved().seed
+    return {
+        "model_type": meta["model_type"],
+        "params": meta.get("params") or {},
+        "seed": seed,
+        "target_transform": meta.get("target_transform", "none"),
+        "reference_target": meta.get("reference_target"),
+        "feature_names": list(meta["feature_names"]),
+    }
+
+
+def _score_refit_on_holdout(
+    session: RunSession, refit: dict, feature_names, weights, work_entry: dict | None,
+    model_type: str, target_transform: str, reference_target=None,
+) -> dict | None:
+    """The sealed score of what ships: the refit, scored once beside its work fit.
+
+    ``work_entry`` is the holdout row of the same configuration fitted on work
+    rows only, which stays in ``scores`` for 0023's optimism series. The refit has
+    no validation score of its own — the validation rows are in its training set —
+    so it carries no optimism; ``vs_work_fit`` is what the refit bought instead.
+    """
+    holdout_path = session.holdout_path
+    if holdout_path is None:
+        return None
+    spec = session.resolved()
+    entry = {
+        "experiment_id": REFIT_ID,
+        "model_type": model_type,
+        "fitted_on": "work+validation",
+        "n_rows_fitted": refit["n_rows"],
+        "training_table": refit["table"],
+    }
+    try:
+        score, se, why_not, _ = _score_on_held_out(
+            session, holdout_path, refit["path"], refit["models"], feature_names, spec,
+            load_table(refit["path"])[spec.target], target_transform=target_transform,
+            reference_target=reference_target, weights=weights,
+        )
+    except Exception as e:  # noqa: BLE001 - a run must still finalize
+        score, se, why_not = None, None, f"{type(e).__name__}: {e}"
+    if score is None:
+        entry["holdout_unavailable"] = why_not
+        return entry
+    entry["holdout_score"] = round(score, 6)
+    entry["holdout_se"] = None if se is None else round(se, 6)
+    if work_entry is not None and work_entry.get("holdout_score") is not None:
+        entry["vs_work_fit"] = _gain(score, work_entry["holdout_score"], spec.metric)
+    return entry
+
+
 def _score_on_holdout(
     session: RunSession,
     exp_ids: list[str],
@@ -3109,6 +3227,7 @@ def _score_on_holdout(
                 head["feature_names"], spec, y_work,
                 target_transform=head.get("target_transform", "none"),
                 reference_target=head.get("reference_target"),
+                weights=blend.get("weights"),
             )
         except Exception as e:  # noqa: BLE001 - a run must still finalize
             score, se, why_not = None, None, f"{type(e).__name__}: {e}"
@@ -3274,6 +3393,7 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         "id": exp_id,
         "model_type": PROBE_MODEL_TYPE,
         "params": dict(PROBE_PARAMS),
+        "seed": PROBE_SEED,
         "target_transform": fit.target_transform,
         "task_type": spec.task_type,
         "metric": spec.metric,
@@ -3304,15 +3424,39 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
     audit = _score_minimal_audit(
         session, path, fit, baseline_model, spec, y, exp_id, evaluation_score,
     )
+
+    # The table and the evaluation score come from the work-only fit; what ships
+    # is the same lineage and probe refitted on work + evaluation rows (see
+    # `_refit_for_shipping`). A refit that fails ships the work-only fit.
+    pipeline = _load_lineage(path, spec.task_type)
+    ship_model, ship_pipeline, ship_table = fit.model, pipeline, table_rel
+    try:
+        refit = _refit_for_shipping(session, table_rel, [_fit_recipe(session, meta)])
+        ship_model, ship_pipeline, ship_table = (
+            refit["models"][0], refit["pipeline"], refit["table"]
+        )
+        refit_record = {"fitted_on": "work+validation", "n_rows": refit["n_rows"],
+                        "training_table": refit["table"], "refit_of": [exp_id]}
+    except Exception as e:  # noqa: BLE001 - a run must still finalize
+        refit = None
+        refit_record = {"fitted_on": "work", "refit_unavailable": f"{type(e).__name__}: {e}"}
     if audit is not None:
+        audit[REFIT_ID] = (
+            _score_refit_on_holdout(
+                session, refit, fit.feature_names, None, audit["scores"][0],
+                PROBE_MODEL_TYPE, fit.target_transform,
+            )
+            if refit is not None
+            else {"experiment_id": REFIT_ID, **refit_record}
+        )
         journal.set_holdout(session.run_dir, audit)
 
-    pipeline = _load_lineage(path, spec.task_type)
     bundle_dir = save_bundle(
-        session.ctx, pipeline, [fit.model], np.array([1.0]), fit.feature_names,
+        session.ctx, ship_pipeline, [ship_model], np.array([1.0]), fit.feature_names,
         spec.task_type, fit.target_transform,
-        training_table=table_rel,
+        training_table=ship_table,
         objective=spec.objective,
+        fitted_on=refit_record,
     )
     j = journal.load(session.run_dir)
     credit = journal.attribution(j, table_rel)
@@ -3341,16 +3485,33 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         + (f" / {split.get('n_holdout')} audit" if audit is not None else "")
         + f" ({split_mode})",
     ]
+    if refit is not None:
+        report_lines.append(
+            f"- **Shipped model fitted on:** training + evaluation rows ({refit['n_rows']} rows)"
+        )
+    else:
+        report_lines.append(
+            f"- **Shipped model fitted on:** training rows only "
+            f"(refit failed: {refit_record['refit_unavailable']})"
+        )
     if audit is not None:
-        shipped = audit["scores"][0]
-        if shipped.get("holdout_score") is None:
+        work_fit = audit["scores"][0]
+        shipped = shipped_holdout(audit)
+        at = report_lines.index(f"- **Evaluation score:** {evaluation_score:.6g}") + 1
+        if shipped is None:
             report_lines.append(
-                f"- **Audit score:** unavailable ({shipped.get('holdout_unavailable')})"
+                f"- **Audit score:** unavailable ({work_fit.get('holdout_unavailable')})"
+            )
+        elif shipped is work_fit:
+            report_lines.insert(
+                at, f"- **Audit score (scored once):** {shipped['holdout_score']:.6g}",
             )
         else:
+            work = work_fit.get("holdout_score")
             report_lines.insert(
-                report_lines.index(f"- **Evaluation score:** {evaluation_score:.6g}") + 1,
-                f"- **Audit score (scored once):** {shipped['holdout_score']:.6g}",
+                at,
+                f"- **Audit score (scored once):** {shipped['holdout_score']:.6g}"
+                + ("" if work is None else f" (fitted on training rows only: {work:.6g})"),
             )
     composition = target_composition(split)
     if composition:
@@ -3399,7 +3560,9 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         "metric": spec.metric,
         "evaluation_score": evaluation_score,
         "baseline_score": baseline_score,
-        **({"audit_score": audit["scores"][0].get("holdout_score")} if audit else {}),
+        **({"audit_score": (shipped_holdout(audit) or {}).get("holdout_score")}
+           if audit else {}),
+        "fitted_on": refit_record,
         "n_experiments": len(j["leaderboard"]),
         "bundle_dir": session.rel(bundle_dir),
         "report_path": session.rel(report_path),
@@ -3453,6 +3616,17 @@ def finalize_run(session: RunSession) -> dict:
         head = members[0]["meta"]
         source_path = session.resolve_table(head["source_table"])
         models = [m["model"] for m in members]
+        # 0080 — the blend ships weighted by inverse out-of-sample instability, not
+        # equally, so a member that will be optimistic out of sample cannot inflate
+        # the average by contributing 1/k of every prediction regardless of how
+        # wrong it is (the failure 0045 registered and the next sealed run
+        # confirmed). The weights come from each member's cross-fitting
+        # fold-spread — fixed before the sealed set is read, from neither `val` nor
+        # the seal. Every member still ships; this reweights, it does not select
+        # (0044). Fixed here, before any scoring, so the validation and sealed
+        # scores below are of the weighted blend the bundle predicts with.
+        spreads = [float(np.std(m["meta"].get("fold_metrics") or [np.nan])) for m in members]
+        weights = blend_weights(spreads)
         # Scored on the validation half like every other candidate, so the run has
         # a number for it in the same units — and so its `optimism` on the sealed
         # rows is comparable to theirs. This is a measurement, not a selection:
@@ -3462,9 +3636,12 @@ def finalize_run(session: RunSession) -> dict:
             load_table(source_path)[spec.target],
             target_transform=head.get("target_transform", "none"),
             reference_target=head.get("reference_target"),
+            weights=weights,
         )
         blend = {
             "members": [m["experiment_id"] for m in members],
+            "metas": [m["meta"] for m in members],
+            "weights": weights,
             "model_types": [m["meta"]["model_type"] for m in members],
             "model_type": "blend(" + "+".join(m["meta"]["model_type"] for m in members) + ")",
             "models": models,
@@ -3483,44 +3660,66 @@ def finalize_run(session: RunSession) -> dict:
     holdout = _score_on_holdout(
         session, candidates, selected_id=best["experiment_id"], blend=blend,
     )
-    if holdout is not None:
-        journal.set_holdout(session.run_dir, holdout)
     exp_dir = os.path.join(session.run_dir, best["artifact_path"])
     with open(os.path.join(exp_dir, "meta.json")) as f:
         meta = json.load(f)
     model = joblib.load(os.path.join(exp_dir, "final_model.joblib"))
 
     ship = blend["meta"] if blend else meta
-    ship_models = blend["models"] if blend else [model]
-    # 0080 — the blend ships weighted by inverse out-of-sample instability, not
-    # equally, so a member that will be optimistic out of sample cannot inflate the
-    # average by contributing 1/k of every prediction regardless of how wrong it is
-    # (the failure 0045 registered and the next sealed run confirmed). The weights
-    # come from each member's cross-fitting fold-spread — fixed before the sealed
-    # set is read, from neither `val` nor the seal. Every member still ships; this
-    # reweights, it does not select (0044).
-    if blend is not None:
-        spreads = [float(np.std(m["meta"].get("fold_metrics") or [np.nan])) for m in members]
-        ship_weights = blend_weights(spreads)
-    else:
-        ship_weights = np.array([1.0])
+    ship_weights = blend["weights"] if blend else np.array([1.0])
     # The bundle must be able to rebuild the shipped models' features from *raw*
     # input, so it inherits the lineage of whichever table they were trained on —
     # empty when trained on the raw table, one step per encoding otherwise. Every
     # blend member shares that table by construction (`_blend_members`), which is
     # what makes one pipeline enough for all of them.
     pipeline = _load_lineage(session.resolve_table(ship["source_table"]), ship["task_type"])
+    # Everything above was chosen and scored on work-only fits. What ships is the
+    # same lineage and the same members refitted on work + validation, so the
+    # bundle has seen the most recent rows the run had. The work-only fits stay
+    # on the leaderboard and in the sealed record; the refit is scored once
+    # beside them. A refit that fails ships the work-only fits, and says why.
+    ship_fit = {
+        "models": blend["models"] if blend else [model],
+        "pipeline": pipeline,
+        "training_table": ship["source_table"],
+    }
+    try:
+        refit = _refit_for_shipping(
+            session, ship["source_table"],
+            [_fit_recipe(session, m) for m in (blend["metas"] if blend else [meta])],
+        )
+        ship_fit.update(models=refit["models"], pipeline=refit["pipeline"],
+                        training_table=refit["table"])
+        refit_record = {"fitted_on": "work+validation", "n_rows": refit["n_rows"],
+                        "training_table": refit["table"],
+                        # The work-only experiments this refits, in bundle order.
+                        "refit_of": blend["members"] if blend else [best["experiment_id"]]}
+    except Exception as e:  # noqa: BLE001 - a run must still finalize
+        refit = None
+        refit_record = {"fitted_on": "work", "refit_unavailable": f"{type(e).__name__}: {e}"}
+    if holdout is not None:
+        if refit is not None:
+            holdout[REFIT_ID] = _score_refit_on_holdout(
+                session, refit, ship["feature_names"], ship_weights,
+                next((e for e in holdout["scores"] if e.get("shipped")), None),
+                blend["model_type"] if blend else meta["model_type"],
+                ship.get("target_transform", "none"), ship.get("reference_target"),
+            )
+        else:
+            holdout[REFIT_ID] = {"experiment_id": REFIT_ID, **refit_record}
+        journal.set_holdout(session.run_dir, holdout)
     bundle_dir = save_bundle(
         session.ctx,
-        pipeline,
-        ship_models,
+        ship_fit["pipeline"],
+        ship_fit["models"],
         ship_weights,
         ship["feature_names"],
         ship["task_type"],
         ship.get("target_transform", "none"),
         reference_target=ship.get("reference_target"),
-        training_table=ship["source_table"],
+        training_table=ship_fit["training_table"],
         objective=session.resolved().objective,
+        fitted_on=refit_record,
     )
 
     credit = journal.attribution(j, ship["source_table"])
@@ -3571,6 +3770,7 @@ def finalize_run(session: RunSession) -> dict:
     journal.mark_finalized(session.run_dir)
 
     shipped = shipped_holdout(holdout)
+    work_fit = work_fit_holdout(holdout)
     return {
         "best_experiment_id": best["experiment_id"],
         "model_type": blend["model_type"] if blend else meta["model_type"],
@@ -3581,20 +3781,26 @@ def finalize_run(session: RunSession) -> dict:
         "val_score": blend["val_score"] if blend else meta["val_score"],
         # Present only on a run that was cut with a third split, and the run is
         # over by the time the agent reads it — there is no call left to make
-        # with it, which is the point. `optimism` is the number 0023 exists for:
-        # how much the validation half flattered the model that shipped.
+        # with it, which is the point. `holdout_score` is what the bundle
+        # predicts with (the refit); `optimism` is the number 0023 exists for —
+        # how much the validation half flattered the shipped configuration — and
+        # so belongs to its work-only fit, the one the validation half scored.
         **(
             {}
             if shipped is None
             else {
                 "holdout_score": shipped["holdout_score"],
-                "optimism": shipped.get("optimism"),
+                "work_fit_holdout_score": (work_fit or {}).get("holdout_score"),
+                "optimism": (work_fit or {}).get("optimism"),
             }
         ),
         # The argmax winner's, always — a blend has no folds of its own, and this
         # is still the run's record of how far the search drifted from them.
         "cv_score": meta["cv_score"],
         "baseline_score": j["baseline"]["val_score"],
+        # Which rows the shipped models were fitted on: work + validation unless
+        # the refit failed, in which case the reason is here.
+        "fitted_on": refit_record,
         "n_experiments": len(j["leaderboard"]),
         "bundle_dir": session.rel(bundle_dir),
         # Second inputs this bundle cannot predict without. Named in the return

@@ -291,9 +291,12 @@ def test_finalize_scores_every_terminal_candidate_once(sealed):
 
     # And the gap on the finalize result belongs to whatever the bundle predicts
     # with, which is where the reader looks first.
+    # That is the refit; the work-only fit of the same configuration keeps the
+    # `shipped` mark in `scores`, and the optimism, because validation scored it.
     shipped = [e for e in record["scores"] if e.get("shipped")]
     assert len(shipped) == 1
-    assert out["holdout_score"] == shipped[0]["holdout_score"]
+    assert out["holdout_score"] == record["shipped_refit"]["holdout_score"]
+    assert out["work_fit_holdout_score"] == shipped[0]["holdout_score"]
     assert out["optimism"] == shipped[0]["optimism"]
 
 

@@ -200,6 +200,7 @@ what ships:
 |---|---|---|
 | Agent tools | 6: inspect, encode, group statistics, row filter, row-local transform, finalize | 13: the same, plus `fit_history`, `fit_stream_aggregate`, `fit_future_covariate_window`, `fit_reference_target`, and read-only tools for attribution, residuals and the run journal |
 | What ships | one fixed LightGBM (the model that ranked the tables), refitted on the selected table | a blend of lgbm, xgb, catboost and elasticnet fits, weighted by their cross-validation stability |
+| Fitted on | training + validation rows: after the table is chosen, its features and the model are refitted on every row except the test rows | the same: features and every blend member refitted on training + validation |
 | Splits | work / evaluation / sealed audit slice (20% by default, `holdout_fraction=None` turns it off) | work / validation, plus an optional sealed test slice (`holdout_fraction=`) |
 | Report | evaluation score, audit score (scored once), trivial baseline, selected table | the above, plus the search's pick vs. what shipped and each model's optimism on the sealed slice |
 
@@ -247,6 +248,28 @@ the run and scored once, after the table was chosen; it is the number to expect 
 new rows. With the full profile the report also separates the search winner from
 what actually ships, and shows each model's optimism.
 
+**What ships is refitted before it ships**
+([0092](docs/decisions/0092-what-ships-is-refitted-on-every-row-the-search-could-use.md)).
+Everything is *chosen* on fits to the training rows: the table, every feature
+step's parameters, the models and the blend weights. Once the choice is made,
+finalize fits the same features and the same models again on training + validation
+rows, and that refit is the bundle. Nothing is re-chosen; only fitted state
+(encoder mappings, stored history, out-of-fold values, model weights) is redone. On
+a forecast this matters most: the validation rows are the latest the run has, and
+a bundle fitted without them serves from a stale past. On Restaurant, an offline
+replay of this refit moved the score on 39 unseen days from 0.611 to 0.525 rmsle
+(`research/capacity_ship_minimal/`); runs of the product itself have not been
+measured yet.
+
+The test rows stay out of the refit and score what ships, once. The report prints
+the refit's score as the shipped test score, with the score of the same models
+fitted on training rows only beside it. The refit has no validation score and no
+optimism of its own, because the validation rows are in its training set; the
+training-only fits keep theirs. If a refit fails, the training-only fit ships and
+the report says why. Which
+rows a bundle was fitted on is in `bundle/pipeline.json` (`fitted_on`) and in the
+finalize result.
+
 An excerpt from a real House Prices run with the full profile and a sealed test
 slice (`ta.Agent(profile="full")`). The default profile's report is shorter:
 evaluation score, audit score, baseline, the one model, the selected table,
@@ -280,6 +303,12 @@ the precommitted, fold-spread-weighted blend scored 0.1259 on those rows — +0.
 > they existed. Choosing between models by this column would spend the last
 > honest number the run has.
 ```
+
+That run predates the refit. A run finalized now adds one more row to the table,
+`(shipped, refit)`: the same blend refitted on training + validation, with its
+test score and no validation score. The blend row above it is then marked
+`(shipped config, training rows only)`, and the report says what the refit gained or cost
+against it on the same test rows.
 
 ### Learn from limitations across runs
 
@@ -349,7 +378,8 @@ experiment with your own model, take the exact features the agent learned:
 # a plain-English explanation, and the stored recipe. No fitted values dumped.
 print(run.bundle.describe_features())
 
-# The exact leakage-safe matrix the shipped models were fitted on, plus the target.
+# The exact leakage-safe matrix the shipped models were fitted on, plus the target:
+# training + validation rows, since the shipped models are refitted on both.
 training = run.training_features()
 from sklearn.linear_model import LinearRegression
 my_model = LinearRegression().fit(
@@ -370,6 +400,11 @@ The split is deliberate and it is a safety boundary, not an inconvenience: use
 fit rows would reproduce in-fold values, not the out-of-fold ones the models were
 trained on — i.e. it would leak. `training_features()` returns the real
 out-of-fold table; `feature_table()` is the serving half.
+
+Because the shipped models are refitted on training + validation rows, so is this
+table: its out-of-fold values come from folds over those rows, and it contains the
+validation rows. Don't score a model trained on it against the run's validation
+score. The test rows are not in it, so the test score is still a fair comparison.
 
 ## Why the confirmation step
 

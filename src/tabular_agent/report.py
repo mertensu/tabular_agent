@@ -69,16 +69,30 @@ def selected_holdout(holdout: dict | None) -> dict | None:
     return None
 
 
-def shipped_holdout(holdout: dict | None) -> dict | None:
-    """The sealed score of what the bundle actually predicts with.
+def work_fit_holdout(holdout: dict | None) -> dict | None:
+    """The sealed score of the shipped configuration as fitted on work rows only.
 
-    Falls back to the selected candidate for runs written before blending, where
-    the argmax winner *was* what shipped.
+    The row ``scores`` marks ``shipped``: the blend (or the single winner) the
+    search ranked and scored. Falls back to the selected candidate for runs
+    written before blending, where the argmax winner *was* what shipped.
     """
     for entry in (holdout or {}).get("scores") or []:
         if entry.get("shipped") and entry.get("holdout_score") is not None:
             return entry
     return selected_holdout(holdout)
+
+
+def shipped_holdout(holdout: dict | None) -> dict | None:
+    """The sealed score of what the bundle actually predicts with.
+
+    Since the refit before shipping that is ``holdout["shipped_refit"]``: the
+    same configuration refitted on work + validation. Runs written before it, or
+    whose refit failed, shipped the work-only fit.
+    """
+    refit = (holdout or {}).get("shipped_refit") or {}
+    if refit.get("holdout_score") is not None:
+        return refit
+    return work_fit_holdout(holdout)
 
 
 def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str]:
@@ -91,7 +105,8 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
     """
     scores = holdout.get("scores") or []
     selected = selected_holdout(holdout)
-    shipped = shipped_holdout(holdout)
+    shipped = work_fit_holdout(holdout)
+    refit = (holdout.get("shipped_refit") or {})
     lines = ["", "## What the search cost", ""]
     if selected is not None and selected.get("optimism") is not None:
         gap = selected["optimism"]
@@ -135,12 +150,39 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
             "direct gain or cost of shipping that blend instead of the search winner.",
             "",
         ]
+    if refit.get("holdout_score") is not None and shipped is not None:
+        delta = refit.get("vs_work_fit")
+        lines += [
+            f"**What ships was refitted on training + validation rows** "
+            f"({refit.get('n_rows_fitted')} rows) after everything above was "
+            f"chosen. It scored **{refit['holdout_score']:.4f}** on the test rows"
+            + (
+                ""
+                if delta is None
+                else f", **{delta:+.4f}** against the same configuration fitted on "
+                "training rows only"
+            )
+            + ". It has no validation score or optimism: the validation rows are "
+            "in its training set.",
+            "",
+        ]
+    elif refit.get("refit_unavailable"):
+        lines += [
+            f"**The refit before shipping failed** ({refit['refit_unavailable']}), "
+            "so what ships is the work-only fit marked below.",
+            "",
+        ]
     lines += [
         "| model | experiment | validation | test | optimism |",
         "|---|---|---|---|---|",
     ]
+    refitted = refit.get("holdout_score") is not None
     for e in scores:
-        mark = " (shipped)" if e is shipped else " (search's pick)" if e.get("selected") else ""
+        mark = (
+            (" (shipped config, training rows only)" if refitted else " (shipped)")
+            if e is shipped
+            else " (search's pick)" if e.get("selected") else ""
+        )
         val = "n/a" if e.get("val_score") is None else f"{e['val_score']:.4f}"
         if e.get("holdout_score") is None:
             sealed, gap = f"not scored: {e.get('holdout_unavailable')}", ""
@@ -149,6 +191,11 @@ def _holdout_section(holdout: dict, split: dict | None, metric: str) -> list[str
             gap = "" if e.get("optimism") is None else f"{e['optimism']:+.4f}"
         lines.append(
             f"| `{e.get('model_type')}`{mark} | `{e['experiment_id']}` | {val} | {sealed} | {gap} |"
+        )
+    if refitted:
+        lines.append(
+            f"| `{refit.get('model_type')}` (shipped, refit) | `{refit['experiment_id']}` "
+            f"| n/a | {refit['holdout_score']:.4f} | |"
         )
     lines += [
         "",

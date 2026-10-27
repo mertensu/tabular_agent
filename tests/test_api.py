@@ -314,7 +314,8 @@ def test_facade_minimal_run_finalizes_and_predicts_end_to_end(tmp_path):
 
     training = run.training_features()
     assert training.columns.tolist() == ["x", "target"]
-    assert len(training) == 30  # 50 rows less 10 evaluation and 10 sealed audit
+    # What shipped was refitted on work + evaluation rows: 50 less the 10 sealed.
+    assert len(training) == 40
     assert run.journal["holdout"]["n_rows"] == 10
 
     assert len(predictions) == 3

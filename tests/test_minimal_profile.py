@@ -75,9 +75,12 @@ def test_minimal_audit_slice_is_sealed_and_scored_once(tmp_path):
     j = journal.load(session.run_dir)
     audit = j["holdout"]
     assert audit["n_rows"] == 60
-    [shipped] = audit["scores"]
-    assert shipped["shipped"] and shipped["holdout_score"] == out["audit_score"]
-    assert shipped["val_score"] == out["evaluation_score"]
+    [work_fit] = audit["scores"]
+    assert work_fit["shipped"] and work_fit["val_score"] == out["evaluation_score"]
+    # What ships is the refit on work + evaluation rows, scored once beside it.
+    refit = audit["shipped_refit"]
+    assert refit["holdout_score"] == out["audit_score"]
+    assert refit["n_rows_fitted"] == 240 and refit["fitted_on"] == "work+validation"
     assert audit["baseline_holdout_score"] is not None
 
     report = open(os.path.join(session.run_dir, out["report_path"])).read()

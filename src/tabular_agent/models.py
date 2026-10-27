@@ -636,6 +636,47 @@ class TrainResult:
     unfitted_rows: int = 0
 
 
+def _fit_frame(X, y, task_type, target_transform, reference_target, objective):
+    """``(X, y, y_fit, fittable, reference_target)``: what a fit is handed.
+
+    Reference-forward is row-wise and fixed; the optional stateless transform
+    wraps it. Prediction reverses those operations in the opposite order.
+    """
+    X = X.reset_index(drop=True)
+    y = pd.Series(np.asarray(y)).reset_index(drop=True)
+    reference_target = normalize_reference_target(reference_target, X.columns)
+    if reference_target is not None and task_type != "regression":
+        raise ValueError(
+            "reference_target applies to regression only; classification targets "
+            "are class labels, not quantities relative to a row-wise reference"
+        )
+    y_reference = pd.Series(apply_reference_target(y, X, reference_target))
+    check_target_domain(target_transform, y_reference, task_type)
+    y_fit = (
+        pd.Series(apply_target(target_transform, y_reference))
+        if target_transform != "none"
+        else y_reference
+    )
+    check_objective(objective, y_fit, target_transform)
+    return X, y, y_fit, poisson_fit_rows(objective, y_fit), reference_target
+
+
+def fit_final_model(X, y, task_type, metric, model_type="lgbm", params=None, seed=42,
+                    target_transform="none", reference_target=None, objective=None):
+    """The one all-rows fit `train_cv` ends with, without the folds before it.
+
+    For refitting a model whose folds were already run on other rows: same
+    family, parameters, seed, target transform and objective, so the only thing
+    that differs from the model `train_cv` returned is the rows.
+    """
+    X, _, y_fit, fittable, _ = _fit_frame(
+        X, y, task_type, target_transform, reference_target, objective,
+    )
+    model = _make_model(model_type, task_type, params, seed, metric, objective)
+    model.fit(X[fittable], y_fit[fittable])
+    return model
+
+
 def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, seed=42,
              target_transform="none", reference_target=None,
              time_budget_s=None, objective=None) -> TrainResult:
@@ -659,25 +700,9 @@ def train_cv(X, y, folds, task_type, metric, model_type="lgbm", params=None, see
     what was asked for, and a rule about parameters would have caught the wrong
     thing. Wall clock does not care why.
     """
-    X = X.reset_index(drop=True)
-    y = pd.Series(np.asarray(y)).reset_index(drop=True)
-    reference_target = normalize_reference_target(reference_target, X.columns)
-    if reference_target is not None and task_type != "regression":
-        raise ValueError(
-            "reference_target applies to regression only; classification targets "
-            "are class labels, not quantities relative to a row-wise reference"
-        )
-    # Reference-forward is row-wise and fixed; the optional stateless transform
-    # wraps it.  Prediction reverses those operations in the opposite order.
-    y_reference = pd.Series(apply_reference_target(y, X, reference_target))
-    check_target_domain(target_transform, y_reference, task_type)
-    y_fit = (
-        pd.Series(apply_target(target_transform, y_reference))
-        if target_transform != "none"
-        else y_reference
+    X, y, y_fit, fittable, reference_target = _fit_frame(
+        X, y, task_type, target_transform, reference_target, objective,
     )
-    check_objective(objective, y_fit, target_transform)
-    fittable = poisson_fit_rows(objective, y_fit)
     n = len(X)
     classes = None
     if task_type in ("binary", "multiclass"):
