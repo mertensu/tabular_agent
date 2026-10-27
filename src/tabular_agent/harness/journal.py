@@ -484,6 +484,28 @@ def mark_finalized(run_dir: str) -> dict:
     return journal
 
 
+#: A rejection message is kept whole up to this length: they are written to teach
+#: and are usually a few sentences, but a sandbox traceback can be long.
+MAX_REJECTION_CHARS = 2000
+
+
+@_serialized_mutation
+def record_rejection(run_dir: str, entry: dict) -> dict:
+    """One tool call the harness rejected, with the message the agent was given.
+
+    A rejected call builds no table and no experiment, so without this it leaves
+    no trace: a run whose agent tried something and was refused five times reads
+    the same afterwards as one whose agent never tried. Kept apart from the
+    leaderboard and the tables, which record what was built.
+    """
+    journal = load(run_dir)
+    entry = dict(entry)
+    entry["message"] = str(entry.get("message", ""))[:MAX_REJECTION_CHARS]
+    journal.setdefault("rejections", []).append(entry)
+    _save_unlocked(run_dir, journal)
+    return journal
+
+
 @_serialized_mutation
 def append_note(run_dir: str, note: dict) -> dict:
     journal = load(run_dir)

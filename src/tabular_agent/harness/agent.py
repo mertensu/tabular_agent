@@ -173,6 +173,7 @@ def _retryable(call, ctx=None):
     try:
         return call()
     except (ValueError, FileNotFoundError, SandboxError) as e:
+        _record_rejection(ctx, e)
         if ctx is not None and ctx.max_retries and ctx.retry >= ctx.max_retries:
             return {
                 "rejected": True,
@@ -188,6 +189,23 @@ def _retryable(call, ctx=None):
                 ),
             }
         raise ModelRetry(str(e)) from e
+
+
+def _record_rejection(ctx, error: Exception) -> None:
+    """Keep a copy of a rejection in the journal; never let that fail the call."""
+    if ctx is None:
+        return
+    try:
+        from . import journal
+
+        journal.record_rejection(ctx.deps.session.run_dir, {
+            "tool": ctx.tool_name,
+            "attempt": (ctx.retry or 0) + 1,
+            "error": type(error).__name__,
+            "message": str(error),
+        })
+    except Exception:  # noqa: BLE001 - a record is a nicety; the run is not
+        pass
 
 
 def _build_minimal_agent(model):

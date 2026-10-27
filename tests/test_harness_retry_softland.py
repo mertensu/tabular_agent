@@ -151,3 +151,17 @@ def test_a_looping_model_finalizes_itself_instead_of_crashing(tmp_path, tool_nam
     assert j["stop"]["finalized"] is True
     trained = [r for r in j["leaderboard"] if r["model_type"] != "baseline"]
     assert len(trained) == 1
+
+
+def test_a_rejection_is_recorded_in_the_journal(tmp_path):
+    """A refused call builds nothing, so the journal keeps the refusal itself."""
+    from pydantic_ai import ModelRetry
+
+    session = _session(tmp_path)
+    ctx = _FakeCtx("fit_future_covariate_window", retry=0, max_retries=TOOL_RETRIES)
+    ctx.deps = Deps(session=session)
+    with pytest.raises(ModelRetry):
+        _retryable(lambda: (_ for _ in ()).throw(ValueError("built after a filter")), ctx)
+    [entry] = journal.load(session.run_dir)["rejections"]
+    assert entry == {"tool": "fit_future_covariate_window", "attempt": 1,
+                     "error": "ValueError", "message": "built after a filter"}
