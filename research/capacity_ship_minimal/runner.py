@@ -141,6 +141,10 @@ TAG_OVERRIDES = {
     # aggregate future-known columns forward only.
     ("rossmann", "r6"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
                          "model": "deepseek-v4-pro-0813@eu"},
+    # r6 was stopped: inspect_data still said "aggregate them forward". r7 repeats
+    # it with that note pared back too.
+    ("rossmann", "r7"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
+                         "model": "deepseek-v4-pro-0813@eu"},
 }
 
 
