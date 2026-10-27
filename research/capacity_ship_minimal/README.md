@@ -1,6 +1,6 @@
 # Does the default product ship enough model?
 
-Opened 2026-10-26. Status: **run 2026-10-26; reading below.** The first House run
+Opened 2026-10-26. Status: **r1 and r2 run 2026-10-26/27; readings below.** The first House run
 exposed that the minimal profile always shipped the work table (fixed in 7e68cfc);
 both readings are from runs after that fix.
 
@@ -70,11 +70,14 @@ run would be needed before generalising beyond these two tables.
 ## Files
 
 - `runner.py` — carves the audit slice, runs `ta.Agent()`, writes `result_<ds>.json`.
-- `evaluate.py` — fits the arms, scores them, writes `arms_<ds>.json`.
+- `evaluate.py` — fits the arms, scores them, writes `arms_<ds>_<tag>.json`.
+- `rerank.py` — refits every table the run scored with each ruler, writes
+  `rerank_<ds>_<tag>.json` (added after r1, for: does the probe pick the table a
+  fitted model would?).
 - Run directories and data copies live under `_runs/capacity_ship_minimal/`
   (untracked).
 
-## Reading (2026-10-26)
+## Reading r1 (2026-10-26)
 
 Audit-slice scores; the refitted probe reproduced the shipped predictions exactly
 (max abs diff 0.0) on both datasets.
@@ -124,3 +127,45 @@ robust reading is that a *fitted* budget beats a fixed one in both directions;
 as much as or more than everything the agent built: catboost_es on the raw work
 table matches or beats the shipped probe on the agent's table. Two runs, one
 table each; a second run per dataset would be needed before generalising.
+
+## Reading r1 + r2 (2026-10-27)
+
+r2 repeats r1 with a fresh agent run on the same audit slice (`holdout_fraction=None`
+in the run, so the product's own sealed slice does not shrink work). All numbers on
+the audit slice. House rmsle (lower better), Porto auc (higher better).
+
+**Capacity: early-stopped fit vs the shipped probe, same selected table.**
+
+| | House r1 | House r2 | Porto r1 | Porto r2 |
+|---|---|---|---|---|
+| lgbm_es | −0.0019 | −0.0006 | +0.0039 * | +0.0047 * |
+| catboost_es | +0.0073 | +0.0043 | +0.0050 * | +0.0070 * |
+
+(* = paired 95% interval excludes zero; positive = better than the probe.)
+CatBoost is better in all four, clear of noise on Porto both times and at or above
+the preregistered 0.005 both times. The decision rule is met twice: ship a fitted
+model; the probe stays a ruler.
+
+**Feature gain over the raw work table, under the shipped probe.** House +0.0082,
++0.0019; Porto +0.0004, −0.0008. Only House r1 is clear of zero, and only
+marginally. The runs' own evaluation rows reported gains of 0.019/0.019 (House)
+and 0.0077/0.0087 (Porto). CatBoost on the *raw* table (House 0.1346, Porto
+0.6303) matches or beats what the product shipped in all four runs.
+
+**Does the probe pick the table a fitted model would?** Spearman between the
+probe's ranking of a run's tables and a fitted ruler's, on the evaluation rows:
+
+| | House r1 | House r2 | Porto r1 | Porto r2 |
+|---|---|---|---|---|
+| lgbm_es | 0.96 | 0.65 | 0.41 | 0.06 |
+| catboost_es | 0.39 | 0.24 | 0.75 | 0.42 |
+
+What the disagreement costs, with catboost_es shipping, audit score of the probe's
+pick vs catboost_es's own pick: House 0.1275 vs 0.1238, 0.1368 vs 0.1227; Porto
+0.6308 vs 0.6309, 0.6316 vs 0.6324. Small on Porto, up to 0.014 rmsle on House.
+
+**What this says.** A fixed 200-round ruler ranks tables only loosely like a
+fitted model does, and on these four runs most of what it ranks are near-ties
+whose differences do not replicate. The model shipped mattered more than the
+table chosen. Two datasets, one agent model (DeepSeek v4.1 flash), two runs
+each.

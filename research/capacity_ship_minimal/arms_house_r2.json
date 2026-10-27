@@ -1,0 +1,98 @@
+{
+  "dataset": "house",
+  "metric": "rmsle",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/house/runs/20261026T210951Z-09f3e969",
+  "selected_table": "tables/t9.parquet",
+  "n_selected_features": 115,
+  "n_work_features": 36,
+  "n_work_rows": 929,
+  "n_audit_rows": 292,
+  "run_evaluation_score": 0.129217,
+  "audit_scores": {
+    "probe": 0.141108,
+    "lgbm_es": 0.141682,
+    "catboost_es": 0.136823,
+    "work_probe": 0.142977,
+    "work_lgbm_es": 0.143595,
+    "work_catboost_es": 0.134615
+  },
+  "vs_probe": {
+    "lgbm_es": {
+      "gain": -0.000574,
+      "ci95": [
+        -0.004235,
+        0.003081
+      ]
+    },
+    "catboost_es": {
+      "gain": 0.004284,
+      "ci95": [
+        -0.003053,
+        0.013096
+      ]
+    },
+    "work_probe": {
+      "gain": -0.00187,
+      "ci95": [
+        -0.016558,
+        0.016467
+      ]
+    },
+    "work_lgbm_es": {
+      "gain": -0.002487,
+      "ci95": [
+        -0.01429,
+        0.010869
+      ]
+    },
+    "work_catboost_es": {
+      "gain": 0.006493,
+      "ci95": [
+        -0.005628,
+        0.019929
+      ]
+    }
+  },
+  "feature_gain": {
+    "at_probe": {
+      "gain": 0.00187,
+      "ci95": [
+        -0.016467,
+        0.016558
+      ]
+    },
+    "at_lgbm_es": {
+      "gain": 0.001913,
+      "ci95": [
+        -0.011124,
+        0.012838
+      ]
+    },
+    "at_catboost_es": {
+      "gain": -0.002208,
+      "ci95": [
+        -0.01572,
+        0.009073
+      ]
+    }
+  },
+  "fits": {
+    "probe_refit_max_abs_diff": 0.0,
+    "lgbm_es": {
+      "rounds": 240,
+      "seconds": 7.5
+    },
+    "catboost_es": {
+      "rounds": 373,
+      "seconds": 2.1
+    },
+    "work_lgbm_es": {
+      "rounds": 379,
+      "seconds": 9.4
+    },
+    "work_catboost_es": {
+      "rounds": 1521,
+      "seconds": 1.8
+    }
+  }
+}

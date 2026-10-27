@@ -1,8 +1,8 @@
 """Score the shipped probe against capacity-fitted models on the audit slice.
 
-    uv run python research/capacity_ship_minimal/evaluate.py house
+    uv run python research/capacity_ship_minimal/evaluate.py house [tag]
 
-Reads `result_<name>.json` written by runner.py and writes `arms_<name>.json`.
+Reads `result_<name>_<tag>.json` written by runner.py and writes `arms_<name>_<tag>.json`.
 No LLM calls.
 """
 
@@ -104,8 +104,8 @@ def paired(metric, y, base, other):
             "ci95": [round(float(lo), 6), round(float(hi), 6)]}
 
 
-def main(name: str) -> int:
-    result = json.loads((HERE / f"result_{name}.json").read_text())
+def main(name: str, tag: str = "r1") -> int:
+    result = json.loads((HERE / f"result_{name}_{tag}.json").read_text())
     run = Run(result["run_dir"])
     task = run.journal["task"]
     target, metric, task_type = task["target"], task["metric"], task["task_type"]
@@ -167,10 +167,10 @@ def main(name: str) -> int:
         },
         "fits": meta,
     }
-    (HERE / f"arms_{name}.json").write_text(json.dumps(out, indent=2) + "\n")
+    (HERE / f"arms_{name}_{tag}.json").write_text(json.dumps(out, indent=2) + "\n")
     print(json.dumps(out, indent=2), flush=True)
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1]))
+    raise SystemExit(main(*sys.argv[1:3]))

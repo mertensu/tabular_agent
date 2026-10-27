@@ -1,7 +1,9 @@
 """One run of the default product per dataset, with an audit slice it never sees.
 
-    uv run python research/capacity_ship_minimal/runner.py house
-    uv run python research/capacity_ship_minimal/runner.py porto
+    uv run python research/capacity_ship_minimal/runner.py house [tag]
+    uv run python research/capacity_ship_minimal/runner.py porto [tag]
+
+``tag`` (default r1) names the repeat; every repeat shares one audit slice.
 
 See README.md for the question and the preregistered decision rule.
 """
@@ -112,10 +114,13 @@ def carve(name: str) -> Path:
     return files
 
 
-def main(name: str) -> int:
+def main(name: str, tag: str = "r1") -> int:
     cfg = DATASETS[name]
     files = carve(name)
-    agent = ta.Agent(model=agent_model(), run_root=OUT / name / "runs")
+    # holdout_fraction=None: the audit slice carved above is this experiment's
+    # sealed rows, and r1 ran before the product sealed one of its own.
+    agent = ta.Agent(model=agent_model(), run_root=OUT / name / "runs",
+                     holdout_fraction=None)
     plan = agent.inspect(files)
     plan.target = cfg["target"]
     plan.metric = cfg["metric"]
@@ -131,16 +136,17 @@ def main(name: str) -> int:
     run = agent.run(plan, prompt=cfg["prompt"])
     result = {
         "dataset": name,
+        "tag": tag,
         "model": MODEL,
         "run_dir": str(run.run_dir),
         "elapsed_min": round((time.time() - started) / 60, 2),
         "identifier_columns": plan.identifier_columns,
         "n_serving_columns": len(plan.serving_columns),
     }
-    (HERE / f"result_{name}.json").write_text(json.dumps(result, indent=2) + "\n")
+    (HERE / f"result_{name}_{tag}.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2), flush=True)
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1]))
+    raise SystemExit(main(*sys.argv[1:3]))
