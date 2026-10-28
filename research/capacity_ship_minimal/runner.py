@@ -174,6 +174,9 @@ TAG_OVERRIDES = {
     # booking, with when it was made), now that the public plan can carry them.
     ("restaurant", "r4"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium",
                            "streams": True},
+    # r5 repeats r4 unchanged: how far apart are two runs of one setup?
+    ("restaurant", "r5"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium",
+                           "streams": True},
 }
 
 
