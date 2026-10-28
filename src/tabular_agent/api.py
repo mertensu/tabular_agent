@@ -485,6 +485,7 @@ class Bundle:
         streams: dict | None = None,
         *,
         include_input: bool = False,
+        known_past: pd.DataFrame | str | os.PathLike | None = None,
     ) -> pd.DataFrame:
         """Apply learned feature lineage to new rows without running the models.
 
@@ -507,7 +508,8 @@ class Bundle:
 
         raw = self._raw_frame(rows)
         matrix = feature_table_bundle(
-            self._bundle, self._prepare(raw.copy()), streams=streams
+            self._bundle, self._prepare(raw.copy()), streams=streams,
+            known_past=self._known_past(known_past),
         )
         if len(matrix) != len(raw):
             raise ValueError(
@@ -540,17 +542,35 @@ class Bundle:
         )
 
 
+    def _known_past(self, known_past) -> pd.DataFrame | None:
+        """The caller's earlier rows of the future-known columns, prepared like ``rows``."""
+        if known_past is None:
+            return None
+        return self._prepare(self._raw_frame(known_past))
+
     def predict(
         self,
         rows: pd.DataFrame | str | os.PathLike,
         streams: dict | None = None,
+        known_past: pd.DataFrame | str | os.PathLike | None = None,
     ):
-        return predict_bundle(self._bundle, self._prepare(self._raw_frame(rows)), streams=streams)
+        """Predict ``rows``.
+
+        ``known_past`` is earlier rows of the declared future-known columns (series
+        key, ordering column, the columns themselves), for windows that look back
+        before the first forecast row (0095). A bundle whose stored values do not
+        reach the forecast start refuses rather than computing those windows over
+        fewer periods than it was trained on; passing them, or refitting on recent
+        rows, is the fix. Nothing is predicted for its rows.
+        """
+        return predict_bundle(self._bundle, self._prepare(self._raw_frame(rows)),
+                              streams=streams, known_past=self._known_past(known_past))
 
     def explain(
         self,
         rows: pd.DataFrame | str | os.PathLike,
         streams: dict | None = None,
+        known_past: pd.DataFrame | str | os.PathLike | None = None,
     ) -> Explanation:
         """Per-feature attribution of the shipped prediction for each row.
 
@@ -560,7 +580,8 @@ class Bundle:
         scale guarantees.
         """
         return explain_bundle(
-            self._bundle, self._prepare(self._raw_frame(rows)), streams=streams
+            self._bundle, self._prepare(self._raw_frame(rows)), streams=streams,
+            known_past=self._known_past(known_past),
         )
 
 

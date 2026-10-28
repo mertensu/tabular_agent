@@ -7,7 +7,7 @@ was rejected, and what it cost. They are written for someone who knows data
 science but has never seen this codebase — project-specific vocabulary is
 explained where it first matters.
 
-This directory holds the fifteen that still carry the product: its architecture,
+This directory holds the sixteen that still carry the product: its architecture,
 its safety invariants, how it measures, what it ships, and its public contracts.
 The other eighty — measurements, refuted mechanisms, dataset findings, plans that
 were superseded — are in [`research/archive/decisions/`](../../research/archive/decisions/),
@@ -83,6 +83,8 @@ Vocabulary used throughout:
 - [0088 — A run may propose a capability gap, but not change the product](0088-a-run-may-propose-a-capability-gap-but-not-change-the-product.md)
 - [0089 — Forecasting is an explicit public contract, not an inferred mode](0089-forecasting-is-an-explicit-public-contract.md)
 - [0093 — A known covariate's past is known too](0093-a-known-covariates-past-is-known-too.md)
+- [0095 — A window over a known covariate's past is never guessed](0095-a-window-over-a-known-past-is-never-guessed.md)
+  *(revises 0093)*
 
 ## Related reading
 

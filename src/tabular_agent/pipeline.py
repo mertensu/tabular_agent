@@ -89,8 +89,13 @@ class Pipeline:
         """Named second inputs this pipeline cannot be replayed without."""
         return sorted(self.stream_requirements())
 
-    def transform(self, df: pd.DataFrame, streams: dict | None = None) -> pd.DataFrame:
+    def transform(self, df: pd.DataFrame, streams: dict | None = None,
+                  known_past: pd.DataFrame | None = None) -> pd.DataFrame:
         """Replay every step. ``streams`` supplies the second inputs by name.
+
+        ``known_past`` is earlier rows of the declared future-known columns, read
+        only by future-covariate windows that look back before ``df``'s first rows
+        (0095); nothing is predicted for them.
 
         Default ``None``, so every pipeline built before streams existed replays
         exactly as it did. A pipeline that *needs* one and is handed none fails
@@ -114,6 +119,8 @@ class Pipeline:
                 # them had to change to make room for this.
                 if step["encoder"]["kind"] == "stream_aggregate":
                     out = enc.transform(out, streams.get(step["encoder"]["stream"]))
+                elif step["encoder"]["kind"] == "future_window":
+                    out = enc.transform(out, known_past=known_past)
                 else:
                     out = enc.transform(out)
             elif step["type"] == "transform":
@@ -268,7 +275,8 @@ def load_bundle(bundle_dir: str) -> dict:
 
 
 def feature_table_bundle(bundle: dict, raw_df: pd.DataFrame,
-                         streams: dict | None = None) -> pd.DataFrame:
+                         streams: dict | None = None,
+                         known_past: pd.DataFrame | None = None) -> pd.DataFrame:
     """Replay lineage and return the exact matrix handed to every shipped model.
 
     This is the reusable half of :func:`predict_bundle`: a custom estimator
@@ -304,7 +312,9 @@ def feature_table_bundle(bundle: dict, raw_df: pd.DataFrame,
             + "; ".join(converted),
             stacklevel=2,
         )
-    features = bundle["pipeline"].transform(raw_df, streams=streams)
+    if known_past is not None:
+        known_past, _ = conform_input_dtypes(known_past, bundle.get("input_dtypes") or {})
+    features = bundle["pipeline"].transform(raw_df, streams=streams, known_past=known_past)
     missing = [name for name in bundle["feature_names"] if name not in features]
     if missing:
         raise ValueError(
@@ -322,7 +332,8 @@ def feature_table_bundle(bundle: dict, raw_df: pd.DataFrame,
 
 
 def predict_bundle(bundle: dict, raw_df: pd.DataFrame,
-                   streams: dict | None = None) -> np.ndarray:
+                   streams: dict | None = None,
+                   known_past: pd.DataFrame | None = None) -> np.ndarray:
     """Replay the lineage, predict with every model in the bundle, combine.
 
     ``streams`` supplies the second inputs a stream aggregate needs, by name
@@ -345,7 +356,7 @@ def predict_bundle(bundle: dict, raw_df: pd.DataFrame,
     a single-model bundle the two are identical, which is every bundle this
     library wrote before 0044.
     """
-    X = feature_table_bundle(bundle, raw_df, streams=streams)
+    X = feature_table_bundle(bundle, raw_df, streams=streams, known_past=known_past)
     task_type = bundle["task_type"]
     transform = bundle.get("target_transform", "none")
     reference_target = bundle.get("reference_target")

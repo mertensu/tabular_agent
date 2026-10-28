@@ -165,14 +165,64 @@ def test_a_served_block_alone_reads_the_stored_past():
         assert served.loc[first, "dataset_id_T2m_roll4_mean"] == pytest.approx(expected)
 
 
-def test_a_stored_past_that_is_not_adjacent_is_not_used():
-    """A gap between the stored tail and the delivered rows: start from the rows."""
+def test_a_gap_before_the_delivered_rows_is_refused():
+    """0095: a window over fewer periods than training saw is not computed."""
     df = _panel(series=1, blocks=3)
     enc = FutureWindowEncoder([], "T2m", "time", HORIZON, [
         {"family": "trailing", "window": 4, "stat": "count"},
     ]).fit(df.iloc[:BLOCK_ROWS])
-    served = enc.transform(df.iloc[-BLOCK_ROWS:][["time", "T2m"]])
-    assert served["T2m_roll4_count"].iloc[0] == 1
+    with pytest.raises(ValueError, match="known_past") as err:
+        enc.transform(df.iloc[-BLOCK_ROWS:][["time", "T2m"]])
+    # It names the column, how much past is needed and where the record ends.
+    assert "'T2m'" in str(err.value) and "3 rows" in str(err.value)
+    assert "last recorded 2018-01-07 23:45:00" in str(err.value)
+    assert "first delivered 2018-01-15" in str(err.value)
+
+
+def test_known_past_closes_the_gap_and_reproduces_the_whole_series():
+    df = _panel(series=2, blocks=3)
+    aggs = [{"family": "trailing", "window": 4, "stat": "sum"},
+            {"family": "forward", "window": 4, "stat": "sum"}]
+    enc = FutureWindowEncoder(["dataset_id"], "T2m", "time", HORIZON, aggs)
+    enc.fit(df.groupby("dataset_id").head(BLOCK_ROWS))
+    block = df.groupby("dataset_id").tail(BLOCK_ROWS)
+    # The block in the middle is the gap: known, but not in the forecast rows.
+    middle = df.drop(df.groupby("dataset_id").head(BLOCK_ROWS).index).drop(block.index)
+    served = enc.transform(block[["dataset_id", "time", "T2m"]],
+                           known_past=middle[["dataset_id", "time", "T2m"]])
+    whole = enc.transform(df)
+    pd.testing.assert_frame_equal(served[enc.output_columns],
+                                  whole.loc[block.index, enc.output_columns])
+
+
+def test_known_past_alone_is_enough_without_a_stored_tail():
+    df = _panel(series=1, blocks=2)
+    enc = FutureWindowEncoder([], "T2m", "time", HORIZON, [
+        {"family": "trailing", "window": 4, "stat": "mean"},
+    ]).fit(df.iloc[:BLOCK_ROWS])
+    enc.tail_ = {}
+    block = df.iloc[-BLOCK_ROWS:][["time", "T2m"]]
+    served = enc.transform(block, known_past=df.iloc[BLOCK_ROWS - 3:BLOCK_ROWS])
+    assert served["T2m_roll4_mean"].iloc[0] == pytest.approx(
+        df["T2m"].iloc[BLOCK_ROWS - 3:BLOCK_ROWS + 1].mean())
+
+
+def test_known_past_must_carry_the_columns_the_windows_read():
+    df = _panel(series=1, blocks=2)
+    enc = FutureWindowEncoder([], "T2m", "time", HORIZON, [
+        {"family": "trailing", "window": 4, "stat": "mean"},
+    ]).fit(df.iloc[:BLOCK_ROWS])
+    with pytest.raises(ValueError, match="known_past lacks"):
+        enc.transform(df.iloc[-BLOCK_ROWS:], known_past=df[["time"]])
+
+
+def test_a_replay_of_the_training_rows_needs_no_past():
+    """Rows that start where training started are at the series start, as in fit."""
+    df = _panel(series=2, blocks=2)
+    enc = FutureWindowEncoder(["dataset_id"], "T2m", "time", HORIZON, [
+        {"family": "trailing", "window": 16, "stat": "mean"},
+    ]).fit(df)
+    assert enc.transform(df)["dataset_id_T2m_roll16_mean"].notna().all()
 
 
 def test_an_encoder_written_before_lookback_still_resets():

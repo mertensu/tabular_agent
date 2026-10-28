@@ -208,7 +208,7 @@ def test_bundle_predict_replays_static_join(monkeypatch, tmp_path):
     monkeypatch.setattr(public_api, "load_bundle", lambda _: {"sentinel": True})
     seen = {}
 
-    def fake_predict(bundle, frame, streams=None):
+    def fake_predict(bundle, frame, streams=None, known_past=None):
         seen["frame"] = frame
         return frame["Region"].to_numpy()
 

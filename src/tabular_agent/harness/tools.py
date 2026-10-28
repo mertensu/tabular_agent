@@ -405,8 +405,15 @@ def _score_on_held_out(
     pipeline = _load_lineage(source_path, spec.task_type)
     # The target is dropped before the pipeline sees the rows (0009): a transform
     # that can read the target is a transform that can leak it.
+    # Rows scored after a gap (the holdout, behind validation) get the rows in
+    # between as the known covariates' past; only future-covariate windows read
+    # it, and those columns are declared known before and after the start (0095).
+    known_past = None
+    if os.path.abspath(rows_path) != os.path.abspath(session.val_path):
+        known_past = load_table(session.val_path).drop(columns=[spec.target])
     features = pipeline.transform(
-        val.drop(columns=[spec.target]), streams=_run_streams(session)
+        val.drop(columns=[spec.target]), streams=_run_streams(session),
+        known_past=known_past,
     )
 
     missing = [c for c in feature_names if c not in features.columns]

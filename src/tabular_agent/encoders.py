@@ -1794,42 +1794,114 @@ class FutureWindowEncoder:
                 self.tail_[str(key)] = [part["p"].tolist(), part["v"].tolist()]
         return self
 
-    def _with_stored_past(self, work: pd.DataFrame) -> pd.DataFrame:
-        """``work`` with each series' stored tail prepended where it is contiguous.
+    def _recorded_past(self, known_past: pd.DataFrame | None) -> dict[str, list]:
+        """``{series key: [periods, values]}`` from a caller's ``known_past`` frame."""
+        if known_past is None:
+            return {}
+        missing = [c for c in [*self.by, self.order, self.value] if c not in known_past.columns]
+        if missing:
+            raise ValueError(
+                f"known_past lacks {missing}: it has to carry the series key, the "
+                f"ordering column and {self.value!r} for the periods before the "
+                "delivered rows."
+            )
+        frame = pd.DataFrame({
+            "k": self._keys(known_past), "p": to_periods(known_past[self.order]),
+            "v": pd.to_numeric(known_past[self.value], errors="coerce").to_numpy(dtype=float),
+        }).dropna(subset=["p"])
+        return {str(k): [part["p"].to_numpy(), part["v"].to_numpy()]
+                for k, part in frame.groupby("k", sort=False)}
 
-        Prepended rows get negative ``_src`` so they can be dropped after the
-        rolling windows have read them. A tail is used only for the values strictly
-        before the series' first delivered row, and only if the newest of those is
-        within 1.5 spacings of it: a gap means the stored values are not the
-        window's predecessors, and the window then starts where the rows do.
+    def _with_stored_past(self, work: pd.DataFrame,
+                          known_past: pd.DataFrame | None = None) -> pd.DataFrame:
+        """``work`` with each series' past prepended, or a refusal if it has a gap.
+
+        The past is the caller's ``known_past`` where it has the period, else the
+        tail stored at fit. Only values strictly before a series' first delivered
+        row are read, and only the contiguous run that ends there. Prepended rows
+        get negative ``_src`` so they can be dropped after the windows have read
+        them.
+
+        A series whose recorded past does not reach its first delivered row is
+        refused (0095): its trailing windows would be computed over fewer periods
+        than the model was trained on, and a short "open days in the last 14"
+        reads as a closure. A series with nothing recorded before its first row is
+        at its start, as it was in training, and needs no past.
         """
-        if not self.tail_ or self.spacing_ is None:
+        need = self._lookback_rows
+        if not need:
             return work
+        supplied = self._recorded_past(known_past)
         first = work.groupby("_key")["_p"].min()
-        parts, src = [work], -1
+        parts, src, gaps = [work], -1, []
         for key, start in first.items():
-            stored = self.tail_.get(str(key))
-            if not stored:
+            sources = [x for x in (supplied.get(str(key)), self.tail_.get(str(key))) if x]
+            if not sources:
                 continue
-            p = np.asarray(stored[0], dtype=float)
-            v = np.asarray(stored[1], dtype=float)
+            p = np.concatenate([np.asarray(x[0], dtype=float) for x in sources])
+            v = np.concatenate([np.asarray(x[1], dtype=float) for x in sources])
             before = p < start
-            if not before.any() or start - p[before].max() > 1.5 * self.spacing_:
+            if not before.any():
                 continue
-            n = int(before.sum())
+            # First occurrence wins, so a supplied value replaces a stored one.
+            p, idx = np.unique(p[before], return_index=True)
+            v = v[before][idx]
+            spacing = self.spacing_ if self.spacing_ else np.inf
+            if start - p[-1] > 1.5 * spacing:
+                gaps.append((key, p[-1], start))
+                continue
+            steps = np.diff(p)
+            breaks = np.flatnonzero(steps > 1.5 * spacing)
+            lo = breaks[-1] + 1 if len(breaks) else 0
+            p, v = p[lo:][-need:], v[lo:][-need:]
+            n = len(p)
             parts.append(pd.DataFrame({
-                "_src": np.arange(src, src - n, -1), "_key": key,
-                "_p": p[before], "_v": v[before],
+                "_src": np.arange(src, src - n, -1), "_key": key, "_p": p, "_v": v,
             }))
             src -= n
+        if gaps:
+            raise ValueError(self._gap_message(gaps, need))
         if len(parts) == 1:
             return work
         ext = pd.concat(parts, ignore_index=True)
         return ext.sort_values(["_key", "_p", "_src"], kind="stable").set_index(
             "_src", drop=False)
 
-    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _gap_message(self, gaps: list, need: int) -> str:
+        key, last, start = gaps[0]
+
+        def when(p):
+            if self._order_is_date:
+                t = pd.Timestamp("1970-01-01") + pd.Timedelta(days=float(p))
+                return str(t.round("s").date() if t == t.normalize() else t.round("s"))
+            return f"{p:g}"
+
+        series = f"series {key!r}" if self.by else "the series"
+        return (
+            f"cannot compute the trailing windows over {self.value!r}: they need its "
+            f"values on the {need} rows before each series' first delivered row, and for "
+            f"{len(gaps)} series what this bundle recorded ends before that "
+            f"({series}: last recorded {when(last)}, first delivered {when(start)}). "
+            "A window over fewer rows than the model was trained on is a different "
+            "feature, so it is not computed. Pass the values as "
+            f"known_past=<rows with {[*self.by, self.order, self.value]}> covering at "
+            f"least {need} rows per series before the first delivered row, or refit on rows "
+            "that reach the forecast start."
+        )
+
+    def transform(self, df: pd.DataFrame,
+                  known_past: pd.DataFrame | None = None) -> pd.DataFrame:
+        """The windows for ``df``; ``known_past`` supplies the covariate's earlier values.
+
+        ``known_past`` is only read by trailing windows, for periods before each
+        series' first row in ``df``, and in preference to the tail stored at fit.
+        It needs the series key, the ordering column and the covariate; nothing is
+        predicted for its rows.
+        """
         out = df.copy()
+        # Dates (or ISO text read back from CSV) become days; only for messages.
+        self._order_is_date = (self.order in df.columns
+                               and not pd.api.types.is_numeric_dtype(df[self.order]))
         missing = [c for c in [*self.by, self.order, self.value] if c not in df.columns]
         if missing:
             raise ValueError(
@@ -1862,7 +1934,7 @@ class FutureWindowEncoder:
         with np.errstate(invalid="ignore"):
             block = np.floor((gmax - work["_p"].to_numpy()) / self.block_length + 1e-9)
         work["_block"] = block
-        past = self._with_stored_past(work) if self.lookback else work
+        past = self._with_stored_past(work, known_past) if self.lookback else work
 
         results: dict[str, pd.Series] = {}
         for spec in self.aggregates:

@@ -194,7 +194,8 @@ def _space(task_type: str, target_transform: str, objective: str | None = None) 
     return f"{target_transform}(target)"
 
 
-def explain_bundle(bundle: dict, raw_df: pd.DataFrame, streams: dict | None = None) -> Explanation:
+def explain_bundle(bundle: dict, raw_df: pd.DataFrame, streams: dict | None = None,
+                   known_past: pd.DataFrame | None = None) -> Explanation:
     """Attribute the bundle's shipped prediction to features, one row at a time.
 
     Replays the exact lineage :func:`~tabular_agent.pipeline.predict_bundle` does —
@@ -210,8 +211,10 @@ def explain_bundle(bundle: dict, raw_df: pd.DataFrame, streams: dict | None = No
             "explain() supports regression and binary classification; multiclass "
             "attribution is not built"
         )
-    features = bundle["pipeline"].transform(raw_df, streams=streams or {})
-    X = features[bundle["feature_names"]]
+    # The same replay as prediction: serving types restored, then the lineage.
+    from .pipeline import feature_table_bundle
+
+    X = feature_table_bundle(bundle, raw_df, streams=streams, known_past=known_past)
     weights = np.asarray(bundle["weights"], dtype=float)
     if len(weights) != len(bundle["models"]):
         raise ValueError(
