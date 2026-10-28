@@ -500,3 +500,33 @@ next 7 days (sum), as a `FutureWindowEncoder` step in the lineage.
 - What is missing is signal the agent does not build. The tool can express these
   windows and 0094 can ship them; in r4–r11 the agent never built short windows
   over `Open`.
+
+## Rossmann r12 (2026-10-28): gpt-6.1-terra@eu, medium reasoning, after 0094
+
+Current code (0094 selection, serving types restored, two-horizon validation), the
+r10 setup otherwise. 24 minutes, 26 tables. Shipped t26 (validation 0.1159; r11
+shipped 0.1466 on the same 96 days).
+
+- **It built the short closure windows unprompted**: `Open` over the last / next 7
+  days (t10, +0.0077, passes), then the last / next 2, 3 and 14 days (t19). Then a
+  `Sales > 0` filter and trend ratios (recent vs long-run level per store × weekday
+  and promo). Each of t19 → t20 → t26 was inside its own noise; against t15, the
+  nearest eligible ancestor, the chain cleared it (+0.0063 vs 0.0060), so 0094
+  shipped t26. 0090 would have shipped t15, without the closure windows.
+- It analysed its own errors by segment (Sunday 24% error vs 13–15% on other days),
+  tried filters side by side and dropped what did not help.
+- It cannot be told apart from recall: closure windows, holiday distances and trend
+  ratios are well-known public Rossmann features, and the notes name the dataset.
+
+| r12 t26 | Kaggle private / public |
+|---|---|
+| refit on all rows | 0.1233 / **0.1070** (public ~1,110 / 3,300) |
+| bundle as shipped (data to 13 June) | 0.1303 / 0.4787 |
+| as shipped, our 48 test days passed as `known_past` (0095) | not submitted |
+
+The shipped bundle's 0.479 was a product bug (0095): its trailing `Open` windows
+could not reach back over the seven weeks between its data and Kaggle's test, and
+were computed over the forecast rows alone, so the first days read as closures
+(predictions ~2× on 1 August, normal by mid-August). The bundle now refuses and
+takes `known_past`; with it, predictions match the all-rows refit day by day
+(median ratio 0.98–1.03).
