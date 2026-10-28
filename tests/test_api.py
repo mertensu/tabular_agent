@@ -1,4 +1,5 @@
 import json
+import json
 from pathlib import Path
 
 import numpy as np
@@ -487,6 +488,68 @@ def test_forecasting_agent_passes_explicit_workflow_to_shared_engine(monkeypatch
     assert session.split_on == "Date"
     assert session.split_record()["forecast_horizon"] == 7
     assert session.split_record()["workflow"] == "forecast"
+
+
+def test_a_declared_stream_reaches_a_forecast_run_and_nothing_else(monkeypatch, tmp_path):
+    frame = pd.DataFrame({
+        "Date": pd.date_range("2024-01-01", periods=40),
+        "Store": [1, 2] * 20,
+        "target": np.arange(40, dtype=float),
+    })
+    stream_path = tmp_path / "bookings.parquet"
+    pd.DataFrame({
+        "Store": [1, 2],
+        "for_date": pd.to_datetime(["2024-01-05", "2024-01-06"]),
+        "booked_at": pd.to_datetime(["2024-01-01", "2024-01-02"]),
+        "party": [2.0, 4.0],
+    }).to_parquet(stream_path, index=False)
+    streams = {"bookings": {"path": str(stream_path), "event_time": "for_date",
+                            "observed_at": "booked_at", "notes": "one row per booking"}}
+
+    iid = ta.Agent(model=object(), run_root=tmp_path / "iid")
+    iid_plan = iid.inspect(frame)
+    iid_plan.target = "target"
+    iid_plan.serving_columns = ["Date", "Store"]
+    iid_plan.split_on = False
+    iid_plan.streams = streams
+    with pytest.raises(ValueError, match="ordered split"):
+        iid.run(iid_plan)
+
+    agent = ta.ForecastingAgent(model=object(), run_root=tmp_path / "forecast")
+    plan = agent.inspect(frame)
+    plan.target = "target"
+    plan.serving_columns = ["Date", "Store"]
+    plan.split_on = "Date"
+    plan.forecast_horizon = 7
+    plan.streams = streams
+    assert "streams" in plan.summary()
+    called = {}
+
+    def fake_run(session, prompt, model):
+        called["session"] = session
+
+    def fake_finalize(session):
+        bundle = Path(session.run_dir) / "bundle"
+        bundle.mkdir()
+        (bundle / "pipeline.json").write_text("{}")
+        return {"bundle_dir": "bundle"}
+
+    class FakeRun:
+        def __init__(self, run_dir):
+            self.run_dir = str(run_dir)
+
+    monkeypatch.setattr(public_api, "run_agent", fake_run)
+    monkeypatch.setattr(public_api, "finalize_run", fake_finalize)
+    monkeypatch.setattr(public_api, "Run", FakeRun)
+
+    agent.run(plan)
+    session = called["session"]
+    assert session.stream_names() == ["bookings"]
+    assert session.stream_spec("bookings")["observed_at"] == "booked_at"
+    manifest = json.loads((Path(session.run_dir) / "prepared" / "api_plan.json").read_text())
+    assert manifest["streams"] == {"bookings": {"event_time": "for_date",
+                                                "observed_at": "booked_at",
+                                                "notes": "one row per booking"}}
 
 
 def test_forecasting_agent_is_public():

@@ -95,6 +95,13 @@ class DataPlan:
     #: byte-identical to a run without the field. Must be a subset of
     #: `serving_columns`; `validate()` checks it.
     future_known: list[str] = field(default_factory=list)
+    #: Second inputs recorded one event per row, each with the time it is about
+    #: and the time it became known (0062): bookings for a date, orders for a
+    #: delivery. ``{name: {"path", "event_time", "observed_at", "notes"?}}``. The
+    #: owner's assertion, never inferred: which time column is which cannot be
+    #: read off the file, and the wrong way round builds a feature out of the
+    #: future. Forecasts only; empty (the default) runs as before.
+    streams: dict[str, dict] = field(default_factory=dict)
     _frame: pd.DataFrame | None = field(default=None, repr=False)
 
     @classmethod
@@ -227,6 +234,8 @@ class DataPlan:
                     "                         plan.future_known = [...] to offer "
                     "fit_future_covariate_window"
                 )
+        if self.streams:
+            lines.append(f"  (i) streams            {_preview(sorted(self.streams))}")
         # Optional, like future_known: shown only when the owner set it, because
         # the default needs no confirmation.
         if self.objective is not None:
@@ -328,6 +337,11 @@ class DataPlan:
                     "the target cannot be future_known: if its future values were "
                     "known there would be nothing to forecast"
                 )
+        if self.streams and not isinstance(self.split_on, str):
+            raise ValueError(
+                "streams need an ordered split: a record is usable by a row only if "
+                "it was known before that row, so the rows must have a time"
+            )
         if self.split_on is None:
             raise ValueError(
                 "split_on is unconfirmed; set a column for ordered splitting or False "
@@ -396,6 +410,10 @@ class DataPlan:
             "target": self.target,
             "serving_columns": list(self.serving_columns or []),
             "future_known": list(self.future_known),
+            # What each stream is, not the file: a bundle is handed its streams
+            # fresh at predict time (0062), so the declaration says what to pass.
+            "streams": {name: {k: v for k, v in spec.items() if k != "path"}
+                        for name, spec in self.streams.items()},
             "identifier_columns": list(self.identifier_columns or []),
             "split_on": self.split_on,
             "joins": [asdict(join) for join in self.joins if join.decision == "accepted"],
@@ -763,6 +781,7 @@ class Agent:
             serving_columns=plan.serving_columns,
             future_known=plan.future_known,
             fit_time_budget_s=self.fit_time_budget_s,
+            streams=plan.streams or None,
             profile=self.profile,
             workflow=self.workflow,
         )
