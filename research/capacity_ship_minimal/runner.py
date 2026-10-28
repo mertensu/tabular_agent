@@ -177,6 +177,9 @@ TAG_OVERRIDES = {
     # r5 repeats r4 unchanged: how far apart are two runs of one setup?
     ("restaurant", "r5"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium",
                            "streams": True},
+    # r6 repeats r5 after history windows shorter than a fold's block are refused.
+    ("restaurant", "r6"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium",
+                           "streams": True},
 }
 
 
