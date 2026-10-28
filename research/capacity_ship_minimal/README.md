@@ -614,9 +614,9 @@ so a refit learns the same coefficients). Inserted into r3's shipped member:
 
 The clip is worth +0.0077 private and +0.0066 public on Kaggle. What the shipped
 bundle still loses to the all-rows refit (0.035 private) is close to r2's 0.030:
-staleness, as in r2. On the all-rows refit the clip changes nothing (+0.0002): its
-Kaggle days are 1–39 days after its rows, where no served value left the fitted
-range by much; its remaining large predictions are the in-range case below. Files
+staleness, as in r2. On the all-rows refit the clip changes almost nothing (+0.0002;
+its largest prediction goes from 795 to 633): what remains large there is the
+in-range case below. Files
 `submission_r3_shipped_clip.csv`, `submission_r3_all_rows_clip.csv`.
 
 **Not fixed: the linear member still leaves the target's range on in-range
