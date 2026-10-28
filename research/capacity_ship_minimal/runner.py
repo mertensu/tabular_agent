@@ -180,6 +180,12 @@ TAG_OVERRIDES = {
     # r6 repeats r5 after history windows shorter than a fold's block are refused.
     ("restaurant", "r6"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium",
                            "streams": True},
+    # r7 and r8 repeat r6 with the agent's first finalize returning an inventory of
+    # the run (what would ship, what passed and was never built on, tools unused).
+    ("restaurant", "r7"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium",
+                           "streams": True},
+    ("restaurant", "r8"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium",
+                           "streams": True},
 }
 
 
