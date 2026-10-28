@@ -749,3 +749,9 @@ bias (day-1 mean 24.7 visitors vs r4's 21.3); the shipped file starts 40 days ou
 where the window is empty (shipped / all-rows 0.70–0.88 per day, against r4's
 0.82–0.93). **Prediction before submitting:** r5's all-rows file scores worse than
 r4's, by more on the public board (the early days).
+
+**Fixed (option 1 of three):** the history tool now refuses windows shorter than the
+furthest a validation row lies past its fold's freeze. For Restaurant's runs that is
+83 days. It would have refused r5's 28 / 56 / 70-day windows, and also r2's 56-day
+store window in its shipped table; r3's and r4's (90 days and up) pass. Conservative:
+it refuses windows that are only partly affected too.
