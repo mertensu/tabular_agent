@@ -788,3 +788,8 @@ bookings were added on top of t7 in t8 (+0.0009), but the agent continued from t
 **Kaggle, all-rows refit (private / public):** r6 0.5309 / 0.4954; r4 **0.5286** /
 0.4960; r2 **0.5181** / **0.4840**. r6 is 0.0013 ahead of r4 on the test days and
 0.0023 behind on Kaggle private: level within noise. r2 stays ~0.012 ahead.
+
+**Kaggle, as shipped (private / public):** r6 0.5645 / 0.5383; r4 0.5693 / **0.5214**;
+r2 **0.5481** / 0.5017. r6 loses 0.034 private to its all-rows refit (r2: 0.030), the
+ordinary staleness. Against r4 it is 0.005 better on private and 0.017 worse on public:
+r6 shipped no booking feature, and r4's bookings were fresh for Kaggle's early days.
