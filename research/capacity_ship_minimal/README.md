@@ -476,3 +476,27 @@ differ, including r10, where the offline check had it slightly worse. r11's t24 
 best probe score, 0.1318 / 0.1234) did worse than t20: picking by validation alone
 would not have done this. r11's t20 (0.1270) is the best Rossmann submission of the
 experiment.
+
+## Where the remaining gap is: features, not models (2026-10-28, `gap_split.py`)
+
+On r11's t20 (the 0094 pick), r11's 7 shipped recipes fitted on training rows
+(validation), training + validation (our 48 test days) and all rows (Kaggle). rmspe.
+
+| r11 t20 | blend, shipped weights | best member by validation |
+|---|---|---|
+| as the agent built it | 0.1215 · Kaggle **0.1270** / 0.1145 | 0.1292 |
+| + short calendar windows | **0.1171** · Kaggle **0.1226** / 0.1139 | 0.1204 |
+
+Test days, then Kaggle private / public. The windows are 12 columns per store:
+`Open`, `SchoolHoliday`, `Promo` yesterday / tomorrow (2-row min) and over the last /
+next 7 days (sum), as a `FutureWindowEncoder` step in the lineage.
+
+- **The windows are worth +0.0044 on the test days and +0.0044 on Kaggle private.**
+  0.1226 is the best Rossmann score of the experiment, still about 0.01 short of the
+  top quarter.
+- **The blend is not the problem.** It beats every single member by 0.003–0.008 even
+  with elasticnet (~0.20) at about 1/7 weight; the member that is best on validation
+  is fifth on the test days. r11's very weak members were a property of its t8 table.
+- What is missing is signal the agent does not build. The tool can express these
+  windows and 0094 can ship them; in r4–r11 the agent never built short windows
+  over `Open`.
