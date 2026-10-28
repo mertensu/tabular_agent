@@ -162,11 +162,16 @@ TAG_OVERRIDES = {
     # derived key columns checked by replay.
     ("rossmann", "r11"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
                           "model": "deepseek-v4.1-flash-1017@eu"},
+    # r12: the current code (0094 selection, serving types restored) with a stronger
+    # agent model, at medium reasoning effort. Does it build the short calendar
+    # windows the flash model never did?
+    ("rossmann", "r12"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
+                          "model": "gpt-6.1-terra@eu", "reasoning_effort": "medium"},
 }
 
 
-def agent_model(name: str = MODEL):
-    """The gateway model with thinking on, as the archived DeepSeek runs used."""
+def agent_model(name: str = MODEL, effort: str = "high"):
+    """The gateway model with reasoning on; DeepSeek also needs thinking enabled."""
     from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
     from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -175,7 +180,10 @@ def agent_model(name: str = MODEL):
         provider=OpenAIProvider(base_url=REQUESTY_BASE_URL, api_key=load_api_key()),
         settings=OpenAIChatModelSettings(
             max_tokens=GATEWAY_MAX_OUTPUT_TOKENS,
-            extra_body={"thinking": {"type": "enabled"}, "reasoning_effort": "high"},
+            extra_body=(
+                {"thinking": {"type": "enabled"}, "reasoning_effort": effort}
+                if "deepseek" in name else {"reasoning_effort": effort}
+            ),
         ),
     )
 
@@ -252,7 +260,7 @@ def main(name: str, tag: str = "r1") -> int:
     # sealed rows, and r1 ran before the product sealed one of its own.
     forecast = cfg.get("forecast", False)
     cls = ta.ForecastingAgent if forecast else ta.Agent
-    agent = cls(model=agent_model(cfg.get("model", MODEL)), run_root=OUT / name / "runs",
+    agent = cls(model=agent_model(cfg.get("model", MODEL), cfg.get("reasoning_effort", "high")), run_root=OUT / name / "runs",
                 holdout_fraction=None,
                 **cfg.get("agent", {}))
     plan = agent.inspect(files)
