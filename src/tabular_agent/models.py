@@ -17,11 +17,12 @@ where a three-GBDT blend did not).
 """
 
 import time
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, TransformerMixin
 
 from .metrics import compute_metric
 from .target import (
@@ -162,6 +163,42 @@ def _finite(X):
     that row, which is what NaN means.
     """
     return np.where(np.isfinite(X), X, np.nan)
+
+
+class _ClipToFitRange(TransformerMixin, BaseEstimator):
+    """Each column clipped to the range it had on the rows the model was fitted on.
+
+    A tree cannot extrapolate: a value beyond anything it saw lands in the
+    outermost leaf. A linear model extrapolates without limit, so a served value
+    far outside the training range moves its prediction by as much again, and
+    under a log target that is multiplied. One outlier observation that reaches a
+    served row's features, but no training row's, is enough: the linear member
+    alone then predicts thousands of times the target's range, and a blend that
+    averages members after inverting the transform (0044) carries that through
+    at whatever weight the member has.
+
+    Clipping gives the linear member the trees' reading of an unseen value: as
+    far as anything seen, no further. Rows inside the fitted range are
+    unchanged, so training and validation scores are too. The range is learned
+    in the pipeline, so per fold, from training rows only. Missing values pass
+    through for the imputer, and a column that was all missing at fit is left
+    as it is.
+    """
+
+    def fit(self, X, y=None):
+        X = np.asarray(X, dtype=float)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN columns
+            lo, hi = np.nanmin(X, axis=0), np.nanmax(X, axis=0)
+        self.lo_ = np.where(np.isnan(lo), -np.inf, lo)
+        self.hi_ = np.where(np.isnan(hi), np.inf, hi)
+        return self
+
+    def transform(self, X):
+        return np.clip(np.asarray(X, dtype=float), self.lo_, self.hi_)
+
+    def get_feature_names_out(self, input_features=None):
+        return np.asarray(input_features, dtype=object) if input_features is not None else None
 
 
 #: How the run's metric names its sklearn equivalent, for the inner selection
@@ -471,6 +508,7 @@ def _make_elasticnet(task_type: str, params: dict | None, seed: int,
 
     return make_pipeline(
         FunctionTransformer(_finite, feature_names_out="one-to-one"),
+        _ClipToFitRange(),
         # `keep_empty_features` so an all-NaN column in one fold does not silently
         # change the matrix width between folds.
         SimpleImputer(strategy="median", keep_empty_features=True),

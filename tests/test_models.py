@@ -563,6 +563,31 @@ def test_elasticnet_scaling_is_fitted_inside_the_fold():
     assert not np.allclose(means[0], means[1])
 
 
+def test_elasticnet_does_not_extrapolate_beyond_its_training_range():
+    """A served value far outside the fitted range is read as the range's edge.
+
+    A tree would put it in its outermost leaf; a linear model would follow it
+    without limit, and one outlier then multiplies the member's prediction.
+    """
+    X, y = _regression_data()
+    folds = make_folds(y, "regression", seed=42)
+    result = train_cv(X, y, folds, "regression", "rmse", model_type="elasticnet", seed=1)
+    model = result.final_model
+
+    edge = X.iloc[[0]].copy()
+    edge["a"] = X["a"].max()
+    far = edge.copy()
+    far["a"] = X["a"].max() * 50
+    missing = edge.copy()
+    missing["a"] = np.nan
+
+    assert predict_model(model, far, "regression") == pytest.approx(
+        predict_model(model, edge, "regression"))
+    # Rows inside the range are untouched, and a missing value is still imputed.
+    assert predict_model(model, X, "regression") == pytest.approx(model[2:].predict(model[0].transform(X.to_numpy())))
+    assert np.isfinite(predict_model(model, missing, "regression")).all()
+
+
 def test_elasticnet_works_for_classification_too():
     """Same family, different parameterisation (`LogisticRegressionCV`)."""
     rng = np.random.default_rng(3)

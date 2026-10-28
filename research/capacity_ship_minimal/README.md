@@ -583,19 +583,38 @@ every Wednesday 1.07–1.12×, and on 2017-05-31 the mean is **121 visitors agai
 17**. Two stores: `air_cfdeb326418194ff` at 84,690 visitors that day,
 `air_e42bdc3377d1eee7` at 3,288–3,482 on Wednesdays.
 
-- t6's windows count back from the forecast row. The shipped bundle's rows end
-  2017-03-14 and Kaggle's days are 40–78 days later, so its "90-day" Wednesday window
-  on 05-31 holds one old Wednesday (count 1; the store's was 877 visitors). In
-  training and validation (horizon 1) the same windows were nearly full. A window
-  over fewer rows than the model was trained on is computed and served, where 0095
-  refuses the same thing for a known-in-advance column.
+- The store had one day of 877 visitors (2017-03-08), the largest target value in
+  the data. It falls after the last training fold's freeze, so no training row ever
+  read it: there the 90-day mean never exceeds 176. The shipped bundle's rows end
+  2017-03-14 and Kaggle's days are 40–78 days later, so on 05-31 its Wednesday
+  window holds that day alone (count 1) and reads 877.
+- Thin windows are not themselves the skew: the run's folds are 2–3 months long, so
+  training rows sit 40–80 days past their fold's freeze too, and 1–3% of them have a
+  90-day count of 1. (An earlier version of this section said the windows were
+  nearly full in training; they are not.)
 - The tree members stay near log 3 (~20 visitors). The elasticnet member, linear in
   log space, extrapolates to log 13.3, and the blend averages after inverting the
-  transform (0044), so one member at 1/7 weight carries the row to 84,690. Nothing
-  bounds a prediction to the range the target has seen.
-- The all-rows file is milder (Kaggle days 1–39 after its rows) but still has six
-  predictions above 500 (max 795); r2's files have none above 155. On our own test
-  days the elasticnet member reaches 25,467 too.
+  transform (0044), so one member at 1/7 weight carries the row to 84,690.
+
+**Fixed: linear members clip each feature to its fitted range** (`_ClipToFitRange`
+in the elasticnet pipeline, learned per fold; rows inside the range are unchanged,
+so a refit learns the same coefficients). Inserted into r3's shipped member:
+
+| r3 | before | after |
+|---|---|---|
+| shipped, our test days | 0.5361 | 0.5336 |
+| shipped, Kaggle rows: max prediction | 84,690 | 412 |
+| shipped / all-rows per-day ratio, Wednesdays | 1.07–1.12 | 0.83–0.88 (as other days) |
+
+Files `submission_r3_shipped_clip.csv` and `submission_r3_all_rows_clip.csv`.
+
+**Not fixed: the linear member still leaves the target's range on in-range
+inputs.** In the all-rows file, a store with seven weeks of history
+(`air_1c0b150f9e696a5f`, never above 166 visitors) gets 500–630 on weekends: its
+90-, 180- and 300-day windows are identical, every value within its training range,
+and the elasticnet predicts 1,000–3,960 where the six tree members say 38–137. The
+long windows are collinear in training, and a row where they coincide is a
+combination the linear fit never saw. Per-column clipping cannot see that.
 
 **0095 refused inside the run.** t3 (`holiday_flg` over the last / next 7 days per
 store) never got a score: its trailing window needs the 6 rows before each
