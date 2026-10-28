@@ -36,7 +36,7 @@ from ..inspect import profile_dataframe, profile_stream
 from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import _make_model, fit_final_model, predict_model, train_cv
-from ..pipeline import Pipeline, save_bundle
+from ..pipeline import Pipeline, input_dtypes, save_bundle
 from ..probe import PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_probe, probe_predict
 from ..blend import apply_blend, blend_weights
 from ..report import (
@@ -3049,6 +3049,11 @@ REFIT_DIR = "refit"
 REFIT_ID = "shipped_refit"
 
 
+def _input_dtypes(session: RunSession) -> dict[str, str]:
+    """The training rows' column types, which the bundle restores on serving rows."""
+    return input_dtypes(load_table(session.data_path), exclude=[session.resolved().target])
+
+
 def _refit_for_shipping(session: RunSession, table_rel: str, fits: list[dict]) -> dict:
     """Refit the selected table's lineage and the shipped models on work + validation.
 
@@ -3495,6 +3500,7 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         training_table=ship_table,
         objective=spec.objective,
         fitted_on=refit_record,
+        input_dtypes=_input_dtypes(session),
     )
     j = journal.load(session.run_dir)
     credit = journal.attribution(j, table_rel)
@@ -3758,6 +3764,7 @@ def finalize_run(session: RunSession) -> dict:
         training_table=ship_fit["training_table"],
         objective=session.resolved().objective,
         fitted_on=refit_record,
+        input_dtypes=_input_dtypes(session),
     )
 
     credit = journal.attribution(j, ship["source_table"])

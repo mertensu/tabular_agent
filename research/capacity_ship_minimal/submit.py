@@ -38,7 +38,7 @@ from runner import DATASETS, HERE, OUT  # noqa: E402
 from tabular_agent.api import Run  # noqa: E402
 from tabular_agent.harness.tools import _feature_frame, _fit_recipe, _load_lineage  # noqa: E402
 from tabular_agent.models import fit_final_model  # noqa: E402
-from tabular_agent.pipeline import predict_bundle  # noqa: E402
+from tabular_agent.pipeline import input_dtypes, predict_bundle  # noqa: E402
 from tabular_agent.refit import refit_lineage  # noqa: E402
 from tabular_agent.taskspec import ResolvedSpec  # noqa: E402
 
@@ -96,6 +96,11 @@ def main(name: str, tag: str, table_id: str | None = None) -> int:
     cfg = DATASETS[name]
     result = json.loads((HERE / f"result_{name}_{tag}.json").read_text())
     run = Run(result["run_dir"])
+    if not run.bundle._bundle.get("input_dtypes"):
+        # Bundles written before the training types were recorded: read them off
+        # the run's own training rows, as finalize now does.
+        work = pd.read_parquet(Path(run.run_dir) / "data" / "work.parquet")
+        run.bundle._bundle["input_dtypes"] = input_dtypes(work, exclude=[cfg["target"]])
     test = pd.read_parquet(cfg["source"] / "test_joined.parquet")
     raw = test.drop(columns=[ID[name]])
     dest = OUT / name

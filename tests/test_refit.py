@@ -246,6 +246,8 @@ def test_finalize_ships_the_refit_and_scores_it_once_beside_the_work_fit(
     bundle = load_bundle(bundle_dir)
     assert bundle["fitted_on"]["fitted_on"] == "work+validation"
     assert bundle["training_table"] == "refit/" + os.path.basename(out["table"])
+    assert bundle["input_dtypes"]["weekday"] == "int64"
+    assert "sales" not in bundle["input_dtypes"]
     trained = load_table(os.path.join(s.run_dir, bundle["training_table"]))
     assert len(trained) == n_work + n_val
     # The sealed slice is the latest period and none of it was fitted on.

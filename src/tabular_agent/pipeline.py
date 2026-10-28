@@ -3,6 +3,7 @@ parameters and never needs the target column."""
 
 import json
 import os
+import warnings
 
 import joblib
 import numpy as np
@@ -134,12 +135,65 @@ class Pipeline:
         return p
 
 
+def input_dtypes(df: pd.DataFrame, exclude=()) -> dict[str, str]:
+    """``{column: dtype name}`` of the rows a lineage was built from."""
+    return {c: str(t) for c, t in df.dtypes.items() if c not in set(exclude)}
+
+
+def conform_input_dtypes(df: pd.DataFrame, dtypes: dict[str, str]) -> tuple[pd.DataFrame, list[str]]:
+    """Give serving columns the numeric type they had in training, when no value changes.
+
+    A lineage replays code written against the training rows, and that code can
+    depend on a column's type as well as its values: ``astype(str)`` on a key
+    makes ``"1"`` in training and ``"1.0"`` at serving, and an encoder then reads
+    a key it never saw. A serving file stores the same values with a different
+    type easily: one missing value turns a column of whole numbers into floats.
+
+    Only lossless numeric conversions are made: floats holding whole numbers back
+    to integers (a nullable integer when values are missing), integers or
+    booleans to floats, and 0/1 back to booleans. Anything else is left for the
+    lineage to handle or refuse as it would have. Returns the frame and one line
+    per converted column.
+    """
+    out, notes = df, []
+    for col, want in dtypes.items():
+        if col not in df.columns or str(df[col].dtype) == want:
+            continue
+        have = df[col]
+        try:
+            target = np.dtype(want)
+        except TypeError:
+            continue
+        if not pd.api.types.is_numeric_dtype(have) and not pd.api.types.is_bool_dtype(have):
+            continue
+        values = have.dropna()
+        if target.kind in "iu":
+            if not np.all(np.mod(values.astype(float), 1) == 0):
+                continue
+            new = have.astype(want if len(values) == len(have) else
+                              ("Int64" if target.kind == "i" else "UInt64"))
+        elif target.kind == "f":
+            new = have.astype(want)
+        elif target.kind == "b":
+            if len(values) != len(have) or not values.isin([0, 1]).all():
+                continue
+            new = have.astype(bool)
+        else:
+            continue
+        if out is df:
+            out = df.copy()
+        out[col] = new
+        notes.append(f"{col}: {have.dtype} -> {new.dtype}")
+    return out, notes
+
+
 def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_names, task_type,
                 target_transform: str = "none",
                 reference_target=None,
                 training_table: str | None = None,
                 objective: str | None = None,
-                fitted_on: dict | None = None) -> str:
+                fitted_on: dict | None = None,
+                input_dtypes: dict[str, str] | None = None) -> str:
     bundle_dir = run_ctx.path("bundle", "_")
     bundle_dir = os.path.dirname(bundle_dir)
     model_paths = []
@@ -169,6 +223,10 @@ def save_bundle(run_ctx, pipeline: Pipeline, models: list, weights, feature_name
     # bundle later should not have to read the journal to know which they hold.
     if fitted_on is not None:
         manifest["fitted_on"] = dict(fitted_on)
+    # The type of every input column the lineage was written against, so a
+    # serving file storing the same values differently is put back first.
+    if input_dtypes is not None:
+        manifest["input_dtypes"] = dict(input_dtypes)
     # Derived from the steps, never passed in. A bundle that needs a second input
     # has to say so where somebody will read it — the alternative is a file that
     # predicts only when the caller happens to know, and a `streams=` argument
@@ -204,6 +262,8 @@ def load_bundle(bundle_dir: str) -> dict:
         "training_table": manifest.get("training_table"),
         # Absent on bundles written before the refit: fitted on work rows only.
         "fitted_on": manifest.get("fitted_on"),
+        # Absent on bundles written before it was recorded: rows replay as given.
+        "input_dtypes": manifest.get("input_dtypes") or {},
     }
 
 
@@ -237,6 +297,13 @@ def feature_table_bundle(bundle: dict, raw_df: pd.DataFrame,
             "time: the whole point of storing the recipe is that the records which "
             "have arrived since are the ones a served row should be reading."
         )
+    raw_df, converted = conform_input_dtypes(raw_df, bundle.get("input_dtypes") or {})
+    if converted:
+        warnings.warn(
+            "serving columns converted to their training type before replay: "
+            + "; ".join(converted),
+            stacklevel=2,
+        )
     features = bundle["pipeline"].transform(raw_df, streams=streams)
     missing = [name for name in bundle["feature_names"] if name not in features]
     if missing:
@@ -244,7 +311,14 @@ def feature_table_bundle(bundle: dict, raw_df: pd.DataFrame,
             "the learned feature pipeline did not produce the model columns "
             f"{missing}; the bundle cannot be replayed"
         )
-    return features.loc[:, bundle["feature_names"]].copy()
+    X = features.loc[:, bundle["feature_names"]].copy()
+    # A nullable integer restored above reaches the models as float with NaN,
+    # the form a missing number takes everywhere else in the matrix.
+    for col in X.columns:
+        if isinstance(X[col].dtype, pd.api.extensions.ExtensionDtype) and \
+                pd.api.types.is_numeric_dtype(X[col].dtype):
+            X[col] = X[col].astype("float64")
+    return X
 
 
 def predict_bundle(bundle: dict, raw_df: pd.DataFrame,
