@@ -1,0 +1,15 @@
+{
+  "dataset": "rossmann",
+  "tag": "r11",
+  "model": "deepseek-v4.1-flash-1017@eu",
+  "git_commit": "22408a59a7877235679ae5ed3ecd1b6210ee95f0",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/rossmann/runs/20261027T170758Z-b1726bd0",
+  "elapsed_min": 29.86,
+  "identifier_columns": [],
+  "n_serving_columns": 16,
+  "future_known": [
+    "Open",
+    "Promo",
+    "SchoolHoliday"
+  ]
+}
