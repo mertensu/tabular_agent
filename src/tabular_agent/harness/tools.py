@@ -31,6 +31,7 @@ from ..encoders import fit_encoding as _fit_encoding
 from ..encoders import fit_group_stats as _fit_group_stats
 from ..encoders import fit_history as _fit_history
 from ..encoders import fit_future_covariate_window as _fit_future_covariate_window
+from ..encoders import _clean_windows
 from ..encoders import to_periods as _to_periods
 from ..inspect import profile_dataframe, profile_stream
 from ..io import load_table, save_parquet
@@ -1117,6 +1118,39 @@ def fit_group_stats(
     }
 
 
+def _refuse_windows_shorter_than_a_block(order_values, folds, windows,
+                                         horizon: float | None) -> None:
+    """Refuse a trailing window that some training rows cannot fill.
+
+    A training row reads history frozen at the end of its fold's training rows,
+    so a window shorter than the row's distance from that point is empty. With
+    blocks longer than the window, it is filled only for the rows just after each
+    freeze: a few stretches of the calendar, which the model learns it from. At
+    serving, the rows nearest the end of the data all have it filled at once, and
+    the column no longer means what it meant in training. Only checked when the
+    agent asks for a window; a refit replays what the run accepted. A missing
+    horizon and windows shorter than it are left to their own refusals.
+    """
+    periods = _to_periods(order_values)
+    reach = max(
+        (float(np.nanmax(periods[va]) - np.nanmax(periods[tr]))
+         for tr, va in folds if len(tr) and len(va)),
+        default=None,
+    )
+    if reach is None or horizon is None:
+        return
+    short = sorted({w for w, _ in _clean_windows(windows)
+                    if horizon <= w < reach})
+    if short:
+        raise ValueError(
+            f"window lengths {[f'{w:g}' for w in short]} are shorter than the "
+            f"{reach:g} periods a training row can lie past the point its history "
+            "was frozen at. Such a window is empty for most training rows and "
+            "filled only just after each freeze, while at serving the rows nearest "
+            f"the data's end all have it filled. Use lengths of at least {reach:g}."
+        )
+
+
 def fit_history(
     session: RunSession,
     by: list[str],
@@ -1194,6 +1228,8 @@ def fit_history(
 
     folds = make_folds(df[spec.target], spec.task_type, n_splits=spec.n_splits,
                        seed=spec.seed, order=_fold_order(session, df))
+    _refuse_windows_shorter_than_a_block(df[order], folds, windows or (),
+                                         spec.forecast_horizon)
     train_features, encoder = _fit_history(
         df, by, value, order, folds=folds, keep=keep,
         forecast_horizon=spec.forecast_horizon, windows=windows or (),

@@ -71,9 +71,9 @@ def test_it_adds_the_window_and_its_count_and_records_the_ordering_column(
     forecasting_session,
 ):
     out = fit_history(forecasting_session, by=["store"], value="sales",
-                      windows=[[20, "mean"]], keep=40)
+                      windows=[[30, "mean"]], keep=40)
 
-    assert out["new_columns"] == ["store_sales_20_mean", "store_sales_20_count"]
+    assert out["new_columns"] == ["store_sales_30_mean", "store_sales_30_count"]
     row = journal.load(forecasting_session.run_dir)["tables"][-1]
     assert row["method"] == "history"
     assert row["order_column"] == "day"
@@ -88,9 +88,9 @@ def test_the_target_may_be_the_value_column(forecasting_session):
     out of a served frame either, because the target is not in one.
     """
     out = fit_history(forecasting_session, by=["store"], value="sales",
-                      windows=[[20, "mean"]], keep=40)
+                      windows=[[30, "mean"]], keep=40)
 
-    assert "store_sales_20_mean" in out["new_columns"]
+    assert "store_sales_30_mean" in out["new_columns"]
 
 
 def test_an_unordered_run_is_refused(unordered_session):
@@ -101,7 +101,7 @@ def test_an_unordered_run_is_refused(unordered_session):
 
 def test_the_first_period_has_no_value_and_the_tool_says_so(forecasting_session):
     out = fit_history(forecasting_session, by=["store"], value="sales",
-                      windows=[[20, "mean"]], keep=40)
+                      windows=[[30, "mean"]], keep=40)
 
     assert out["n_rows_without_value"] > 0
     assert "first period" in out["note"]
@@ -141,14 +141,14 @@ def test_an_iso_date_column_read_back_from_csv_works(tmp_path, panel):
     )
 
     out = fit_history(session, by=["store"], value="sales",
-                      windows=[[20, "mean"]], keep=40)
+                      windows=[[30, "mean"]], keep=40)
 
     table = load_table(session.resolve_table(out["table"]))
-    held = table["store_sales_20_count"].dropna()
+    held = table["store_sales_30_count"].dropna()
     # Days, not the nanosecond integers a naive conversion would hand back: in
-    # nanoseconds a 20-unit window spans no time at all and every count is zero.
+    # nanoseconds a 30-unit window spans no time at all and every count is zero.
     assert held.max() > 1
-    assert held.max() <= 20
+    assert held.max() <= 30
 
 
 def test_a_call_with_no_window_is_refused(forecasting_session):
@@ -164,7 +164,7 @@ def test_a_call_with_no_window_is_refused(forecasting_session):
 
 def test_no_run_can_produce_a_single_observation_column(forecasting_session):
     out = fit_history(forecasting_session, by=["store"], value="sales",
-                      windows=[[20, "mean"], [40, "mean"]], keep=60)
+                      windows=[[30, "mean"], [40, "mean"]], keep=60)
 
     assert not [c for c in out["new_columns"] if c.endswith(("_latest", "_latest_ago"))]
     assert not [c for c in out["new_columns"] if c.endswith("_ago_exact")]
@@ -176,7 +176,7 @@ def test_the_bundle_predicts_rows_dated_after_every_row_it_saw(forecasting_sessi
     """The serving case history exists for: a contiguous future block, unlabelled,
     later than all stored history."""
     table = fit_history(forecasting_session, by=["store"], value="sales",
-                        windows=[[20, "mean"]], keep=40)["table"]
+                        windows=[[30, "mean"]], keep=40)["table"]
     train_tabular_model(forecasting_session, table=table)
     out = finalize_run(forecasting_session)
 
@@ -199,7 +199,7 @@ def test_a_served_row_reads_history_not_its_own_batch(forecasting_session):
     """0011's property at the level that matters: one row alone and the same row
     inside a batch get the same feature."""
     table = fit_history(forecasting_session, by=["store"], value="sales",
-                        windows=[[20, "mean"]], keep=40)["table"]
+                        windows=[[30, "mean"]], keep=40)["table"]
     train_tabular_model(forecasting_session, table=table)
     out = finalize_run(forecasting_session)
     bundle = load_bundle(os.path.join(forecasting_session.run_dir, out["bundle_dir"]))
@@ -218,14 +218,14 @@ def test_the_stored_values_are_the_frozen_ones_not_the_rows_own(forecasting_sess
     """The table the model trains on holds per-fold values, so a row's own sales
     can never be inside the number beside it."""
     out = fit_history(forecasting_session, by=["store"], value="sales",
-                      windows=[[20, "mean"]], keep=40)
+                      windows=[[30, "mean"]], keep=40)
     table = load_table(forecasting_session.resolve_table(out["table"]))
 
-    seen = table["store_sales_20_mean"].notna()
+    seen = table["store_sales_30_mean"].notna()
     assert seen.any()
     # The window's right endpoint is strict, so the row is never in its own mean.
-    assert (table.loc[seen, "store_sales_20_mean"] != table.loc[seen, "sales"]).all()
-    assert (table.loc[seen, "store_sales_20_count"] > 0).all()
+    assert (table.loc[seen, "store_sales_30_mean"] != table.loc[seen, "sales"]).all()
+    assert (table.loc[seen, "store_sales_30_count"] > 0).all()
 
 
 # --- trailing windows --------------------------------------------------------
@@ -248,14 +248,14 @@ def forecasting_session(tmp_path, panel):
 def test_a_window_adds_its_statistic_and_its_count(forecasting_session):
     out = fit_history(
         forecasting_session, by=["store"], value="sales",
-        windows=[[20, "mean"], [20, "std"]], keep=40,
+        windows=[[30, "mean"], [30, "std"]], keep=40,
     )
 
     assert out["new_columns"] == [
-        "store_sales_20_mean", "store_sales_20_std", "store_sales_20_count",
+        "store_sales_30_mean", "store_sales_30_std", "store_sales_30_count",
     ]
     row = journal.load(forecasting_session.run_dir)["tables"][-1]
-    assert row["windows"] == [[20.0, "mean"], [20.0, "std"]]
+    assert row["windows"] == [[30.0, "mean"], [30.0, "std"]]
 
 
 def test_the_tool_reports_how_much_each_window_actually_held(forecasting_session):
@@ -264,12 +264,10 @@ def test_the_tool_reports_how_much_each_window_actually_held(forecasting_session
     only thing that shows it."""
     out = fit_history(
         forecasting_session, by=["store"], value="sales",
-        windows=[[2, "mean"], [40, "mean"]], keep=60,
+        windows=[[30, "mean"], [40, "mean"]], keep=60,
     )
 
-    assert out["window_observations"]["40"] > out["window_observations"]["2"]
-    # The 2-day window spans less than the gap for all but the block's first rows.
-    assert "WARNING" in out["note"] and "'2'" in out["note"]
+    assert out["window_observations"]["40"] > out["window_observations"]["30"]
 
 
 def test_a_window_no_fold_can_fill_says_so_without_predicting_a_cost(
@@ -309,14 +307,13 @@ def test_a_window_only_the_earliest_folds_cannot_fill_is_noted_more_briefly(
     assert "every fold" not in out["note"]
 
 
-def test_a_window_inside_every_fold_prefix_is_left_alone(forecasting_session):
-    out = fit_history(
-        forecasting_session, by=["store"], value="sales",
-        windows=[[10, "mean"]], keep=40,
-    )
-
-    assert 10 <= out["shortest_training_prefix"]
-    assert "training prefix" not in out["note"]
+def test_a_window_shorter_than_a_fold_block_is_refused(forecasting_session):
+    """Validation blocks reach 24 days past their freeze here. A 10-day window
+    would be filled only for the rows just after each freeze in training, and
+    for every row near the data's end at serving."""
+    with pytest.raises(ValueError, match="at least 24"):
+        fit_history(forecasting_session, by=["store"], value="sales",
+                    windows=[[10, "mean"], [30, "mean"]], keep=40)
 
 
 def test_a_window_shorter_than_the_horizon_is_refused_through_the_tool(tmp_path, panel):

@@ -197,7 +197,7 @@ def test_every_ordered_step_refits_to_the_tools_own_result(tmp_path, forecast_pa
     steps = [
         lambda t: fit_encoding(s, ["store"], "target", table=t),
         lambda t: fit_group_stats(s, ["store"], "temp", table=t),
-        lambda t: fit_history(s, ["store"], "sales", windows=[[28, "mean"]], table=t),
+        lambda t: fit_history(s, ["store"], "sales", windows=[[60, "mean"]], table=t),
         lambda t: fit_stream_aggregate(s, "bookings", ["store"], "party", [7.0], table=t),
         lambda t: fit_future_covariate_window(
             s, "temp", [{"family": "period", "unit": "block", "stat": "mean"},
@@ -213,7 +213,7 @@ def test_every_ordered_step_refits_to_the_tools_own_result(tmp_path, forecast_pa
 
 def test_refit_history_is_frozen_at_the_end_of_validation(tmp_path, forecast_paths):
     s = _forecast_session(tmp_path, forecast_paths)
-    out = fit_history(s, ["store"], "sales", windows=[[28, "mean"]])
+    out = fit_history(s, ["store"], "sales", windows=[[60, "mean"]])
     rows = _work_and_val(s)
     _, pipeline = _refit(s, out["table"], rows)
     work_frozen = _load_lineage(s.resolve_table(out["table"]), "regression") \
@@ -230,7 +230,7 @@ def test_finalize_ships_the_refit_and_scores_it_once_beside_the_work_fit(
 ):
     s = _forecast_session(tmp_path, forecast_paths, holdout_fraction=0.15)
     out = fit_encoding(s, ["store"], "target")
-    out = fit_history(s, ["store"], "sales", windows=[[28, "mean"]], table=out["table"])
+    out = fit_history(s, ["store"], "sales", windows=[[60, "mean"]], table=out["table"])
     # Selection is not under test: this validation period is too short for the
     # paired interval 0090 requires, so pin the table that ships.
     monkeypatch.setattr(tools, "_best_table_path", lambda session, j: out["table"])
