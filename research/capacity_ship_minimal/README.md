@@ -696,3 +696,9 @@ recipe; the difference is the booking features):
 input clip 0.5322 / 0.5070; r2 0.5181 / 0.4840. The bookings are worth +0.0036
 private (+0.0043 on the test days) and +0.0110 public, and r4 stays 0.0105 behind r2
 on the private board (0.0068 on the test days).
+
+**Kaggle, as shipped (private / public):** r4 0.5693 / **0.5214**; r3 with the input
+clip **0.5676** / 0.5314; r2 0.5481 / 0.5017. The bundle was handed the full streams
+(to 2017-04-22), so its booking features are as fresh as the all-rows file's while
+its other fits end 2017-03-14. Public (the early forecast days) gains 0.010 on r3;
+private (the later days, where bookings are sparse) is level (−0.0017).
