@@ -637,3 +637,57 @@ caller could fill with `known_past`. The agent did not try that lane again.
 
 Files: `_runs/capacity_ship_minimal/restaurant/submission_r3_all_rows.csv` and
 `submission_r3_shipped.csv` (`submit.py restaurant r3`); `arms_restaurant_r3.json`.
+
+## Restaurant r4 (2026-10-28): r3 with the reservation streams declared
+
+`DataPlan.streams` (82f39d1) lets a forecast plan declare a second input recorded
+one event per row with the time it became known. r4 is r3 with the two booking files
+declared (one row per booking: party size, visit datetime, booking datetime), cut
+where the agent's rows end (2017-03-14). The collapsed reservation columns are still
+in the table, as in r2 and r3. Same model and prompt; no guidance added. 4 minutes,
+18 tables. The elasticnet input clip (60d147d) is in.
+
+| table | step (source) | validation probe | gain vs ancestor (spread) | passes |
+|---|---|---|---|---|
+| t1 | calendar, holiday distances; drops the collapsed reservation columns (raw) | 0.7546 | −0.0138 (0.0007) | no |
+| t3 | store / genre / area target encodings (t1) | 0.5682 | +0.1864 (0.0064) | yes |
+| t4 | store × weekday history, 90–300 days (t1) | 0.5266 | +0.2280 (0.0118) | yes |
+| t5 | `holiday_flg` windows (t1) | – | refused by 0095, as in r3 | – |
+| t6 | HPG bookings, made ≥1 day before (t4) | 0.5253 | +0.0013 (0.0011) | yes |
+| **t7** | **AirREGI bookings, made ≥1 day before (t4)** | **0.5158** | **+0.0108 (0.0019)** | **yes, shipped** |
+| t10 / t14 / t16 | AirREGI bookings made ≥42 / ≥21 / ≥7 days before (t4) | 0.5267 / 0.5242 / 0.5200 | −0.0000 / +0.0024 / +0.0066 | no / yes / yes |
+| t11 | t7 + HPG bookings ≥1 day | 0.5149 | +0.0009 (0.0011) | no |
+| t8, t9, t12, t13, t15, t17, t18 | target encodings, store history, a filter, ratios, store × holiday history | 0.5262–0.5577 | ≤ +0.0004 | no |
+
+- **Given the streams, the agent used them on its fifth step** and compared four
+  booking cut-offs. It again dropped the collapsed reservation columns first, for the
+  same stated reason as r3. 0094 and 0090 ship the same table.
+- A lead of 1 day is honest only for the first forecast day (0047): further out, the
+  bookings made after the forecast is issued do not exist yet. In the run, validation
+  reads the uncut stream, so it flatters short leads. On our test days the stream is
+  cut at the first test day, as a forecast issued then would see it.
+
+**Test days** (rmsle; shipped is the refitted blend):
+
+| | r2 | r3 | r3, input clip | r4 |
+|---|---|---|---|---|
+| run's validation probe | 0.5105 | 0.5263 | | 0.5158 |
+| shipped | **0.5225** | 0.5361 | 0.5336 | 0.5293 |
+| probe / lgbm_es / catboost_es | 0.5207 / 0.5210 / 0.5187 | 0.5330 / 0.5308 / 0.5303 | | 0.5273 / 0.5266 / 0.5281 |
+
+**By week after the forecast start** (r3 with the input clip vs r4, same refit
+recipe; the difference is the booking features):
+
+| week | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| r3 | 0.5435 | 0.5293 | 0.5496 | 0.5460 | 0.5170 | 0.5036 |
+| r4 | 0.5341 | 0.5240 | 0.5432 | 0.5434 | 0.5158 | 0.5050 |
+| gain | +0.0094 | +0.0053 | +0.0063 | +0.0027 | +0.0012 | −0.0014 |
+
+- The bookings are worth what bookings should be: most in the first week, nothing by
+  the sixth. No sign of a skew that hurts the far days.
+- Overall r4 gains 0.004 on r3 with the clip, and stays 0.007 behind r2. The gap
+  from validation to the test days is 0.0135 (r3: 0.0098, r2: 0.0120), which leaves
+  room for the short lead's optimism but does not show it on its own.
+- Kaggle files: shipped / all-rows prediction means per day 0.82–0.93 (no weekday
+  spikes); largest predictions 353 / 540.
