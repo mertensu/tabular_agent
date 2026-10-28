@@ -1,0 +1,154 @@
+{
+  "tag": "r11",
+  "table": "t20",
+  "window_columns": [
+    "Store_Open_roll2_min",
+    "Store_Open_roll7_sum",
+    "Store_Open_fwd2_min",
+    "Store_Open_fwd7_sum",
+    "Store_SchoolHoliday_roll2_min",
+    "Store_SchoolHoliday_roll7_sum",
+    "Store_SchoolHoliday_fwd2_min",
+    "Store_SchoolHoliday_fwd7_sum",
+    "Store_Promo_roll2_min",
+    "Store_Promo_roll7_sum",
+    "Store_Promo_fwd2_min",
+    "Store_Promo_fwd7_sum"
+  ],
+  "arms": {
+    "t20_blend": {
+      "test": 0.12145,
+      "file": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/rossmann/submission_gap_t20_blend.csv"
+    },
+    "t20_best": {
+      "test": 0.129185,
+      "file": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/rossmann/submission_gap_t20_best.csv"
+    },
+    "t20_windows_blend": {
+      "test": 0.117085,
+      "file": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/rossmann/submission_gap_t20_windows_blend.csv"
+    },
+    "t20_windows_best": {
+      "test": 0.120414,
+      "file": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/rossmann/submission_gap_t20_windows_best.csv"
+    }
+  },
+  "t20_members": [
+    {
+      "model_type": "lgbm",
+      "params": {
+        "n_estimators": 200
+      },
+      "val": 0.126448,
+      "test": 0.125317
+    },
+    {
+      "model_type": "xgb",
+      "params": {},
+      "val": 0.150785,
+      "test": 0.135542
+    },
+    {
+      "model_type": "catboost",
+      "params": {},
+      "val": 0.130063,
+      "test": 0.12526
+    },
+    {
+      "model_type": "elasticnet",
+      "params": {},
+      "val": 0.217343,
+      "test": 0.203844
+    },
+    {
+      "model_type": "lgbm",
+      "params": {
+        "subsample": 0.7,
+        "subsample_freq": 1,
+        "colsample_bytree": 0.7,
+        "random_state": 1337
+      },
+      "val": 0.132144,
+      "test": 0.126745
+    },
+    {
+      "model_type": "xgb",
+      "params": {
+        "subsample": 0.7,
+        "colsample_bytree": 0.7,
+        "random_state": 1337
+      },
+      "val": 0.125787,
+      "test": 0.129185
+    },
+    {
+      "model_type": "catboost",
+      "params": {
+        "rsm": 0.8,
+        "random_seed": 1337
+      },
+      "val": 0.126571,
+      "test": 0.12462
+    }
+  ],
+  "t20_best_member": 5,
+  "t20_windows_members": [
+    {
+      "model_type": "lgbm",
+      "params": {
+        "n_estimators": 200
+      },
+      "val": 0.123356,
+      "test": 0.120414
+    },
+    {
+      "model_type": "xgb",
+      "params": {},
+      "val": 0.133485,
+      "test": 0.125436
+    },
+    {
+      "model_type": "catboost",
+      "params": {},
+      "val": 0.125007,
+      "test": 0.126813
+    },
+    {
+      "model_type": "elasticnet",
+      "params": {},
+      "val": 0.212319,
+      "test": 0.199846
+    },
+    {
+      "model_type": "lgbm",
+      "params": {
+        "subsample": 0.7,
+        "subsample_freq": 1,
+        "colsample_bytree": 0.7,
+        "random_state": 1337
+      },
+      "val": 0.124113,
+      "test": 0.12457
+    },
+    {
+      "model_type": "xgb",
+      "params": {
+        "subsample": 0.7,
+        "colsample_bytree": 0.7,
+        "random_state": 1337
+      },
+      "val": 0.146825,
+      "test": 0.123693
+    },
+    {
+      "model_type": "catboost",
+      "params": {
+        "rsm": 0.8,
+        "random_seed": 1337
+      },
+      "val": 0.124677,
+      "test": 0.125059
+    }
+  ],
+  "t20_windows_best_member": 0
+}
