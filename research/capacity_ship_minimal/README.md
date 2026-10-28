@@ -456,3 +456,23 @@ Both runs where the offline check was clearest carry over to Kaggle in the same
 direction, at about half the size. r4's t16 (0.1290 private) is the best Rossmann
 submission of this experiment. Not yet scored: r10 (offline −0.0034) and r11's t20
 (+0.0024).
+
+**r10 and r11 added (2026-10-28).** r10's first files were broken by a train/serve type
+skew: Kaggle's test file stores `Open` as floats (`1.0`, plus 11 missing), and r10's
+lineage built a text key from it (`0_1.0`, never seen in training), so its encoding
+fell back to the overall mean and predictions came out ~30% low. Fixed in the bundle
+(serving columns get their training type back when no value changes); only r10's
+tables were affected, every other submitted table replays identical features.
+
+| run | 0090 ships | alternative ships | private | public | offline test gain |
+|---|---|---|---|---|---|
+| r4 | t5: 0.1410 / 0.1201 | t16: **0.1290** / **0.1140** | +0.0120 | +0.0061 | +0.0224 |
+| r7 | t10: 0.1364 / 0.1249 | t18: **0.1321** / **0.1230** | +0.0042 | +0.0019 | +0.0144 |
+| r10 | t14: 0.1310 / 0.1260 | t21: **0.1293** / 0.1259 | +0.0017 | +0.0000 | −0.0034 |
+| r11 | t8: 0.1316 / 0.1278 | t20: **0.1270** / **0.1145** | +0.0046 | +0.0133 | +0.0024 |
+
+The alternative is better on the private board in all four runs where the picks
+differ, including r10, where the offline check had it slightly worse. r11's t24 (the
+best probe score, 0.1318 / 0.1234) did worse than t20: picking by validation alone
+would not have done this. r11's t20 (0.1270) is the best Rossmann submission of the
+experiment.
