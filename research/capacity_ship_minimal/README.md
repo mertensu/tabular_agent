@@ -702,3 +702,50 @@ clip **0.5676** / 0.5314; r2 0.5481 / 0.5017. The bundle was handed the full str
 (to 2017-04-22), so its booking features are as fresh as the all-rows file's while
 its other fits end 2017-03-14. Public (the early forecast days) gains 0.010 on r3;
 private (the later days, where bookings are sparse) is level (−0.0017).
+
+## Restaurant r5 (2026-10-28): r4 repeated — a short history window, filled only after fold freezes
+
+r4's setup unchanged. 7 minutes, 21 tables. Path: calendar (t1, −0.010), store history
+28 / 90 / 180 days (t2, +0.184), store × weekday history 56 / 112 / 224 (t3, +0.035),
+AirREGI bookings ≥1 day before (t4, +0.013), HPG bookings (t5, +0.001, no), then
+store × weekday medians 70 / 140 / 210 (t13: +0.0016 over t5, inside its noise, but
++0.0027 over t4 against a spread of 0.0014). **0094 shipped t13; 0090 would have
+shipped t4.** Both contain t2.
+
+| | r4 | r5 |
+|---|---|---|
+| run's validation probe | 0.5158 | 0.5159 |
+| shipped on our test days | **0.5293** | 0.5458 |
+| probe / lgbm_es / catboost_es | 0.5273 / 0.5266 / 0.5281 | 0.5642 / 0.5382 / 0.5236 |
+
+Same validation score, 0.017 apart on the test days, and the members on r5's table
+spread from 0.524 to 0.693.
+
+**The cause: t2's 28-day store window.** In training it is missing on 62% of rows and
+its median count is 0. History is frozen at each fold's training prefix and the
+blocks are ~3 months, so the window is filled only for rows within 28 days of a
+freeze: in a few calendar stretches (filled share by month: 0 in Jan–Apr and Jul,
+0.65 in Jun, 0.73 Aug, 0.90 Oct, 0.76 Dec, 0.60 Feb). On the test days, 1–39 days after
+one freeze, it is filled for every row in the first four weeks.
+
+| test days after the cut | 0–6 | 7–13 | 14–20 | 21–27 | 28–38 | all |
+|---|---|---|---|---|---|---|
+| r5 shipped | 0.5834 (bias +0.23) | 0.5463 (+0.16) | 0.5535 (+0.14) | 0.5628 (+0.14) | 0.5048 (+0.02) | 0.5458 |
+| the 28-day window blanked | 0.5370 (+0.07) | 0.5171 (+0.03) | 0.5379 (+0.03) | 0.5520 (+0.09) | 0.5048 | **0.5273** |
+
+(bias: mean log error; +0.23 is ~25% over-predicted.) Blanked, r5 beats r4. The run's
+own validation could not see it: the validation block lies 1–80 days after one freeze,
+the same spread of distances as training.
+
+**A harness gap, not fixed.** `fit_history` refuses windows shorter than the declared
+horizon (here 1 day, the floor; 0047) but not windows shorter than the folds' block
+length. Such a window is present in training only right after each freeze, so the
+model learns it from a few calendar stretches, while at serving it is present for
+every row of the first weeks. Nothing about this is specific to the dataset: it
+follows from the fold geometry whenever a history window is shorter than a block.
+
+Kaggle files: r5's all-rows file starts the day after its data and carries the same
+bias (day-1 mean 24.7 visitors vs r4's 21.3); the shipped file starts 40 days out,
+where the window is empty (shipped / all-rows 0.70–0.88 per day, against r4's
+0.82–0.93). **Prediction before submitting:** r5's all-rows file scores worse than
+r4's, by more on the public board (the early days).
