@@ -533,3 +533,77 @@ takes `known_past`; with it, predictions match the all-rows refit day by day
 unchanged, so the private part of the test is the later days the bug never reached.
 The rest of the gap to the all-rows file (0.007 private) is the seven weeks of
 staleness only a refit removes.
+
+## Restaurant r3 (2026-10-28): gpt-6.1-terra@eu, medium reasoning, after 0094/0095
+
+r2's setup on the current code, with r12's agent model. Restaurant declares
+`forecast_horizon=1` (the block's floor, 0047), so the two-horizon validation change
+is a no-op here: validation is 43,969 rows, as in r2 (44,662). **4 minutes, 15
+tables**; the agent stopped on its own. rmsle, lower is better.
+
+| table | step (source) | validation probe | gain vs ancestor (spread) | passes |
+|---|---|---|---|---|
+| t1 | calendar, holiday distances (raw) | 0.7550 | −0.0142 (0.0016) | no |
+| t2 | store × weekday history, 4–8 weeks (t1) | 0.7053 | +0.0497 (0.0597) | no |
+| t3 | `holiday_flg` trailing / forward 7-day sums (t1) | – | refused, see below | – |
+| t4 | store, store × weekday target encodings (t1) | 0.5351 | +0.2199 (0.0093) | yes |
+| t5 | store history, 60–120 days (t1) | 0.5663 | +0.1887 (0.0115) | yes |
+| **t6** | **store × weekday history, 90–300 days (t1)** | **0.5263** | +0.2288 (0.0106) | **yes, shipped** |
+| t7–t11, t13, t14 | target encodings, store history, frequencies, genre / area × weekday history, store × holiday history, calendar flags (each on t6) | 0.5256–0.5396 | −0.0133 … +0.0006 | no |
+| t12, t15 | t6's windows with other lengths (t1) | 0.5318, 0.5268 | +0.223, +0.228 | yes |
+
+- **0094 and 0090 ship the same table (t6).** Every step on top of t6 is inside its
+  noise or worse, and there is no chain to clear the bar together.
+- t2's gain is all in the first validation blocks (+0.14, +0.11, +0.02, −0.002,
+  −0.004): short history windows are worth a lot just after the cut and nothing six
+  weeks out.
+
+**Test days and Kaggle, next to r2:**
+
+| | r2 (t21, 94 features) | r3 (t6, 34 features) |
+|---|---|---|
+| run's validation probe | 0.5105 | 0.5263 |
+| shipped (refit) on our test days | **0.5225** | 0.5361 |
+| probe / lgbm_es / catboost_es on the refit table | 0.5207 / 0.5210 / 0.5187 | 0.5330 / 0.5308 / 0.5303 |
+| Kaggle, all-rows refit, private / public | **0.5181** / 0.4840 | not yet scored |
+| Kaggle, as shipped, private / public | 0.5481 / 0.5017 | not yet scored |
+
+- **The stronger model built a weaker table and stopped sooner.** The table is
+  0.012 behind r2's under every model on the test days; the blend loses another
+  0.003–0.006. r2's flash model stacked store × weekday target encodings, longer
+  history and holiday distances over 24 tables; r3 found one strong history step and
+  stopped after seven misses on top of it.
+- The blend is worse than single lgbm_es / catboost_es (+0.005 [0.001, 0.011], +0.006
+  [0.002, 0.012]). Members range 0.533 (lgbm) to 0.621 (an xgb) and 0.585
+  (elasticnet) on the test days, at ~1/7 weight each. Without elasticnet: 0.5344.
+
+**A train/serve skew: shipped vs all-rows prediction means per day.** On most days
+the shipped file is ~0.85× the all-rows file (r2: ~0.91×, ordinary staleness), but
+every Wednesday 1.07–1.12×, and on 2017-05-31 the mean is **121 visitors against
+17**. Two stores: `air_cfdeb326418194ff` at 84,690 visitors that day,
+`air_e42bdc3377d1eee7` at 3,288–3,482 on Wednesdays.
+
+- t6's windows count back from the forecast row. The shipped bundle's rows end
+  2017-03-14 and Kaggle's days are 40–78 days later, so its "90-day" Wednesday window
+  on 05-31 holds one old Wednesday (count 1; the store's was 877 visitors). In
+  training and validation (horizon 1) the same windows were nearly full. A window
+  over fewer rows than the model was trained on is computed and served, where 0095
+  refuses the same thing for a known-in-advance column.
+- The tree members stay near log 3 (~20 visitors). The elasticnet member, linear in
+  log space, extrapolates to log 13.3, and the blend averages after inverting the
+  transform (0044), so one member at 1/7 weight carries the row to 84,690. Nothing
+  bounds a prediction to the range the target has seen.
+- The all-rows file is milder (Kaggle days 1–39 after its rows) but still has six
+  predictions above 500 (max 795); r2's files have none above 155. On our own test
+  days the elasticnet member reaches 25,467 too.
+
+**0095 refused inside the run.** t3 (`holiday_flg` over the last / next 7 days per
+store) never got a score: its trailing window needs the 6 rows before each
+validation series' first row, and for 168 stores the training rows end earlier,
+because a store has no row on a day it did not report (e.g. last training row
+01-11, first validation row 01-14). The column is a calendar fact known for every
+date, but the window counts the series' own rows, so the refusal fires on gaps no
+caller could fill with `known_past`. The agent did not try that lane again.
+
+Files: `_runs/capacity_ship_minimal/restaurant/submission_r3_all_rows.csv` and
+`submission_r3_shipped.csv` (`submit.py restaurant r3`); `arms_restaurant_r3.json`.
