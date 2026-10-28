@@ -814,3 +814,32 @@ test day, as a forecast issued then would see them.
   explain r2's lead** (0.0055 on the test days, 0.012 on Kaggle private). That lies
   elsewhere: r2's stacked target encodings, or its search, are the remaining
   candidates.
+
+## Restaurant r7, r8 (2026-10-28): r6 with the finalize inventory (af1ad0b)
+
+The agent's first `finalize_run` now returns an inventory of the run and packages
+nothing: what would ship and its steps, tables built and passed by kind, tables that
+passed but were never built on, and table-building tools never called. A second call
+finishes. Otherwise r6's setup.
+
+| | r2 | r6 | r7 | r8 |
+|---|---|---|---|---|
+| tables / minutes | 24 / – | 18 / 3.9 | 15 / 4.9 | 17 / 4.1 |
+| shipped table | t21 | t14 | t6 | t12 |
+| run's validation probe | 0.5105 | 0.5281 | 0.5134 | 0.5250 |
+| shipped on our test days | **0.5225** | 0.5280 | 0.5270 | 0.5243 |
+| probe / lgbm_es / catboost_es | 0.521 / 0.521 / 0.519 | 0.527 / 0.530 / 0.526 | 0.522 / 0.521 / 0.526 | 0.525 / 0.525 / 0.524 |
+
+- **r7** shipped t6: store history ≥90, store × weekday history ≥90, AirREGI then HPG
+  bookings ≥1 day before (validation 0.5134, the best probe of any run). Nine later
+  steps did not pass. Validation → test +0.014, as r4's (also 1-day bookings).
+- **r8** shipped t12: store target encodings, store history ≥90, median target
+  encodings by store and store × weekday. Its bookings (t5, +0.0035) passed and were
+  never built on. Validation → test −0.001, as r6's (no bookings shipped).
+- The history-window refusal fired in both (28; 8 / 20 / 40).
+- **Whether the inventory made the agent search longer cannot be read off these runs.**
+  The journal records that it was shown, not at which table. In both runs the last
+  table was written 1.5–2 minutes before the bundle (r7 14:28:37 → 14:30:18, r8
+  14:35:20 → 14:37:07), which the final fits account for, and neither built more
+  tables than r6. Most likely the agent read it and finished.
+- r8 is the closest any gpt-6.1 run has come to r2 (0.0018 on the test days).
