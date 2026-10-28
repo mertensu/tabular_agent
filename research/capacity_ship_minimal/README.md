@@ -565,9 +565,11 @@ tables**; the agent stopped on its own. rmsle, lower is better.
 | run's validation probe | 0.5105 | 0.5263 |
 | shipped (refit) on our test days | **0.5225** | 0.5361 |
 | probe / lgbm_es / catboost_es on the refit table | 0.5207 / 0.5210 / 0.5187 | 0.5330 / 0.5308 / 0.5303 |
-| Kaggle, all-rows refit, private / public | **0.5181** / 0.4840 | not yet scored |
+| Kaggle, all-rows refit, private / public | **0.5181** / **0.4840** | 0.5323 / 0.5071 |
 | Kaggle, as shipped, private / public | 0.5481 / 0.5017 | not yet scored |
 
+- On Kaggle private r3 is 0.014 behind r2, the same as on our test days (0.0136):
+  the test days carried over exactly. 0.5323 is at the median (0.5322).
 - **The stronger model built a weaker table and stopped sooner.** The table is
   0.012 behind r2's under every model on the test days; the blend loses another
   0.003–0.006. r2's flash model stacked store × weekday target encodings, longer
