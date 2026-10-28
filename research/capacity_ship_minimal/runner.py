@@ -170,6 +170,10 @@ TAG_OVERRIDES = {
     # Restaurant r3: r2's setup on the current code (0094, 0095, serving types
     # restored, two-horizon validation) with r12's stronger agent model.
     ("restaurant", "r3"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium"},
+    # r4 repeats r3 with the two reservation files declared as streams (one row per
+    # booking, with when it was made), now that the public plan can carry them.
+    ("restaurant", "r4"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium",
+                           "streams": True},
 }
 
 
@@ -213,11 +217,53 @@ def _reservations_as_of(cut: pd.Timestamp) -> pd.DataFrame:
     return parts[0].join(parts[1], how="outer").reset_index()
 
 
+def audit_cut(cfg: dict) -> pd.Timestamp:
+    """The first of the test days: the agent's rows end before it."""
+    when = pd.read_parquet(cfg["source"] / "train_joined.parquet", columns=[cfg["split_on"]])
+    return when[cfg["split_on"]].max().normalize() - pd.Timedelta(days=cfg["audit_days"] - 1)
+
+
+def streams_as_of(cfg: dict, cut: pd.Timestamp | None = None) -> dict[str, pd.DataFrame]:
+    """The dataset's declared streams, holding only records known before ``cut``.
+
+    ``None`` keeps every record: the files end where the competition's forecast is
+    issued. Cut at the test days, they are what a forecast issued then could read.
+    """
+    import importlib
+
+    sys.path.insert(0, str(REPO / "scripts"))
+    declared = importlib.import_module(cfg["prep"]).STREAMS
+    out = {}
+    for name, spec in declared.items():
+        df = pd.read_parquet(spec["path"])
+        out[name] = df if cut is None else df[df[spec["observed_at"]] < cut].reset_index(drop=True)
+    return out
+
+
+def _run_streams(name: str, cfg: dict) -> dict[str, dict]:
+    """The streams as the agent's plan declares them: cut where its rows end."""
+    import importlib
+
+    sys.path.insert(0, str(REPO / "scripts"))
+    declared = importlib.import_module(cfg["prep"]).STREAMS
+    cut = audit_cut(cfg)
+    dest = OUT / name / "streams"
+    dest.mkdir(parents=True, exist_ok=True)
+    plan_streams = {}
+    for stream, frame in streams_as_of(cfg, cut).items():
+        path = dest / f"{stream}.parquet"
+        frame.to_parquet(path, index=False)
+        last = (cut - pd.Timedelta(days=1)).date().isoformat()
+        notes = declared[stream].get("notes", "").replace("2017-04-22", last)
+        plan_streams[stream] = {**declared[stream], "path": str(path), "notes": notes}
+    return plan_streams
+
+
 def _carve_forecast(cfg: dict, files: Path, audit_path: Path) -> None:
     """Agent gets everything before the last ``audit_days``; the audit slice is those days."""
     train = pd.read_parquet(cfg["source"] / "train_joined.parquet")
     when = train[cfg["split_on"]]
-    cut = when.max().normalize() - pd.Timedelta(days=cfg["audit_days"] - 1)
+    cut = audit_cut(cfg)
     work, audit = train[when < cut], train[when >= cut].copy()
     if cfg["prep"] == "prep_restaurant":
         rebuilt = _reservations_as_of(cut)
@@ -287,6 +333,8 @@ def main(name: str, tag: str = "r1") -> int:
         plan.split_on = cfg["split_on"]
         plan.forecast_horizon = cfg.get("forecast_horizon", getattr(prep, "FORECAST_HORIZON", None))
         plan.future_known = cfg["future_known"]
+        if cfg.get("streams"):
+            plan.streams = _run_streams(name, cfg)
     else:
         plan.split_on = False
     plan.reject_joins()
@@ -305,6 +353,7 @@ def main(name: str, tag: str = "r1") -> int:
         "identifier_columns": plan.identifier_columns,
         "n_serving_columns": len(plan.serving_columns),
         "future_known": list(plan.future_known or []),
+        "streams": sorted(plan.streams),
     }
     (HERE / f"result_{name}_{tag}.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2), flush=True)

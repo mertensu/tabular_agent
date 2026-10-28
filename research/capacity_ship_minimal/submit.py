@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from runner import DATASETS, HERE, OUT  # noqa: E402
+from runner import DATASETS, HERE, OUT, streams_as_of  # noqa: E402
 
 from tabular_agent.api import Run  # noqa: E402
 from tabular_agent.harness.tools import _feature_frame, _fit_recipe, _load_lineage  # noqa: E402
@@ -45,7 +45,8 @@ from tabular_agent.taskspec import ResolvedSpec  # noqa: E402
 ID = {"restaurant": "id", "rossmann": "Id"}
 
 
-def all_rows_bundle(run: Run, cfg: dict, table_id: str | None = None) -> dict:
+def all_rows_bundle(run: Run, cfg: dict, table_id: str | None = None,
+                    streams: dict | None = None) -> dict:
     """The shipped bundle's recipe refitted on every training row, audit included."""
     b = run.bundle._bundle
     j = run.journal
@@ -71,7 +72,7 @@ def all_rows_bundle(run: Run, cfg: dict, table_id: str | None = None) -> dict:
     if not source.exists():
         source = Path(run.run_dir) / "data" / name
     table, pipeline = refit_lineage(_load_lineage(str(source), spec.task_type), rows, spec,
-                                    order=split["split_on"])
+                                    order=split["split_on"], streams=streams)
     features = None
     if table_id:
         features = list(_feature_frame(pd.read_parquet(source), cfg["target"])[0].columns)
@@ -104,15 +105,19 @@ def main(name: str, tag: str, table_id: str | None = None) -> int:
     test = pd.read_parquet(cfg["source"] / "test_joined.parquet")
     raw = test.drop(columns=[ID[name]])
     dest = OUT / name
+    # Every record: the stream files end where the competition's forecast is issued.
+    streams = streams_as_of(cfg) if run.bundle._plan.get("streams") else {}
 
     if table_id:
-        refit = all_rows_bundle(run, cfg, table_id)
+        refit = all_rows_bundle(run, cfg, table_id, streams)
         files = ((f"{table_id}_all_rows",
-                  np.asarray(predict_bundle(refit, run.bundle._prepare(raw)), dtype=float)),)
+                  np.asarray(predict_bundle(refit, run.bundle._prepare(raw), streams=streams),
+                             dtype=float)),)
     else:
-        shipped = np.asarray(run.bundle.predict(raw), dtype=float)
-        refit = all_rows_bundle(run, cfg)
-        all_rows = np.asarray(predict_bundle(refit, run.bundle._prepare(raw)), dtype=float)
+        shipped = np.asarray(run.bundle.predict(raw, streams=streams), dtype=float)
+        refit = all_rows_bundle(run, cfg, streams=streams)
+        all_rows = np.asarray(predict_bundle(refit, run.bundle._prepare(raw), streams=streams),
+                              dtype=float)
         files = (("shipped", shipped), ("all_rows", all_rows))
 
     for label, preds in files:

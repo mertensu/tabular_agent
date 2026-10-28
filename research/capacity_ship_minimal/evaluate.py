@@ -110,7 +110,7 @@ def fitted_rows(run: Run) -> pd.DataFrame:
     return pd.concat([work, pd.read_parquet(root / "val.parquet")], ignore_index=True)
 
 
-def work_fit_predict(run: Run, raw: pd.DataFrame) -> np.ndarray | None:
+def work_fit_predict(run: Run, raw: pd.DataFrame, streams: dict) -> np.ndarray | None:
     """What the bundle would predict had it shipped its work-only fits (pre-0092)."""
     if not refitted(run):
         return None
@@ -124,7 +124,8 @@ def work_fit_predict(run: Run, raw: pd.DataFrame) -> np.ndarray | None:
               for e in b["fitted_on"]["refit_of"]]
     work_bundle = {**b, "pipeline": _load_lineage(str(source), b["task_type"]),
                    "models": models}
-    return np.asarray(predict_bundle(work_bundle, run.bundle._prepare(raw)), dtype=float)
+    return np.asarray(predict_bundle(work_bundle, run.bundle._prepare(raw), streams=streams),
+                      dtype=float)
 
 
 def score(metric, y, p):
@@ -160,7 +161,7 @@ def paired(metric, y, base, other, groups=None):
 
 
 def main(name: str, tag: str = "r1") -> int:
-    from runner import DATASETS
+    from runner import DATASETS, audit_cut, streams_as_of
 
     cfg = DATASETS[name]
     forecast = cfg.get("forecast", False)
@@ -175,7 +176,10 @@ def main(name: str, tag: str = "r1") -> int:
 
     selected = run.training_features()
     X_sel, y_sel = selected.drop(columns=[target]), selected[target]
-    Xa_sel = run.bundle.feature_table(audit.drop(columns=[target]))[list(X_sel.columns)]
+    # Streams as a forecast issued at the first test day could read them.
+    streams = streams_as_of(cfg, audit_cut(cfg)) if run.bundle._plan.get("streams") else {}
+    Xa_sel = run.bundle.feature_table(audit.drop(columns=[target]),
+                                      streams=streams)[list(X_sel.columns)]
 
     # The rows the shipped bundle was fitted on, so the raw-table arms see the same.
     work = fitted_rows(run)
@@ -194,7 +198,8 @@ def main(name: str, tag: str = "r1") -> int:
     order_work = work[cfg["split_on"]] if forecast else None
     groups = audit[cfg["group"]] if cfg.get("group") else None
 
-    shipped = np.asarray(run.bundle.predict(audit.drop(columns=[target])), dtype=float)
+    shipped = np.asarray(run.bundle.predict(audit.drop(columns=[target]), streams=streams),
+                         dtype=float)
     if shipped.ndim == 2:
         shipped = shipped[:, -1]
 
@@ -210,7 +215,7 @@ def main(name: str, tag: str = "r1") -> int:
     if forecast:
         preds["probe"] = refit_preds
         meta["shipped_members"] = len(run.bundle._bundle.get("models") or [])
-    work_fit = work_fit_predict(run, audit.drop(columns=[target]))
+    work_fit = work_fit_predict(run, audit.drop(columns=[target]), streams)
     if work_fit is not None:
         preds["shipped_work_fit"] = work_fit[:, -1] if work_fit.ndim == 2 else work_fit
 
