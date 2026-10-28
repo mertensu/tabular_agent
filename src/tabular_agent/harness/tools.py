@@ -502,6 +502,9 @@ def _probe_preds_path(session: RunSession, table_path: str) -> str:
 
 def _agent_score_fields(session: RunSession, scored: dict) -> dict:
     """Public score vocabulary for the selected product profile."""
+    # The shipping comparison (0094) is the harness's, not search guidance.
+    scored = {k: v for k, v in scored.items()
+              if k not in ("eligible_ancestor", "probe_vs_eligible_ancestor_interval")}
     if session.profile != "minimal":
         return scored
     out = dict(scored)
@@ -656,7 +659,29 @@ def _probe_and_compare(session: RunSession, table_path: str, source_rel: str) ->
         out["probe_vs_source_table"] = _gain(out["probe_score"], before, session.resolved().metric)
         if session.profile != "minimal":
             out.update(_difference_interval(session, table_path, source_rel))
+            out.update(_vs_eligible_ancestor(session, table_path, source_rel, out))
     return out
+
+
+def _vs_eligible_ancestor(session: RunSession, table_path: str, source_rel: str,
+                          scored: dict) -> dict:
+    """The comparison that decides whether this table may ship (0094).
+
+    Against the nearest table on its lineage that could itself ship, rather than
+    only the one it was built from, so steps that are each inside the noise are
+    judged by what they add up to. Recorded for the terminal selection; the agent
+    is not shown it (`_agent_score_fields`).
+    """
+    tables = journal.load(session.run_dir).get("tables") or []
+    anchor = stop.eligible_ancestor(tables, source_rel)
+    if anchor == source_rel:
+        interval = scored.get("probe_vs_source_interval")
+    else:
+        interval = _difference_interval(session, table_path, anchor).get(
+            "probe_vs_source_interval")
+    if interval is None:
+        return {}
+    return {"eligible_ancestor": anchor, "probe_vs_eligible_ancestor_interval": interval}
 
 
 def _difference_interval(session: RunSession, table_path: str, source_rel: str) -> dict:

@@ -7,7 +7,7 @@ was rejected, and what it cost. They are written for someone who knows data
 science but has never seen this codebase — project-specific vocabulary is
 explained where it first matters.
 
-This directory holds the fourteen that still carry the product: its architecture,
+This directory holds the fifteen that still carry the product: its architecture,
 its safety invariants, how it measures, what it ships, and its public contracts.
 The other eighty — measurements, refuted mechanisms, dataset findings, plans that
 were superseded — are in [`research/archive/decisions/`](../../research/archive/decisions/),
@@ -74,6 +74,8 @@ Vocabulary used throughout:
   *(still standing; its equal weighting was superseded by
   [0080](../../research/archive/decisions/0080-a-blend-weight-a-member-cannot-inflate-decided-before-the-seal.md))*
 - [0092 — What ships is refitted on every row the search could use](0092-what-ships-is-refitted-on-every-row-the-search-could-use.md)
+- [0094 — A table ships on what its steps add up to, not on its last step](0094-a-table-ships-on-what-its-steps-add-up-to.md)
+  *(supersedes [0090](../../research/archive/decisions/0090-the-terminal-table-must-have-a-demonstrated-gain.md))*
 
 ### Public contracts
 

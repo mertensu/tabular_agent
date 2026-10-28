@@ -14,6 +14,7 @@ from tabular_agent.harness.stop import (
     advisory,
     best_table,
     best_probe_table,
+    eligible_ancestor,
     evaluate,
 )
 
@@ -210,3 +211,45 @@ def test_ties_go_to_the_earlier_table():
         {**row("t2", 0.30), "probe_vs_source_interval": interval(0.02, 0.01)},
     ]
     assert best_table(tables, "logloss")["id"] == "t1"
+
+
+def chained(id, score, source, vs_source, vs_ancestor=None, ancestor=None):
+    r = {**row(id, score), "source_table": f"tables/{source}.parquet",
+         "probe_vs_source_interval": vs_source}
+    if vs_ancestor is not None:
+        r["eligible_ancestor"] = f"tables/{ancestor}.parquet"
+        r["probe_vs_eligible_ancestor_interval"] = vs_ancestor
+    return r
+
+
+def test_a_chain_of_steps_inside_the_noise_ships_once_it_adds_up():
+    """0094: t3 is judged against t1, the last table that could ship."""
+    t1 = chained("t1", 0.30, "t0", interval(0.05, 0.01), interval(0.05, 0.01), "t0")
+    t2 = chained("t2", 0.29, "t1", interval(0.01, 0.02), interval(0.01, 0.02), "t1")
+    t3 = chained("t3", 0.27, "t2", interval(0.02, 0.03), interval(0.03, 0.02), "t1")
+    assert best_table([t1, t2, t3], "logloss")["id"] == "t3"
+    # Under 0090's comparison with the immediate source only, it would not.
+    t3_0090 = {k: v for k, v in t3.items() if k != "probe_vs_eligible_ancestor_interval"}
+    assert best_table([t1, t2, t3_0090], "logloss")["id"] == "t1"
+
+
+def test_one_noise_step_past_an_eligible_table_still_fails():
+    """What 0090 is for: the ancestor *is* the source, and the step is noise."""
+    t1 = chained("t1", 0.30, "t0", interval(0.05, 0.01), interval(0.05, 0.01), "t0")
+    t2 = chained("t2", 0.29, "t1", interval(0.01, 0.02), interval(0.01, 0.02), "t1")
+    assert best_table([t1, t2], "logloss")["id"] == "t1"
+
+
+def test_the_ancestor_is_the_nearest_eligible_one_on_the_lineage():
+    t1 = chained("t1", 0.30, "t0", interval(0.05, 0.01))
+    t2 = chained("t2", 0.29, "t1", interval(0.01, 0.02))
+    t3 = chained("t3", 0.28, "t2", interval(0.01, 0.02))
+    tables = [t1, t2, t3]
+    assert eligible_ancestor(tables, "tables/t3.parquet") == "tables/t1.parquet"
+    assert eligible_ancestor(tables, "tables/t1.parquet") == "tables/t1.parquet"
+    # Nothing eligible on the path: the immediate source, as 0090 used.
+    t1["probe_vs_source_interval"] = interval(0.001, 0.01)
+    assert eligible_ancestor(tables, "tables/t3.parquet") == "tables/t3.parquet"
+    # The raw rows have no journal row.
+    assert eligible_ancestor(tables, "data/work.parquet") == "data/work.parquet"
+    assert eligible_ancestor(tables, None) is None

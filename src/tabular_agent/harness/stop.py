@@ -196,9 +196,9 @@ def best_probe_table(tables: list[dict], metric: str) -> dict | None:
     return max(rows, key=lambda r: r["probe_score"] if higher else -r["probe_score"])
 
 
-def _has_demonstrated_gain(row: dict) -> bool:
-    """Whether the table beat its source beyond the paired noise bar (0090)."""
-    interval = row.get("probe_vs_source_interval") or {}
+def _clears_bar(interval: dict | None) -> bool:
+    """Whether a paired difference is larger than its own noise bar (0090)."""
+    interval = interval or {}
     gain = interval.get("gain")
     if interval.get("mode") == "paired_bootstrap":
         spread = interval.get("paired_se")
@@ -211,12 +211,46 @@ def _has_demonstrated_gain(row: dict) -> bool:
     return float(spread) > 0.0 and float(gain) > float(spread)
 
 
-def best_table(tables: list[dict], metric: str) -> dict | None:
-    """The terminal table: fixed-ruler argmax among demonstrated gains (0090).
+def _has_demonstrated_gain(row: dict) -> bool:
+    """Whether the table may ship: it beat its nearest eligible ancestor (0094).
 
-    A scored table without a paired-difference interval cannot win. If none
-    clears its own one-standard-deviation bar the caller falls back to the raw
-    work table. Ties retain input order, hence the earlier/shorter lineage.
+    Rows scored before 0094 have no ancestor comparison and are judged against
+    their immediate source, as 0090 judged them.
+    """
+    interval = row.get("probe_vs_eligible_ancestor_interval")
+    if interval is None:
+        interval = row.get("probe_vs_source_interval")
+    return _clears_bar(interval)
+
+
+def eligible_ancestor(tables: list[dict], source: str | None) -> str | None:
+    """The table a new one is judged against: its nearest eligible ancestor (0094).
+
+    Walks the lineage back from ``source`` through the journal's rows and returns
+    the first table that could itself ship. While none on the path can, it is
+    ``source`` itself, so the first step out of the raw rows is judged exactly as
+    0090 judged every step. Eligibility is fixed when a table is scored and its
+    ancestors are always scored first, so the answer does not depend on what the
+    run builds later.
+    """
+    rows = {t.get("path"): t for t in tables}
+    node, seen = source, set()
+    while node in rows and node not in seen:
+        seen.add(node)
+        if _has_demonstrated_gain(rows[node]):
+            return node
+        node = rows[node].get("source_table")
+    return source
+
+
+def best_table(tables: list[dict], metric: str) -> dict | None:
+    """The terminal table: fixed-ruler argmax among eligible tables (0094).
+
+    A table is eligible when its gain over its nearest eligible ancestor clears
+    that comparison's noise bar, so a chain of steps each inside the noise can
+    ship once together they are not. A scored table without an interval cannot
+    win. If none is eligible the caller falls back to the raw work table. Ties
+    retain input order, hence the earlier/shorter lineage.
     """
     rows = [row for row in _attempts(tables) if _has_demonstrated_gain(row)]
     if not rows:

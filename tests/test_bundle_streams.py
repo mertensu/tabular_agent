@@ -93,6 +93,7 @@ def shipped(tmp_path, table_path, stream_file):
         "block_sd": 0.01,
         "mode": "ordered_blocks",
     }
+    row["probe_vs_eligible_ancestor_interval"] = row["probe_vs_source_interval"]
     journal.save(session.run_dir, j)
     out = finalize_run(session)
     return session, out

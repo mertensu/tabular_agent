@@ -30,11 +30,10 @@ RAW = "the work table"
 
 def mark_demonstrated(state: dict, index: int) -> None:
     """Make a fixture's synthetic score eligible for 0090 terminal selection."""
-    state["tables"][index]["probe_vs_source_interval"] = {
-        "gain": 0.2,
-        "block_sd": 0.01,
-        "mode": "ordered_blocks",
-    }
+    demonstrated = {"gain": 0.2, "block_sd": 0.01, "mode": "ordered_blocks"}
+    state["tables"][index]["probe_vs_source_interval"] = demonstrated
+    # 0094 decides on the comparison with the nearest eligible ancestor.
+    state["tables"][index]["probe_vs_eligible_ancestor_interval"] = demonstrated
 
 
 @pytest.fixture
@@ -1771,3 +1770,38 @@ def test_a_fit_over_the_run_s_time_budget_is_refused_as_a_correction(tmp_path):
 
 def test_no_time_budget_is_the_default(session):
     assert session.fit_time_budget_s is None
+
+
+CUBE_CODE = """
+def transform_features(df):
+    df = df.copy()
+    df["x2_cube"] = df["x2"] ** 3
+    return df
+"""
+
+
+SQUARE_CODE = """
+def transform_features(df):
+    df = df.copy()
+    df["x1_sq"] = df["x1"] ** 2
+    return df
+"""
+
+
+def test_a_table_records_its_comparison_with_the_nearest_eligible_ancestor(session):
+    """0094: t3 is compared with t1 when t2 could not ship; the agent is not shown it."""
+    first = transform_features(session, RATIO_CODE)
+    second = transform_features(session, SQUARE_CODE, table=first["table"])
+    state = journal.load(session.run_dir)
+    mark_demonstrated(state, 0)
+    noise = {"gain": 0.0, "paired_se": 0.01, "mode": "paired_bootstrap"}
+    state["tables"][1]["probe_vs_source_interval"] = noise
+    state["tables"][1]["probe_vs_eligible_ancestor_interval"] = noise
+    journal.save(session.run_dir, state)
+
+    third = transform_features(session, CUBE_CODE, table=second["table"])
+    row = journal.load(session.run_dir)["tables"][2]
+    assert row["eligible_ancestor"] == first["table"]
+    assert row["probe_vs_eligible_ancestor_interval"] != row["probe_vs_source_interval"]
+    assert "eligible_ancestor" not in third
+    assert "probe_vs_eligible_ancestor_interval" not in third

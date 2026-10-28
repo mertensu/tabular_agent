@@ -248,6 +248,7 @@ def test_the_stored_statistics_replay_on_rows_that_never_had_the_value(session):
         "paired_se": 0.01,
         "mode": "paired_bootstrap",
     }
+    terminal["probe_vs_eligible_ancestor_interval"] = terminal["probe_vs_source_interval"]
     journal.save(session.run_dir, state)
     out = finalize_run(session)
 
