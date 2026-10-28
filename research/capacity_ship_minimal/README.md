@@ -522,11 +522,14 @@ shipped 0.1466 on the same 96 days).
 |---|---|
 | refit on all rows | 0.1233 / **0.1070** (public ~1,110 / 3,300) |
 | bundle as shipped (data to 13 June) | 0.1303 / 0.4787 |
-| as shipped, our 48 test days passed as `known_past` (0095) | not submitted |
+| as shipped, our 48 test days passed as `known_past` (0095) | 0.1303 / 0.1133 |
 
 The shipped bundle's 0.479 was a product bug (0095): its trailing `Open` windows
 could not reach back over the seven weeks between its data and Kaggle's test, and
 were computed over the forecast rows alone, so the first days read as closures
 (predictions ~2× on 1 August, normal by mid-August). The bundle now refuses and
 takes `known_past`; with it, predictions match the all-rows refit day by day
-(median ratio 0.98–1.03).
+(median ratio 0.98–1.03), and Kaggle public goes from 0.479 to 0.113. Private is
+unchanged, so the private part of the test is the later days the bug never reached.
+The rest of the gap to the all-rows file (0.007 private) is the seven weeks of
+staleness only a refit removes.
