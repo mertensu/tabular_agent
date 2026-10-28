@@ -755,3 +755,32 @@ furthest a validation row lies past its fold's freeze. For Restaurant's runs tha
 83 days. It would have refused r5's 28 / 56 / 70-day windows, and also r2's 56-day
 store window in its shipped table; r3's and r4's (90 days and up) pass. Conservative:
 it refuses windows that are only partly affected too.
+
+## Restaurant r6 (2026-10-28): r5 repeated, after the history-window refusal (cf817c1)
+
+Same setup, unchanged. 4 minutes, 18 tables. The refusal fired twice: the agent asked
+for 4 / 12 / 24-day windows, then 28; after the second refusal every window it built
+was 84 days or longer.
+
+Path: AirREGI bookings ≥1 day before (t2, +0.037) and ≥43 days (t4, +0.019) on the
+calendar; store target encodings (t5, +0.219, 0.5356); store × weekday history from
+84 days (t7, +0.219, 0.5358); + target encodings (t9, +0.005); + store history from 84
+days (**t14, +0.0025 against 0.0016, shipped, 0.5281**). Four later steps (store ×
+month encodings, Golden Week distances, area and holiday history) did not pass. 0094
+and 0090 ship the same table. **No booking feature reached the shipped table**: the
+bookings were added on top of t7 in t8 (+0.0009), but the agent continued from t9.
+
+| | r2 | r4 | r5 | r6 |
+|---|---|---|---|---|
+| run's validation probe | 0.5105 | 0.5158 | 0.5159 | 0.5281 |
+| shipped on our test days | **0.5225** | 0.5293 | 0.5458 | 0.5280 |
+| validation → test | +0.012 | +0.014 | +0.030 | **−0.000** |
+| probe / lgbm_es / catboost_es | 0.521 / 0.521 / 0.519 | 0.527 / 0.527 / 0.528 | 0.564 / 0.538 / 0.524 | 0.527 / 0.530 / 0.526 |
+
+- The best test-day score of the gpt-6.1 runs, and the first whose validation score
+  is what the test days give. The members agree on its table (0.526–0.530).
+- By week the bias is small and negative throughout (−0.05 to −0.12 in log), with no
+  first-week excess like r5's +0.23.
+- Kaggle files: shipped / all-rows per day 0.82–0.91; largest predictions 137 / 212.
+- Still 0.0055 behind r2. One reading per setup; the two r4-setup runs before the
+  refusal differed by 0.017.
