@@ -691,3 +691,8 @@ recipe; the difference is the booking features):
   room for the short lead's optimism but does not show it on its own.
 - Kaggle files: shipped / all-rows prediction means per day 0.82–0.93 (no weekday
   spikes); largest predictions 353 / 540.
+
+**Kaggle (all-rows refit, private / public):** r4 **0.5286 / 0.4960**; r3 with the
+input clip 0.5322 / 0.5070; r2 0.5181 / 0.4840. The bookings are worth +0.0036
+private (+0.0043 on the test days) and +0.0110 public, and r4 stays 0.0105 behind r2
+on the private board (0.0068 on the test days).
