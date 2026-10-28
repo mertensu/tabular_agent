@@ -475,6 +475,16 @@ def record_table_refusal(run_dir: str, table: str) -> int:
 
 
 @_serialized_mutation
+def mark_inventory_shown(run_dir: str) -> None:
+    """Record that the agent has been shown the run's inventory once."""
+    journal = load(run_dir)
+    state = journal.get("stop") or {"refusals": 0, "finalized": False}
+    state["inventory_shown"] = True
+    journal["stop"] = state
+    _save_unlocked(run_dir, journal)
+
+
+@_serialized_mutation
 def mark_finalized(run_dir: str) -> dict:
     journal = load(run_dir)
     state = journal.get("stop") or {"refusals": 0, "finalized": False}

@@ -881,8 +881,12 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "
     def finalize_run(ctx: RunContext[Deps]) -> dict:
         """Package the best experiment into a predictor bundle and write the report.
 
-        Call this exactly once, when you are done experimenting.
+        Call this when you are done experimenting. The first call returns an
+        overview of what the run built and finishes nothing; call it again to finish.
         """
+        inventory = tools.run_inventory(ctx.deps.session)
+        if inventory is not None:
+            return inventory
         return _retryable(lambda: tools.finalize_run(ctx.deps.session), ctx)
 
     return agent

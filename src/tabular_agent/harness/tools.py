@@ -3686,6 +3686,87 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
     }
 
 
+#: Which tool builds a table of each journal ``method``. Encodings record the
+#: encoding's own name (target, frequency, ...), so they are matched separately.
+_TOOL_OF_METHOD = {
+    "group_stats": "fit_group_stats",
+    "history": "fit_history",
+    "stream_aggregate": "fit_stream_aggregate",
+    "future_window": "fit_future_covariate_window",
+    "filter": "filter_rows",
+    "transform": "transform_features",
+}
+
+
+def run_inventory(session: RunSession) -> dict | None:
+    """What the run built, once, when the agent first asks to finish.
+
+    Facts from the journal and nothing else: what would ship and the steps it is
+    made of, how many tables of each kind were built and passed, tables that
+    passed but were never built on, and table-building tools never called. No
+    advice: what to make of it is the agent's call, and calling ``finalize_run``
+    again finishes. ``None`` when it has been shown, the run is finalized, or the
+    stop rule has ended the search (building would be refused).
+    """
+    state = journal.stop_state(session.run_dir)
+    if state.get("finalized") or state.get("inventory_shown") or _progress(session)["should_stop"]:
+        return None
+    j = journal.load(session.run_dir)
+    tables = j.get("tables") or []
+    by_path = {t.get("path"): t for t in tables}
+    metric = (j.get("task") or {}).get("metric") or session.resolved().metric
+
+    def kind(t):
+        return "encoding" if t.get("encoded_columns") is not None else t.get("method")
+
+    def gain(t):
+        interval = (t.get("probe_vs_eligible_ancestor_interval")
+                    or t.get("probe_vs_source_interval") or {})
+        return interval.get("gain")
+
+    winner = stop.best_table(tables, metric)
+    steps, node = [], winner
+    while node is not None:
+        steps.append(f"{node['id']}: {kind(node)}")
+        node = by_path.get(node.get("source_table"))
+
+    kinds: dict[str, dict] = {}
+    for t in tables:
+        k = kinds.setdefault(kind(t), {"built": 0, "passed": 0})
+        k["built"] += 1
+        k["passed"] += int(stop._has_demonstrated_gain(t))
+
+    sources = {t.get("source_table") for t in tables}
+    loose_ends = [
+        {"table": t["id"], "kind": kind(t),
+         "built_on": os.path.splitext(os.path.basename(t.get("source_table") or ""))[0],
+         "gain": gain(t)}
+        for t in tables
+        if stop._has_demonstrated_gain(t) and t.get("path") not in sources
+        and (winner is None or t["id"] != winner["id"])
+    ]
+
+    used = {kind(t) for t in tables}
+    available = {"fit_encoding", "fit_group_stats", "filter_rows", "transform_features"}
+    if session.split_on is not None:
+        available.add("fit_history")
+        if session.streams:
+            available.add("fit_stream_aggregate")
+        if session.future_known:
+            available.add("fit_future_covariate_window")
+    called = {_TOOL_OF_METHOD.get(k, "fit_encoding") for k in used if k}
+    journal.mark_inventory_shown(session.run_dir)
+    return {
+        "finalized": False,
+        "would_ship": {"table": winner["id"] if winner else None,
+                       "steps": list(reversed(steps))},
+        "tables_by_kind": kinds,
+        "passed_but_not_built_on": loose_ends,
+        "tools_never_called": sorted(available - called),
+        "note": "Nothing was finalized. Call finalize_run again to finish.",
+    }
+
+
 def finalize_run(session: RunSession) -> dict:
     """Package the best experiment: deployable bundle + human-readable report.
 
