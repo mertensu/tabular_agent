@@ -167,6 +167,9 @@ TAG_OVERRIDES = {
     # windows the flash model never did?
     ("rossmann", "r12"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
                           "model": "gpt-6.1-terra@eu", "reasoning_effort": "medium"},
+    # Restaurant r3: r2's setup on the current code (0094, 0095, serving types
+    # restored, two-horizon validation) with r12's stronger agent model.
+    ("restaurant", "r3"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium"},
 }
 
 
