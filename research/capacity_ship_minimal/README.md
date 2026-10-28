@@ -784,3 +784,7 @@ bookings were added on top of t7 in t8 (+0.0009), but the agent continued from t
 - Kaggle files: shipped / all-rows per day 0.82–0.91; largest predictions 137 / 212.
 - Still 0.0055 behind r2. One reading per setup; the two r4-setup runs before the
   refusal differed by 0.017.
+
+**Kaggle, all-rows refit (private / public):** r6 0.5309 / 0.4954; r4 **0.5286** /
+0.4960; r2 **0.5181** / **0.4840**. r6 is 0.0013 ahead of r4 on the test days and
+0.0023 behind on Kaggle private: level within noise. r2 stays ~0.012 ahead.
