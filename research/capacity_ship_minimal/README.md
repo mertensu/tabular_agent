@@ -724,8 +724,8 @@ spread from 0.524 to 0.693.
 **The cause: t2's 28-day store window.** In training it is missing on 62% of rows and
 its median count is 0. History is frozen at each fold's training prefix and the
 blocks are ~3 months, so the window is filled only for rows within 28 days of a
-freeze: in a few calendar stretches (filled share by month: 0 in Jan–Apr and Jul,
-0.65 in Jun, 0.73 Aug, 0.90 Oct, 0.76 Dec, 0.60 Feb). On the test days, 1–39 days after
+freeze: in a few calendar stretches (filled share by month: 0 in Jan–Apr 2016 and Jul,
+0.65 in Jun, 0.73 Aug, 0.90 Oct, 0.76 Dec, 0.39 Jan 2017, 0.60 Feb). On the test days, 1–39 days after
 one freeze, it is filled for every row in the first four weeks.
 
 | test days after the cut | 0–6 | 7–13 | 14–20 | 21–27 | 28–38 | all |
