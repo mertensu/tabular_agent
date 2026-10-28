@@ -1,0 +1,42 @@
+{
+  "dataset": "restaurant",
+  "tag": "r6",
+  "table": "refit/t14.parquet",
+  "test_days": {
+    "shipped_recipe": 0.527967,
+    "with_reservation_columns": 0.526154
+  },
+  "gain": {
+    "gain": 0.001813,
+    "ci95": [
+      -0.001494,
+      0.004739
+    ]
+  },
+  "by_week": {
+    "0": {
+      "shipped_recipe": 0.5389,
+      "with_reservation_columns": 0.5307
+    },
+    "1": {
+      "shipped_recipe": 0.5237,
+      "with_reservation_columns": 0.5224
+    },
+    "2": {
+      "shipped_recipe": 0.5377,
+      "with_reservation_columns": 0.5385
+    },
+    "3": {
+      "shipped_recipe": 0.5381,
+      "with_reservation_columns": 0.5367
+    },
+    "4": {
+      "shipped_recipe": 0.5135,
+      "with_reservation_columns": 0.5146
+    },
+    "5": {
+      "shipped_recipe": 0.5072,
+      "with_reservation_columns": 0.5055
+    }
+  }
+}

@@ -793,3 +793,24 @@ bookings were added on top of t7 in t8 (+0.0009), but the agent continued from t
 r2 **0.5481** / 0.5017. r6 loses 0.034 private to its all-rows refit (r2: 0.030), the
 ordinary staleness. Against r4 it is 0.005 better on private and 0.017 worse on public:
 r6 shipped no booking feature, and r4's bookings were fresh for Kaggle's early days.
+
+### Did dropping the reservation columns cost r6 anything? (`reservation_check.py`)
+
+r6's shipped recipe (7 models, parameters, blend weights) refitted on its training +
+validation rows, once on t14 as shipped and once with the six collapsed reservation
+columns added. On our test days the columns hold only bookings made before the first
+test day, as a forecast issued then would see them.
+
+| test days | shipped recipe | + reservation columns |
+|---|---|---|
+| all | 0.5280 (reproduces the shipped 0.5280) | 0.5262 |
+| week 1 / 2 / 3 | 0.5389 / 0.5237 / 0.5377 | 0.5307 / 0.5224 / 0.5385 |
+| week 4 / 5 / 6 | 0.5381 / 0.5135 / 0.5072 | 0.5367 / 0.5146 / 0.5055 |
+
+- **+0.0018 [−0.0015, 0.0047]**, inside the noise, almost all of it in the first
+  week. The same shape as r4's booking features from the stream. r6 shipped no
+  booking feature, so this is roughly what any booking signal is worth on top of it.
+- The agent's decision to drop the columns cost at most about 0.002. **It does not
+  explain r2's lead** (0.0055 on the test days, 0.012 on Kaggle private). That lies
+  elsewhere: r2's stacked target encodings, or its search, are the remaining
+  candidates.
