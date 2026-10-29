@@ -39,7 +39,9 @@ from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import _make_model, fit_final_model, predict_model, train_cv
 from ..pipeline import Pipeline, input_dtypes, save_bundle
-from ..probe import PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_probe, probe_predict
+from ..probe import (
+    PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_fitted_ruler, fit_probe, probe_predict,
+)
 from ..blend import apply_blend, blend_weights
 from ..report import (
     accuracy_interval,
@@ -3009,8 +3011,96 @@ def _best_table_path(session: RunSession, run_journal: dict) -> str:
             return session.rel(session.data_path)
         pick = max if greater_is_better(metric) else min
         return pick(scored, key=lambda t: t["probe_score"])["path"]
-    winner = stop.best_table(candidates, metric)
-    return winner["path"] if winner else session.rel(session.data_path)
+    return _choose_by_fitted_ruler(session, run_journal, candidates, metric)
+
+
+def _choose_by_fitted_ruler(session: RunSession, run_journal: dict, candidates: list[dict],
+                            metric: str) -> str:
+    """The table that ships: 0094's rule, judged by the fitted ruler instead of the probe.
+
+    The probe ranks tables during the search because it is cheap. Choosing what
+    ships is done once, so every scored table is fitted again here with the
+    early-stopped ruler (`fit_fitted_ruler`), scored on the same validation rows,
+    and 0094 is applied to those scores: each table is compared with its nearest
+    eligible ancestor, under the same noise bar, from the fitted ruler's own
+    predictions. The best eligible table by the fitted ruler ships; if none is
+    eligible, the work table, as before. On two forecasting runs the probe passed
+    over a table that both rulers scored best on the test days.
+
+    Costs one early-stopped fit per scored table, which on a large table is a
+    minute or more each. Recorded in the journal (``terminal_selection``) with the
+    probe's own choice beside it, and read back on a second call. If the fitted
+    ruler cannot score anything, the probe's choice ships.
+    """
+    work_rel = session.rel(session.data_path)
+    done = run_journal.get("terminal_selection")
+    if done:
+        return done["table"]
+
+    spec = session.resolved()
+    probe_winner = stop.best_table(candidates, metric)
+    probe_choice = probe_winner["path"] if probe_winner else work_rel
+
+    y_val = load_table(session.val_path)[spec.target]
+    labels = sorted(pd.unique(y_val)) if spec.task_type in ("binary", "multiclass") else None
+    order_values = _val_order_values(session)
+
+    # The work table first: the first step out of it is judged against it.
+    rows = [{"id": "work", "path": work_rel}] + [
+        t for t in candidates if t.get("path") != work_rel and t.get("probe_score") is not None
+    ]
+    preds, scores, rounds, shadow = {}, {}, {}, []
+    for t in rows:
+        path = session.data_path if t["path"] == work_rel else os.path.join(
+            session.run_dir, t["path"])
+        try:
+            df = load_table(path)
+            X, _ = _feature_frame(df, spec.target)
+            if X.empty or _refuse_if_unservable(session, path, df, list(X.columns)):
+                continue
+            order = df[session.split_on] if session.split_on in df.columns else None
+            fit = fit_fitted_ruler(X, df[spec.target], spec.task_type, spec.metric,
+                                   spec.target_transform, spec.objective, order=order)
+            score, _, _, p = _score_on_val(
+                session, path, [fit.model], fit.feature_names, spec, df[spec.target],
+                target_transform=fit.target_transform,
+            )
+        except Exception:  # noqa: BLE001 - a table it cannot fit is a table it cannot pick
+            continue
+        if score is None:
+            continue
+        preds[t["path"]], scores[t["id"]] = np.asarray(p), round(float(score), 6)
+        rounds[t["id"]] = fit.spec["rounds"]
+        if t["path"] == work_rel:
+            continue
+        row = {k: v for k, v in t.items() if k != "probe_vs_source_interval"}
+        row["probe_score"] = scores[t["id"]]
+        row["probe_vs_eligible_ancestor_interval"] = None
+        anchor = stop.eligible_ancestor(shadow, t.get("source_table"))
+        if anchor in preds:
+            try:
+                row["probe_vs_eligible_ancestor_interval"] = compare_predictions(
+                    spec.metric, y_val, preds[t["path"]], preds[anchor],
+                    order_values=order_values, labels=labels, seed=spec.seed,
+                )
+                row["eligible_ancestor"] = anchor
+            except Exception:  # noqa: BLE001 - no interval: the table cannot be eligible
+                pass
+        shadow.append(row)
+
+    winner = stop.best_table(shadow, metric) if shadow else None
+    choice = winner["path"] if winner else (work_rel if scores else probe_choice)
+    by_path = {t["path"]: t["id"] for t in rows}
+    journal.record_terminal_selection(session.run_dir, {
+        "ruler": {"model_type": PROBE_MODEL_TYPE, "early_stopped": True},
+        "table": choice,
+        "chosen": by_path.get(choice, "work"),
+        "probe_choice": by_path.get(probe_choice, "work"),
+        "scores": scores,
+        "rounds": rounds,
+        "eligible": [r["id"] for r in shadow if stop._has_demonstrated_gain(r)],
+    })
+    return choice
 
 
 def _terminal_fits(session: RunSession) -> list[dict]:

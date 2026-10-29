@@ -46,6 +46,11 @@ def _safe_frame(X):
 
 class _SafeNames:
     def fit(self, X, y, **kwargs):
+        eval_X = kwargs.get("eval_X")
+        if isinstance(eval_X, tuple):
+            kwargs["eval_X"] = tuple(_safe_frame(a) for a in eval_X)
+        elif eval_X is not None:
+            kwargs["eval_X"] = _safe_frame(eval_X)
         return super().fit(_safe_frame(X), y, **kwargs)
 
     def predict(self, X, **kwargs):

@@ -96,6 +96,7 @@ __all__ = [
     "ProbeFit",
     "default_target_transform",
     "describe_probe",
+    "fit_fitted_ruler",
     "fit_probe",
 ]
 
@@ -112,6 +113,20 @@ PROBE_PARAMS: dict = {"n_estimators": 200}
 #: Fixed, and deliberately not ``TaskSpec.seed``: the ruler must not vary between
 #: runs, or cross-run comparison measures the seed as much as the change.
 PROBE_SEED = 0
+
+#: The fitted ruler, used once per run at finalize to choose the table that ships.
+#: The probe's fixed 200 rounds suit some tables and not others, and it ranks the
+#: rest by how close each happens to come to that budget rather than by what a
+#: model fitted to the table could make of it. The same family stopped early on
+#: rows it does not train on lets every table reach its own capacity. Fixed, like
+#: the probe: a slow rate and a ceiling no table should reach, so the stopping
+#: point decides and nothing here is tuned against a dataset.
+FITTED_RULER_PARAMS: dict = {"learning_rate": 0.03}
+FITTED_RULER_MAX_ROUNDS = 5000
+FITTED_RULER_PATIENCE = 200
+#: The share of the table's rows the stopping point is read on: the latest rows
+#: when the run is ordered, as the run's own validation half is.
+FITTED_RULER_STOP_FRACTION = 0.15
 
 
 def default_target_transform(metric: str, task_type: str) -> str:
@@ -230,3 +245,71 @@ def probe_predict(fit: ProbeFit, X: pd.DataFrame, task_type: str) -> np.ndarray:
     if fit.target_transform != "none":
         preds = invert_target(fit.target_transform, preds)
     return preds
+
+
+def fit_fitted_ruler(
+    X: pd.DataFrame,
+    y,
+    task_type: str,
+    metric: str,
+    target_transform: str | None = None,
+    objective: str | None = None,
+    order=None,
+) -> ProbeFit:
+    """Fit the ruler that chooses what ships: the probe's family, fitted to capacity.
+
+    Rounds are found on an inner split of the table's own rows (the latest
+    ``FITTED_RULER_STOP_FRACTION`` when ``order`` is given, a random share
+    otherwise), then the model is refitted on all of them at that many rounds. The
+    validation half is never read, so its scores can still rank tables. Returns a
+    :class:`ProbeFit`, scored and replayed exactly as the probe's.
+    """
+    import time
+
+    import lightgbm as lgb
+
+    if target_transform is None:
+        target_transform = default_target_transform(metric, task_type)
+
+    X = X.reset_index(drop=True)
+    y = pd.Series(np.asarray(y)).reset_index(drop=True)
+    check_target_domain(target_transform, y, task_type)
+    y_fit = pd.Series(apply_target(target_transform, y)) if target_transform != "none" else y
+    check_objective(objective, y_fit, target_transform)
+    fittable = poisson_fit_rows(objective, y_fit)
+    X, y_fit = X[fittable].reset_index(drop=True), y_fit[fittable].reset_index(drop=True)
+    classes = np.unique(y.to_numpy()) if task_type in ("binary", "multiclass") else None
+
+    n_stop = max(1, int(round(len(X) * FITTED_RULER_STOP_FRACTION)))
+    if order is not None:
+        ranked = np.argsort(np.asarray(order)[np.asarray(fittable)], kind="stable")
+    else:
+        ranked = np.random.default_rng(PROBE_SEED).permutation(len(X))
+    inner, stop_rows = ranked[:-n_stop], ranked[-n_stop:]
+
+    def make(rounds):
+        return _make_model(
+            PROBE_MODEL_TYPE, task_type,
+            {**FITTED_RULER_PARAMS, "n_estimators": rounds}, PROBE_SEED, metric, objective,
+        )
+
+    started = time.monotonic()
+    model = make(FITTED_RULER_MAX_ROUNDS)
+    model.fit(X.iloc[inner], y_fit.iloc[inner],
+              eval_X=(X.iloc[stop_rows],), eval_y=(y_fit.iloc[stop_rows],),
+              callbacks=[lgb.early_stopping(FITTED_RULER_PATIENCE, verbose=False)])
+    rounds = max(1, int(model.best_iteration_ or FITTED_RULER_MAX_ROUNDS))
+    model = make(rounds)
+    model.fit(X, y_fit)
+    elapsed = round(time.monotonic() - started, 2)
+
+    return ProbeFit(
+        model=model,
+        feature_names=list(X.columns),
+        target_transform=target_transform,
+        classes=classes,
+        fit_seconds=elapsed,
+        spec={"model_type": PROBE_MODEL_TYPE, "params": dict(FITTED_RULER_PARAMS),
+              "seed": PROBE_SEED, "rounds": rounds},
+        unfitted_rows=int((~fittable).sum()),
+    )

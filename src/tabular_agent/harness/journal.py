@@ -538,6 +538,15 @@ def record_rejection(run_dir: str, entry: dict) -> dict:
 
 
 @_serialized_mutation
+def record_terminal_selection(run_dir: str, entry: dict) -> dict:
+    """How the table that ships was chosen, once, at finalize."""
+    journal = load(run_dir)
+    journal["terminal_selection"] = entry
+    _save_unlocked(run_dir, journal)
+    return journal
+
+
+@_serialized_mutation
 def append_note(run_dir: str, note: dict) -> dict:
     journal = load(run_dir)
     journal["log"].append(note)
