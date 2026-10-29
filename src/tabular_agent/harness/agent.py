@@ -544,8 +544,7 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "
         moment a thing happens, so a training row can be shown bookings made the
         same day while a row you are asked to forecast never can. Summing the file
         as it stands builds exactly that column, it scores beautifully in
-        validation — which is drawn from the same uncut file — and it is worth
-        much less than it looks at predict time.
+        validation, and it is worth much less than it looks at predict time.
 
         `leads` fixes it. `leads=[7]` counts only the records observed at least 7
         periods before each row, which is what a forecast issued a week ahead
@@ -564,10 +563,10 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "
             leads: How far ahead of a row a record had to be observed to count,
                 in the ordering column's units — e.g. [7, 30]. Each must be at
                 least the task's declared forecast_horizon, since no row you are
-                scored on could have anything more recent. Note the horizon is the
-                *floor* of a scored block: a lead at the floor is honest for the
-                block's earliest rows and generous towards its far edge, and the
-                result reports `block_span` so you can pick against it.
+                scored on could have anything more recent. A row also counts only
+                records observed before its block's forecast was issued, as a
+                served row would, so a short lead adds records only near a block's
+                start; the result reports `block_span`.
             stats: Which statistics of `value`, from sum, mean and std. Defaults
                 to ["sum"]. The count comes with all of them, always.
             table: Path to the source table. Omit to use the run's work table.

@@ -22,9 +22,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tabular_agent.cv import make_folds
 from tabular_agent.encoders import (
     ENCODER_CLASSES,
     StreamAggregateEncoder,
+    fit_stream_aggregate,
+    to_periods,
 )
 
 
@@ -103,7 +106,7 @@ def test_the_collapsed_column_is_what_a_lead_of_zero_would_give(table, stream):
 
 
 def test_a_record_observed_after_the_row_is_never_read(table, stream):
-    """Why there is no fold loop: the restriction is backward per row already.
+    """The lead alone already keeps out anything recorded after the row.
 
     Store ``b``'s single booking was made on the day of the visit, so every
     positive lead excludes it — whichever half of the data the row is in and
@@ -115,6 +118,48 @@ def test_a_record_observed_after_the_row_is_never_read(table, stream):
 
     assert row[col(1, "count")] == 0.0
     assert row[col(1, "sum")] == 0.0
+
+
+def test_a_cut_keeps_out_what_was_recorded_after_the_forecast_was_issued(table, stream):
+    """A row two days into its forecast reads the stream as it stood at the issue.
+
+    Store ``a`` on the 3rd: a lead of one day admits the bookings made on 20
+    February and on the 1st. A forecast issued on 28 February had only the first.
+    """
+    enc = encoder(leads=[1], stats=["sum"]).fit(table, stream=stream)
+    row = lambda out: out[(out["store"] == "a") & (out["visit_date"] == D3)].iloc[0]  # noqa: E731
+
+    uncut = row(enc.transform(table, stream))
+    before_d1 = to_periods(pd.Series(pd.to_datetime(["2017-02-28"])))[0]
+    cut = row(enc.transform(table, stream, issued_at=before_d1))
+
+    assert (uncut[col(1, "sum")], uncut[col(1, "count")]) == (7.0, 2.0)
+    # Only the booking made on 20 February existed by the 28th.
+    assert (cut[col(1, "sum")], cut[col(1, "count")]) == (5.0, 1.0)
+
+
+def test_training_rows_are_cut_where_their_fold_s_forecast_was_issued():
+    """Each validation block reads the stream as of its first row minus the horizon."""
+    days = pd.date_range("2017-01-01", periods=12)
+    table = pd.DataFrame({"store": "a", "visit_date": days, "visitors": 1.0})
+    # One booking per day, each made five days ahead of its visit.
+    stream = pd.DataFrame({"store": "a", "visit_date": days,
+                           "booked_at": days - pd.Timedelta(days=5), "party": 1.0})
+    folds = make_folds(table["visitors"], "regression", n_splits=3,
+                       order=table["visit_date"].to_numpy())
+
+    out, fitted = fit_stream_aggregate(table, stream, encoder(leads=[1]), folds=folds,
+                                       forecast_horizon=1)
+    counts = out[col(1, "count")]
+
+    # The first block is forecast from nothing and keeps a missing value.
+    assert counts.iloc[folds[0][0]].isna().all()
+    for _, va in folds:
+        issued = table["visit_date"].iloc[va].min() - pd.Timedelta(days=1)
+        expected = (table["visit_date"].iloc[va] - pd.Timedelta(days=5) <= issued)
+        assert (counts.iloc[va] == expected.astype(float).to_numpy()).all()
+    # What runs at predict is the encoder, uncut: the caller's stream is the cut.
+    assert fitted.transform(table, stream)[col(1, "count")].eq(1.0).all()
 
 
 def test_the_key_and_the_event_time_both_have_to_match(table, stream):

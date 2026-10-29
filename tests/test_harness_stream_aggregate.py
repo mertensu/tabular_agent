@@ -7,14 +7,17 @@ all, which needs the run's stream to reach every place a lineage is replayed.
 
 The refusal worth reading twice is the one on short leads. It does not prevent a
 leak — the restriction is backward from each row whatever the lead — it prevents
-a column built from knowledge no forecast row could have. Validation cannot catch
-that on its own, because validation is drawn from the same uncut file.
+a column built from knowledge no forecast row could have.
+
+The cut that goes with it (0096): each block reads the stream as it stood when
+its forecast was issued, so a short lead adds records only near the block's start.
 """
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from tabular_agent.cv import make_folds
 from tabular_agent.harness import journal
 from tabular_agent.harness.session import RunSession
 from tabular_agent.harness.tools import fit_stream_aggregate, inspect_data
@@ -92,11 +95,25 @@ def test_the_lead_decides_what_the_column_holds(session):
         session.run_dir + "/" + out["table"].replace("\\", "/")
     )
 
-    # At a lead of 7 the same-day booking is gone; at 30 only the earliest is left.
-    assert set(built[col(7, "sum")].dropna()) == {5.0}
+    # The same-day booking never counts. The 7-day one counts only where it was
+    # made before the block's forecast was issued (its first day minus the
+    # horizon of 7), so at the block's first day and nowhere deeper. The 30-day
+    # one was made before every block's issue time.
+    lead7 = built[col(7, "sum")]
+    assert set(lead7.dropna()) == {2.0, 5.0}
+    spec = session.resolved()
+    folds = make_folds(built["visitors"], spec.task_type, n_splits=spec.n_splits,
+                       seed=spec.seed, order=built["visit_date"].to_numpy())
+    dates = pd.to_datetime(built["visit_date"])
+    starts = np.zeros(len(built), dtype=bool)
+    for _, va in folds:
+        starts[va] = (dates.iloc[va] == dates.iloc[va].min()).to_numpy()
+    assert (starts[lead7.to_numpy() == 5.0]).all()
+    assert (lead7[starts] == 5.0).all()
     assert set(built[col(30, "sum")].dropna()) == {2.0}
-    assert out["records_per_row"] == {"7": 2.0, "30": 1.0}
-    assert out["rows_answered"] == {"7": 1.0, "30": 1.0}
+    assert out["records_per_row"] == {"7": 1.0, "30": 1.0}
+    # The first block has no earlier block to be forecast from.
+    assert out["rows_answered"]["7"] == out["rows_answered"]["30"] < 1.0
 
 
 def test_every_statistic_arrives_with_its_count(session):
@@ -164,13 +181,13 @@ def test_the_grain_it_measured_is_reported(session):
 
 
 def test_the_block_span_is_reported_so_a_lead_can_be_chosen_against_it(session):
-    """The horizon is a block's *floor*; nothing else tells the agent its width."""
+    """Nothing else tells the agent how wide a scored block is."""
     out = fit_stream_aggregate(
         session, stream="bookings", by=["store"], value="party", leads=[7],
     )
 
     assert out["block_span"] > 0
-    assert "floor" in out["note"]
+    assert f"spans about {out['block_span']:g}" in out["note"]
 
 
 # --- the refusals ------------------------------------------------------------
@@ -304,3 +321,15 @@ def test_a_healthy_lead_carries_no_warning(session):
     )
 
     assert "WARNING" not in out["note"]
+
+
+def test_held_out_rows_read_the_stream_as_it_stood_when_their_forecast_was_issued(session):
+    """Validation is scored as serving is: no record from after the issue time (0096)."""
+    from tabular_agent.harness.tools import _streams_as_issued
+
+    val = pd.read_parquet(session.val_path)
+    cut = _streams_as_issued(session, val)["bookings"]
+    issued = pd.to_datetime(val["visit_date"]).min() - pd.Timedelta(days=7)
+
+    assert pd.to_datetime(cut["booked_at"]).max() <= issued
+    assert len(cut) < len(pd.read_parquet(session.stream_path("bookings")))

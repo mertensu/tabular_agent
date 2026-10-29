@@ -26,6 +26,7 @@ from .encoders import (
     fit_future_covariate_window,
     fit_group_stats,
     fit_history,
+    fit_stream_aggregate,
 )
 from .pipeline import Pipeline
 from .rows import select_rows
@@ -119,15 +120,15 @@ def _refit_encoder(e: dict, df: pd.DataFrame, spec: ResolvedSpec, order: str | N
     if kind == "stream_aggregate":
         if e["stream"] not in streams:
             raise RefitError(f"stream {e['stream']!r} was not supplied")
-        stream = streams[e["stream"]]
+        if order is None:
+            raise RefitError("a stream aggregate step needs the run's ordering column")
         encoder = StreamAggregateEncoder(
             e["stream"], e["by"], e["value"], e["event_time"], e["observed_at"],
             e["order"], leads=e["leads"], stats=e["stats"],
             event_grain=e.get("event_grain"),
-        ).fit(df, stream=stream)
-        # The tool keeps the transform's own column order, not `output_columns`'.
-        out = encoder.transform(df, stream)
-        return out[[c for c in out.columns if c not in df.columns]], encoder
+        )
+        return fit_stream_aggregate(df, streams[e["stream"]], encoder, folds=folds(),
+                                    forecast_horizon=spec.forecast_horizon)
     if kind == "future_window":
         return fit_future_covariate_window(df, e["by"], e["value"], e["order"],
                                            e["block_length"], e.get("aggregates", ()))

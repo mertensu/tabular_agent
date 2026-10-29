@@ -1083,20 +1083,16 @@ class StreamAggregateEncoder:
       own key and time and of the stream, never of which other rows are in the
       frame. One row alone and a batch of a million get identical answers, which
       an aggregate computed inside ``transform_features`` cannot promise.
-    * **No fold loop, and not by oversight.** The lead restriction is already
-      strictly backward *per row*: a training row at ``t`` reads only records
-      observed by ``t - lead``, so it cannot see anything recorded after its own
-      position, whichever fold it is in. That is the property :func:`fit_history`
-      needs its per-fold freeze to reproduce. Nothing here reads the target.
-
-    **The known limit, stated rather than hidden.** ``forecast_horizon`` is the
-    *floor* of a scored block (0047), so a lead set at the floor is honest for the
-    near edge of that block and under-restrictive for the far edge — a row 39
-    periods out is served an aggregate a row 1 period out could have had. The
-    ``_count`` column is what makes that visible per row. Declaring the far edge
-    too would close it by construction and is not built: it is one more field the
-    data's owner has to get right on every ordered run, and the count already
-    reports the damage where it lands.
+    * **Cut where the forecast is issued** (0096). A served row is predicted from
+      the stream as it stood when the forecast was issued, so a row deep in the
+      forecast sees fewer records than its lead alone would allow: a lead of one
+      day reaches a row 30 days out only through records that already existed
+      30 days before it. ``transform(..., issued_at=t0)`` reproduces that by
+      counting only records observed at or before ``t0``, and
+      :func:`fit_stream_aggregate` gives each training row the cut its own
+      forward-chaining fold implies, the freeze :func:`fit_history` uses. Without
+      the cut, a short lead is as generous on the far edge of a block as on the
+      near one, in training and in validation alike, while serving cannot be.
 
     **The grain is measured, stored and replayed — it is not left to the caller.**
     A stream is almost always finer than the table it feeds: a store-day table
@@ -1384,7 +1380,8 @@ class StreamAggregateEncoder:
             )
         return self
 
-    def _aggregate(self, df: pd.DataFrame, stream: pd.DataFrame) -> dict[str, np.ndarray]:
+    def _aggregate(self, df: pd.DataFrame, stream: pd.DataFrame,
+                   issued_at: float | None = None) -> dict[str, np.ndarray]:
         """One pass per lead over the stream's per-bucket running totals.
 
         The work is done by :func:`pandas.merge_asof`: with the records of each
@@ -1406,6 +1403,10 @@ class StreamAggregateEncoder:
                 "which carries the grid with it."
             )
         s = self._clean_stream(stream)
+        if issued_at is not None:
+            # The stream as it stood when the forecast was issued: what a caller
+            # serving then would have handed in.
+            s = s[s["ot"].to_numpy() <= issued_at].reset_index(drop=True)
         keys = self._keys(df, "the table")
         t = to_periods(df[self.order])
         n = len(df)
@@ -1492,8 +1493,15 @@ class StreamAggregateEncoder:
                     out[name] = np.where(known, std, np.nan)
         return out
 
-    def transform(self, df: pd.DataFrame, stream: pd.DataFrame | None = None
-                  ) -> pd.DataFrame:
+    def transform(self, df: pd.DataFrame, stream: pd.DataFrame | None = None,
+                  issued_at: float | None = None) -> pd.DataFrame:
+        """Each row's aggregate; ``issued_at`` (in ``to_periods`` units) cuts the stream.
+
+        At predict time the stream handed in is already the one that existed when
+        the forecast was issued, and ``issued_at`` stays ``None``. Inside a run the
+        stream file holds records from after the rows being scored, and the cut
+        is what makes those rows read what a served row would.
+        """
         if stream is None:
             raise ValueError(
                 f"this table's features come from stream {self.stream!r}, which has "
@@ -1502,7 +1510,7 @@ class StreamAggregateEncoder:
                 "on since the fit is the one that gets used."
             )
         out = df.copy()
-        for name, values in self._aggregate(df, stream).items():
+        for name, values in self._aggregate(df, stream, issued_at).items():
             out[name] = values
         return out
 
@@ -2261,6 +2269,41 @@ def fit_history(df, by, value, order, *, folds, keep=None,
         for name in names:
             oof.iloc[va, positions[name]] = transformed[name].to_numpy()
     return oof, template.fit(df)
+
+
+def fit_stream_aggregate(df, stream, encoder: "StreamAggregateEncoder", *, folds,
+                         forecast_horizon):
+    """Training values for a stream aggregate, each cut where its forecast is issued.
+
+    Returns ``(train_features, encoder)`` on :func:`fit_history`'s contract: the
+    frame is what the model may **train** on, the encoder (fitted on all of
+    ``df``) is what runs at **predict**.
+
+    A served block is forecast from the stream as it stood at its issue time, the
+    block's first row minus ``forecast_horizon``. Each forward-chaining fold's
+    validation block is given that cut, so a training row sits at the same
+    distance from the stream's edge as a served row the same depth into its
+    block. Rows in no validation block (the first block) keep ``NaN``, the gap
+    history leaves for the same reason: nothing before them to forecast from.
+    """
+    periods = to_periods(df[encoder.order])
+    _require_ordered_folds(periods, folds)
+    encoder.fit(df, stream=stream)
+    names = None
+    oof = None
+    for _, va in folds:
+        if not len(va):
+            continue
+        issued_at = float(np.nanmin(periods[va])) - float(forecast_horizon)
+        block = encoder.transform(df.iloc[va], stream, issued_at=issued_at)
+        if oof is None:
+            # The transform's own column order, which tables have always had.
+            names = [c for c in block.columns if c not in df.columns]
+            oof = pd.DataFrame(np.nan, index=df.index, columns=names)
+        oof.iloc[va, [oof.columns.get_loc(c) for c in names]] = block[names].to_numpy()
+    if oof is None:
+        raise ValueError("no fold has a validation block to cut the stream at")
+    return oof, encoder
 
 
 def fit_future_covariate_window(df, by, value, order, block_length, aggregates):

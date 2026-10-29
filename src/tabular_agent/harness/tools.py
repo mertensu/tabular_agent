@@ -30,6 +30,7 @@ from ..encoders import STREAM_STATS, TARGET_STATS, StreamAggregateEncoder
 from ..encoders import fit_encoding as _fit_encoding
 from ..encoders import fit_group_stats as _fit_group_stats
 from ..encoders import fit_history as _fit_history
+from ..encoders import fit_stream_aggregate as _fit_stream_aggregate
 from ..encoders import fit_future_covariate_window as _fit_future_covariate_window
 from ..encoders import _clean_windows
 from ..encoders import to_periods as _to_periods
@@ -183,6 +184,26 @@ def _run_streams(session: RunSession) -> dict:
     """
     return {
         name: load_table(session.stream_path(name)) for name in session.stream_names()
+    }
+
+
+def _streams_as_issued(session: RunSession, rows: pd.DataFrame) -> dict:
+    """The run's streams as they stood when a forecast of ``rows`` would be issued.
+
+    Held-out rows are scored as served rows: from the stream a caller would hand
+    in at the issue time, the first scored row minus the declared horizon (0096).
+    The pinned file runs past them, and a record observed after the issue time is
+    one no forecast of these rows could have read. Uncut when the run is not
+    ordered or declares no horizon; a stream aggregate refuses both.
+    """
+    streams = _run_streams(session)
+    horizon = session.resolved().forecast_horizon
+    if not streams or session.split_on is None or horizon is None:
+        return streams
+    issued_at = float(np.nanmin(_to_periods(rows[session.split_on]))) - float(horizon)
+    return {
+        name: frame[_to_periods(frame[session.stream_spec(name)["observed_at"]]) <= issued_at]
+        for name, frame in streams.items()
     }
 
 
@@ -413,7 +434,7 @@ def _score_on_held_out(
     if os.path.abspath(rows_path) != os.path.abspath(session.val_path):
         known_past = load_table(session.val_path).drop(columns=[spec.target])
     features = pipeline.transform(
-        val.drop(columns=[spec.target]), streams=_run_streams(session),
+        val.drop(columns=[spec.target]), streams=_streams_as_issued(session, val),
         known_past=known_past,
     )
 
@@ -1515,15 +1536,15 @@ def fit_stream_aggregate(
     encoder = StreamAggregateEncoder(
         stream, by, value, declared["event_time"], declared["observed_at"], order,
         leads=leads, stats=stats,
-    ).fit(df, stream=stream_df)
-    # No fold loop, and that is the design rather than an omission. `fit_history`
-    # re-freezes per fold because *last known* is defined relative to the fitting
-    # set, so fitting it once on everything lets a validation row read the future.
-    # Here the restriction is `observed_at <= row - lead`, which is backward from
-    # each row individually: a row cannot reach past its own position whichever
-    # fold it lands in, and the serving asymmetry a freeze would reproduce is
-    # exactly what the lead already is.
-    out = encoder.transform(df, stream_df)
+    )
+    # Per fold, like `fit_history`: each validation block reads the stream as it
+    # stood when that block's forecast would be issued (0096).
+    folds = make_folds(df[spec.target], spec.task_type, n_splits=spec.n_splits,
+                       seed=spec.seed, order=_fold_order(session, df))
+    train_features, encoder = _fit_stream_aggregate(
+        df, stream_df, encoder, folds=folds, forecast_horizon=spec.forecast_horizon,
+    )
+    out = df.join(train_features)
     new_columns = encoder.output_columns
 
     table_id = journal.next_table_id(session.run_dir)
@@ -1578,8 +1599,6 @@ def fit_stream_aggregate(
     # count and nothing converts that to a span — and it is the number that shows
     # the limit below.
     periods = _to_periods(df[order])
-    folds = make_folds(df[spec.target], spec.task_type, n_splits=spec.n_splits,
-                       seed=spec.seed, order=_fold_order(session, df))
     spans = [
         float(np.nanmax(periods[va]) - np.nanmin(periods[va]))
         for _, va in folds if len(va)
@@ -1588,19 +1607,17 @@ def fit_stream_aggregate(
 
     note = (
         "This table is scored above; build on it to keep the new columns. Each row "
-        "counts only the stream records observed at least `lead` before it, so a "
-        "training row is restricted exactly as a served row at the same lead would "
-        f"be. Every statistic has a `_count` beside it — read them together, since "
-        "a sum over one record and a sum over forty look identical otherwise."
+        "counts only the stream records observed at least `lead` before it and "
+        "before its block's forecast was issued, so a row deep in a block sees "
+        "what a served row that far out would. Rows in the first period have no "
+        "earlier block and keep a missing value. Every statistic has a `_count` "
+        "beside it — read them together, since a sum over one record and a sum "
+        "over forty look identical otherwise."
     )
     if block_span is not None:
         note += (
-            f" The horizon you declared ({spec.forecast_horizon:g} in {order!r}) is "
-            f"the *floor* of a scored block, and a block spans about "
-            f"{block_span:g}. A lead at the floor is therefore honest for the "
-            "block's earliest rows and more generous than the far edge could ever "
-            "be; a lead nearer the far edge is honest throughout and sees less. "
-            "Both are legitimate and the counts say what each costs."
+            f" A block spans about {block_span:g} in {order!r}, so a short lead "
+            "only adds records for the block's earliest rows."
         )
     note += (
         f" Read rows_answered against matched_rows ({encoder.matched_rows_:.3f}): the "
