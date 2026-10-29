@@ -69,7 +69,8 @@ def render_brief(session: RunSession) -> str | None:
 
     metric = task.get("metric")
     direction = "higher is better" if greater_is_better(metric) else "lower is better"
-    status = stop.evaluate(tables, metric, session.stop_policy)
+    status = stop.evaluate(tables, metric, session.stop_policy,
+                           elapsed_minutes=journal.elapsed_minutes(session.run_dir))
 
     # The heading earns its tokens by saying where this came from: an agent told
     # facts about a run it does not remember should know they were read off disk
@@ -115,12 +116,11 @@ def render_brief(session: RunSession) -> str | None:
     if status["should_stop"]:
         lines.append(f"The harness is stopping this run: {status['reason']}. Call finalize_run.")
     else:
-        lines.append(
-            f"Budget: {status['tables_remaining']} tables left of "
-            f"{session.stop_policy.max_tables}; "
-            f"{status['since_improvement']} since the last real improvement "
-            f"(the run ends at {status['patience']})."
-        )
+        line = (f"Budget: {stop.budget_line(status)} "
+                f"{status['since_improvement']} table(s) since the last real improvement")
+        if status["patience"] is not None:
+            line += f" (the run ends at {status['patience']})"
+        lines.append(line + ".")
 
     # Read off the raw spec rather than `session.resolved()`, which would parse
     # the source table to detect the task type — a file read at the top of every

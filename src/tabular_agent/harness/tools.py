@@ -530,10 +530,15 @@ def _probe_preds_path(session: RunSession, table_path: str) -> str:
 
 
 def _agent_score_fields(session: RunSession, scored: dict) -> dict:
-    """Public score vocabulary for the selected product profile."""
+    """Public score vocabulary for the selected product profile, and the budget left.
+
+    Every table result carries the budget (0097): an agent can only use time it
+    knows it has.
+    """
     # The shipping comparison (0094) is the harness's, not search guidance.
     scored = {k: v for k, v in scored.items()
               if k not in ("eligible_ancestor", "probe_vs_eligible_ancestor_interval")}
+    scored["budget"] = stop.budget_line(_progress(session))
     if session.profile != "minimal":
         return scored
     out = dict(scored)
@@ -2184,7 +2189,8 @@ def _progress(session: RunSession) -> dict:
     """The run's stop status, read from the journal's tables (0035)."""
     j = journal.load(session.run_dir)
     metric = (j.get("task") or {}).get("metric") or session.resolved().metric
-    return stop.evaluate(j.get("tables") or [], metric, session.stop_policy)
+    return stop.evaluate(j.get("tables") or [], metric, session.stop_policy,
+                         elapsed_minutes=journal.elapsed_minutes(session.run_dir))
 
 
 def _refuse_if_finished(session: RunSession, force: bool = False) -> dict | None:

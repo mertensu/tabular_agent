@@ -19,6 +19,7 @@ import functools
 import json
 import os
 import tempfile
+import time
 
 from ..metrics import greater_is_better
 
@@ -476,12 +477,31 @@ def record_table_refusal(run_dir: str, table: str) -> int:
 
 @_serialized_mutation
 def mark_inventory_shown(run_dir: str) -> None:
-    """Record that the agent has been shown the run's inventory once."""
+    """Record that the agent has been shown the run's inventory, and at how many tables.
+
+    With ``tables_at_finalize`` this says whether the agent built anything after
+    reading it.
+    """
     journal = load(run_dir)
     state = journal.get("stop") or {"refusals": 0, "finalized": False}
-    state["inventory_shown"] = True
+    state["inventory_shown"] = {"tables": len(journal.get("tables") or [])}
     journal["stop"] = state
     _save_unlocked(run_dir, journal)
+
+
+@_serialized_mutation
+def mark_started(run_dir: str) -> None:
+    """Record when the agent's search began, once; the wall-clock budget runs from it."""
+    journal = load(run_dir)
+    if journal.get("started_at") is None:
+        journal["started_at"] = time.time()
+        _save_unlocked(run_dir, journal)
+
+
+def elapsed_minutes(run_dir: str) -> float | None:
+    """Minutes since the search began, or ``None`` if no agent search was started."""
+    started = load(run_dir).get("started_at")
+    return None if started is None else (time.time() - started) / 60.0
 
 
 @_serialized_mutation
@@ -489,6 +509,7 @@ def mark_finalized(run_dir: str) -> dict:
     journal = load(run_dir)
     state = journal.get("stop") or {"refusals": 0, "finalized": False}
     state["finalized"] = True
+    state["tables_at_finalize"] = len(journal.get("tables") or [])
     journal["stop"] = state
     _save_unlocked(run_dir, journal)
     return journal

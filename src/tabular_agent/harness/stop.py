@@ -7,10 +7,13 @@ in the loop had an opinion about *done*.
 
 Two layers, the same split as everywhere else in this harness:
 
-* **Advisory** — every table result carries how many tables have passed without a
-  real improvement. A cooperative model reads that and finalizes.
-* **Structural** — past the patience budget the harness stops accepting new
-  tables at all. Guidance for the cooperative case, structure for the rest.
+* **Advisory** — every table result carries what is left of the run's budget and
+  how many tables have passed without a real improvement. When it is done is the
+  agent's call.
+* **Structural** — past the budget (tables or minutes) the harness stops
+  accepting new tables at all. Since 0097 a streak without improvement no longer
+  ends a run by default: counted in tables, it ended every run after about a
+  minute of search.
 
 The interesting part is what counts as an improvement. Not an absolute
 threshold — that would need tuning per dataset and per metric, and getting it
@@ -62,11 +65,11 @@ class StopPolicy:
     """Knobs for "is this run finished". Defaults are deliberately generous."""
 
     #: Tables allowed to pass with no real improvement before the harness ends
-    #: the run. Deliberately large: trying eight things that do not work in order
-    #: to find the ninth that does is not a failing search, it is the only kind
-    #: there is. Six rather than the old ten because the unit changed from
-    #: experiment to table — see the module docstring.
-    patience: int = 6
+    #: the run, or ``None`` for no such rule (the default since 0097). Counted in
+    #: tables, six was about a minute once tables became cheap, and every run that
+    #: hit it ended there rather than when the agent was done. A run is bounded by
+    #: ``max_tables`` and ``max_minutes``; the streak is still reported.
+    patience: int | None = None
 
     #: A gain counts only if it exceeds this fraction of the incumbent's own
     #: uncertainty. At 0.25, beating the best table by a quarter of its standard
@@ -83,7 +86,11 @@ class StopPolicy:
     #: run that keeps clearing the bar by luck, and against cost. Looser than the
     #: old experiment ceiling because a table now costs one fit rather than
     #: `n_splits + 1`.
-    max_tables: int = 30
+    max_tables: int = 60
+
+    #: Wall-clock ceiling on the search, in minutes from the run's start, or
+    #: ``None`` for none. With the table ceiling it is the run's whole budget.
+    max_minutes: float | None = 30.0
 
     #: Tool calls refused before the harness gives up on being asked nicely,
     #: packages the run itself and closes it.
@@ -259,12 +266,13 @@ def best_table(tables: list[dict], metric: str) -> dict | None:
     return max(rows, key=lambda r: r["probe_score"] if higher else -r["probe_score"])
 
 
-def evaluate(tables: list[dict], metric: str, policy: StopPolicy) -> dict:
+def evaluate(tables: list[dict], metric: str, policy: StopPolicy,
+             elapsed_minutes: float | None = None) -> dict:
     """Whether the run has stopped making progress, and the numbers behind it.
 
-    Pure function of the journal's table list — no run dir, no side effects — so
-    the stop rule can be unit-tested against a hand-written history instead of by
-    building twenty tables.
+    Pure function of the journal's table list and the minutes the run has taken —
+    no run dir, no side effects — so the stop rule can be unit-tested against a
+    hand-written history instead of by building twenty tables.
     """
     rows = _attempts(tables)
     since_improvement = _since_improvement(
@@ -273,11 +281,18 @@ def evaluate(tables: list[dict], metric: str, policy: StopPolicy) -> dict:
     n_tables = len(tables)
     inside_noise = _latest_gain_inside_one_se(rows, greater_is_better(metric))
 
-    stalled = bool(rows) and since_improvement >= policy.patience
+    stalled = (policy.patience is not None and bool(rows)
+               and since_improvement >= policy.patience)
     exhausted = n_tables >= policy.max_tables
+    minutes_remaining = None
+    if policy.max_minutes is not None and elapsed_minutes is not None:
+        minutes_remaining = max(policy.max_minutes - elapsed_minutes, 0.0)
+    out_of_time = minutes_remaining == 0.0
 
     if exhausted:
         reason = f"this run has used its budget of {policy.max_tables} tables"
+    elif out_of_time:
+        reason = f"this run has used its budget of {policy.max_minutes:g} minutes"
     elif stalled:
         reason = (
             f"the last {since_improvement} tables produced no real improvement "
@@ -288,15 +303,24 @@ def evaluate(tables: list[dict], metric: str, policy: StopPolicy) -> dict:
         reason = None
 
     return {
-        "should_stop": stalled or exhausted,
+        "should_stop": stalled or exhausted or out_of_time,
         "reason": reason,
         "n_tables": n_tables,
         "since_improvement": since_improvement,
         "patience": policy.patience,
         "tables_remaining": max(policy.max_tables - n_tables, 0),
+        "minutes_remaining": None if minutes_remaining is None else round(minutes_remaining, 1),
         # Advisory only: this does not gate anything. See `_latest_gain_inside_one_se`.
         "latest_gain_inside_one_se": inside_noise,
     }
+
+
+def budget_line(status: dict) -> str:
+    """What is left of the run's budget, as a fact and nothing more."""
+    line = f"{status['n_tables']} tables built, {status['tables_remaining']} left"
+    if status.get("minutes_remaining") is not None:
+        line += f", {status['minutes_remaining']:.0f} minutes left"
+    return line + "."
 
 
 def advisory(status: dict) -> str:
@@ -309,10 +333,10 @@ def advisory(status: dict) -> str:
     else:
         note = f"{status['since_improvement']} table(s) since the last real improvement."
 
-    line = (
-        f"{note} {status['tables_remaining']} tables remain in this run's budget; "
-        f"the run ends after {status['patience']} in a row without an improvement."
-    )
+    line = f"{note} {budget_line(status)}"
+    if status["patience"] is not None:
+        line += (f" The run ends after {status['patience']} in a row without an "
+                 "improvement.")
 
     # Said last so it is the thing most recently read, and phrased as a fact about
     # the measurement rather than an instruction: the run is not being stopped and

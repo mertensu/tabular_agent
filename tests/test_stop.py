@@ -140,17 +140,30 @@ def test_the_table_ceiling_stops_a_run_that_keeps_improving():
     assert status["tables_remaining"] == 0
 
 
-def test_a_long_search_is_allowed_but_not_an_endless_one():
-    """Eight ideas that did not work, to find the ninth that does, is the job —
-    but with one counter there is a limit, where the old two-level rule let a run
-    alternate between levels forever."""
-    tables = [row("t1", 0.40)] + [row(f"t{i + 2}", 0.41 + i * 0.01) for i in range(5)]
+def test_a_streak_without_improvement_does_not_end_a_run_by_default():
+    """0097: the run is bounded by its budget, not by six tables in a row. Counted
+    in tables, that streak ended every run after about a minute of search."""
+    tables = [row("t1", 0.40)] + [row(f"t{i + 2}", 0.41 + i * 0.01) for i in range(20)]
     status = evaluate(tables, "logloss", StopPolicy())
-    assert status["since_improvement"] == 5
-    assert not status["should_stop"]  # default patience is 6
+    assert status["since_improvement"] == 20
+    assert not status["should_stop"]
+    # Still available to a caller who asks for it.
+    assert evaluate(tables, "logloss", StopPolicy(patience=6))["should_stop"]
 
-    tables.append(row("t8", 0.47))
-    assert evaluate(tables, "logloss", StopPolicy())["should_stop"]
+
+def test_the_run_ends_when_its_minutes_are_spent():
+    tables = [row("t1", 0.40)]
+    policy = StopPolicy(max_minutes=30)
+
+    status = evaluate(tables, "logloss", policy, elapsed_minutes=12.0)
+    assert not status["should_stop"]
+    assert status["minutes_remaining"] == 18.0
+
+    status = evaluate(tables, "logloss", policy, elapsed_minutes=30.5)
+    assert status["should_stop"]
+    assert "30 minutes" in status["reason"]
+    # No clock (no agent search was started): no time budget to spend.
+    assert not evaluate(tables, "logloss", policy)["should_stop"]
 
 
 def test_a_no_op_table_no_longer_buys_anything():

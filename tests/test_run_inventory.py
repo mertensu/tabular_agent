@@ -53,6 +53,7 @@ def test_the_inventory_is_shown_once_and_finishes_nothing(session):
     assert "fit_history" in inventory["tools_never_called"]
     assert "fit_encoding" not in inventory["tools_never_called"]
     assert not journal.stop_state(session.run_dir).get("finalized")
+    assert journal.stop_state(session.run_dir)["inventory_shown"] == {"tables": 2}
     # Shown once: the next request to finish goes through.
     assert run_inventory(session) is None
 
@@ -78,3 +79,14 @@ def test_no_inventory_after_finalizing(session):
     finalize_run(session)
 
     assert run_inventory(session) is None
+
+
+def test_the_journal_says_whether_anything_was_built_after_the_inventory(session):
+    fit_encoding(session, columns=["store"], method="target")
+    run_inventory(session)
+    fit_encoding(session, columns=["store"], method="frequency")
+    finalize_run(session)
+
+    state = journal.stop_state(session.run_dir)
+    assert state["inventory_shown"] == {"tables": 1}
+    assert state["tables_at_finalize"] == 2

@@ -12,7 +12,7 @@ usable — and testable — without it.
 import os
 from dataclasses import dataclass
 
-from . import tools
+from . import journal, tools
 from .brief import render_brief
 from .instructions import FORECAST_SYSTEM_PROMPT, SYSTEM_PROMPT
 from .session import RunSession
@@ -880,8 +880,8 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "
     def finalize_run(ctx: RunContext[Deps]) -> dict:
         """Package the best experiment into a predictor bundle and write the report.
 
-        Call this when you are done experimenting. The first call returns an
-        overview of what the run built and finishes nothing; call it again to finish.
+        Call this when you are done experimenting. The first call may return an
+        overview of what the run built and finish nothing; call it again to finish.
         """
         inventory = tools.run_inventory(ctx.deps.session)
         if inventory is not None:
@@ -907,18 +907,28 @@ def run(session: RunSession, prompt: str, model=DEFAULT_MODEL):
     caller finalizes what the search built either way (see `Agent.run`), so a long
     search that runs out of requests degrades to "ship what we have" instead of
     crashing with no bundle.
+
+    The transcript (what the agent said, every tool call and what it was told) is
+    written to ``messages.json`` in the run directory however the run ends.
     """
+    from pydantic_ai import capture_run_messages
     from pydantic_ai.exceptions import UsageLimitExceeded
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
     from pydantic_ai.usage import UsageLimits
 
     agent = build_agent(
         model, profile=session.profile, workflow=getattr(session, "workflow", "general")
     )
-    try:
-        return agent.run_sync(
-            prompt,
-            deps=Deps(session=session),
-            usage_limits=UsageLimits(request_limit=REQUEST_LIMIT),
-        )
-    except UsageLimitExceeded:
-        return None
+    journal.mark_started(session.run_dir)
+    with capture_run_messages() as messages:
+        try:
+            return agent.run_sync(
+                prompt,
+                deps=Deps(session=session),
+                usage_limits=UsageLimits(request_limit=REQUEST_LIMIT),
+            )
+        except UsageLimitExceeded:
+            return None
+        finally:
+            with open(os.path.join(session.run_dir, "messages.json"), "wb") as handle:
+                handle.write(ModelMessagesTypeAdapter.dump_json(messages, indent=2))

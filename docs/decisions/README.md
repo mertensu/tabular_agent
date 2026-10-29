@@ -7,7 +7,7 @@ was rejected, and what it cost. They are written for someone who knows data
 science but has never seen this codebase — project-specific vocabulary is
 explained where it first matters.
 
-This directory holds the sixteen that still carry the product: its architecture,
+This directory holds the eighteen that still carry the product: its architecture,
 its safety invariants, how it measures, what it ships, and its public contracts.
 The other eighty — measurements, refuted mechanisms, dataset findings, plans that
 were superseded — are in [`research/archive/decisions/`](../../research/archive/decisions/),
@@ -76,6 +76,8 @@ Vocabulary used throughout:
 - [0092 — What ships is refitted on every row the search could use](0092-what-ships-is-refitted-on-every-row-the-search-could-use.md)
 - [0094 — A table ships on what its steps add up to, not on its last step](0094-a-table-ships-on-what-its-steps-add-up-to.md)
   *(supersedes [0090](../../research/archive/decisions/0090-the-terminal-table-must-have-a-demonstrated-gain.md))*
+- [0097 — A run is bounded by its budget, not by a streak without improvement](0097-a-run-is-bounded-by-its-budget-not-by-a-streak.md)
+  *(revises 0035's stop)*
 
 ### Public contracts
 
@@ -85,6 +87,8 @@ Vocabulary used throughout:
 - [0093 — A known covariate's past is known too](0093-a-known-covariates-past-is-known-too.md)
 - [0095 — A window over a known covariate's past is never guessed](0095-a-window-over-a-known-past-is-never-guessed.md)
   *(revises 0093)*
+- [0096 — A stream is read as it stood when the forecast was issued](0096-a-stream-is-read-as-it-stood-when-the-forecast-was-issued.md)
+  *(revises [0062](../../research/archive/decisions/0062-a-stream-is-a-second-input-and-its-observation-time-is-a-column.md))*
 
 ## Related reading
 

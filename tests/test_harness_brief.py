@@ -155,7 +155,7 @@ def test_it_carries_the_stop_state(session):
     _fake_table(session, 1, 0.30)
     _fake_table(session, 2, 0.20)
 
-    assert "2 tables left of 4" in render_brief(session)
+    assert "2 tables built, 2 left" in render_brief(session)
 
     _fake_table(session, 3, 0.10)
     _fake_table(session, 4, 0.05)

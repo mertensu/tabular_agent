@@ -464,7 +464,7 @@ def test_every_result_says_where_the_run_stands(session):
                                 "    return df")
     note = advisory(_progress(session))
     assert "since the last real improvement" in note
-    assert "tables remain in this run's budget" in note
+    assert "2 tables built" in note
 
 
 def test_an_agent_that_will_not_stop_gets_the_run_packaged_for_it(tmp_path):
