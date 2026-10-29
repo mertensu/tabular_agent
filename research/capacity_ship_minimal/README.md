@@ -1037,3 +1037,41 @@ Test-day scores, fits on work rows only; intervals are store-bootstrap.
 - **Cost.** lgbm_es + catboost_es took about 4 minutes per Rossmann table here,
   against ~10 seconds for the probe; an early-stopped ruler inside a 30-minute
   budget would allow far fewer tables.
+
+### Restaurant r10 refitted as shipped (`rerank_refit.py`)
+
+Same picks (validation, work-only fits); each table's lineage and each ruler's model
+refitted on training + validation rows, as finalize does (0092), and scored on the
+test days. Check: the probe on t8 should reproduce `arms_restaurant_r10.json`'s
+refitted probe (0.5284).
+
+**Prediction, written before the run.** Most of the +0.0046 was staleness: refitted,
+both fitted rulers' picks beat the probe's by less than 0.003, and t3 stops being
+the best table on the test days.
+
+**Reading.** The check holds: the probe on t8 refitted reads 0.528392, as in
+`arms_restaurant_r10.json`, and the work table reproduces all three of its arms.
+
+| refitted on training + validation | probe | lgbm_es | catboost_es |
+|---|---|---|---|
+| t11 (probe's pick) | 0.5271 | 0.5268 | 0.5233 |
+| t14 (lgbm_es's pick) | **0.5216** | **0.5219** | 0.5200 |
+| t12 (catboost_es's pick) | 0.5256 | 0.5247 | 0.5223 |
+| t8 (shipped) | 0.5284 | 0.5284 | 0.5243 |
+| t3 | 0.5290 | 0.5263 | 0.5275 |
+
+- **lgbm_es's pick vs the probe's: +0.0049 [0.0033, 0.0066]** under lgbm_es, the same
+  as work-only (+0.0047). Staleness did not make it; my prediction was wrong here.
+  t14 is the best table on the test days under the probe and lgbm_es alike; the
+  probe ranked it sixth on validation, 0.0013 behind t11.
+- **catboost_es's pick vs the probe's: +0.0010 [−0.0005, 0.0025]**, inside noise
+  (work-only: +0.0045). Here staleness did make most of it.
+- t3 is no longer the best table on the test days (prediction right): it was the
+  stale fits.
+- Against what shipped (t8): lgbm_es's pick +0.0065 [0.0043, 0.0088], catboost_es's
+  +0.0019 [0.0005, 0.0033].
+
+**Across the two forecasting runs**, picking by lgbm_es beat picking by the probe in
+both, clear of zero: +0.0049 (Restaurant, refitted) and +0.0011 (Rossmann,
+work-only). Picking by catboost_es did not, in either. Each is one choice per run,
+so two runs are two draws, not a rate.
