@@ -182,7 +182,7 @@ def _forecast_session(tmp_path, paths, name="forecast_run", **kw):
     table, stream = paths
     session = RunSession(
         str(tmp_path / name), table,
-        TaskSpec(target="sales", n_splits=3, forecast_horizon=7.0),
+        TaskSpec(target="sales", n_splits=3, forecast_horizon=7.0, forecast_length=7.0),
         split_on="date", future_known=["temp"], workflow="forecast",
         streams={"bookings": {"path": stream, "event_time": "date",
                               "observed_at": "booked_at"}},
@@ -296,29 +296,41 @@ def test_a_failed_refit_ships_the_work_fit_and_says_why(tmp_path, iid_session, m
     assert result["holdout_score"] == result["work_fit_holdout_score"]
 
 
-def test_a_forecast_validation_period_spans_whole_horizons(tmp_path, forecast_paths):
-    """5% of 240 days is 12 days; with a 7-day horizon validation becomes 14 days."""
+def test_a_forecast_validation_period_spans_whole_forecasts(tmp_path, forecast_paths):
+    """5% of 240 days is 12 days; with 7-day forecasts validation becomes 14 days."""
     table, stream = forecast_paths
     s = RunSession(str(tmp_path / "whole"), table,
-                   TaskSpec(target="sales", n_splits=3, forecast_horizon=7.0),
+                   TaskSpec(target="sales", n_splits=3, forecast_horizon=1.0,
+                            forecast_length=7.0),
                    split_on="date", workflow="forecast", val_fraction=0.05)
     val = load_table(s.val_path)
     assert val["date"].nunique() == 14
     assert load_table(s.data_path)["date"].max() < val["date"].min()
 
 
-def test_a_forecast_validation_period_spans_at_least_two_horizons(tmp_path, forecast_paths):
-    """5% of 240 days is 12 days; with a 10-day horizon one would be nearest, two is the floor."""
+def test_a_forecast_validation_period_spans_at_least_two_forecasts(tmp_path, forecast_paths):
+    """5% of 240 days is 12 days; with 10-day forecasts one would be nearest, two is the floor."""
     table, stream = forecast_paths
     s = RunSession(str(tmp_path / "two"), table,
-                   TaskSpec(target="sales", n_splits=3, forecast_horizon=10.0),
+                   TaskSpec(target="sales", n_splits=3, forecast_horizon=1.0,
+                            forecast_length=10.0),
                    split_on="date", workflow="forecast", val_fraction=0.05)
     assert load_table(s.val_path)["date"].nunique() == 20
 
 
-def test_data_too_short_for_two_horizons_validates_on_one(tmp_path, forecast_paths):
+def test_data_too_short_for_two_forecasts_validates_on_one(tmp_path, forecast_paths):
     table, stream = forecast_paths
     s = RunSession(str(tmp_path / "one"), table,
-                   TaskSpec(target="sales", n_splits=3, forecast_horizon=120.0),
+                   TaskSpec(target="sales", n_splits=3, forecast_horizon=1.0,
+                            forecast_length=120.0),
                    split_on="date", workflow="forecast", val_fraction=0.05)
     assert load_table(s.val_path)["date"].nunique() == 120
+
+
+def test_the_horizon_alone_does_not_round_validation(tmp_path, forecast_paths):
+    """A long horizon is a lead, not a forecast's length: 5% of 240 days stays 12."""
+    table, stream = forecast_paths
+    s = RunSession(str(tmp_path / "lead"), table,
+                   TaskSpec(target="sales", n_splits=3, forecast_horizon=10.0),
+                   split_on="date", workflow="forecast", val_fraction=0.05)
+    assert load_table(s.val_path)["date"].nunique() == 12

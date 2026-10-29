@@ -79,7 +79,25 @@ class TaskSpec:
     #: last known value with its age, which needs no declaration to be honest.
     #: Nothing can derive this: it is a fact about the serving contract, which
     #: makes it the data owner's to state (0029).
+    #:
+    #: It says nothing about how many periods one forecast covers; that is
+    #: `forecast_length`.
     forecast_horizon: float | None = None
+    #: How many periods one forecast covers: the rows a served request delivers
+    #: per series, in the ordering column's units ("every Sunday, forecast
+    #: Monday to Sunday" is a horizon of 1 and a length of 7).
+    #:
+    #: Where `forecast_horizon` says how far the first forecast row is from the
+    #: end of history, this says where the last one is. Forward-looking windows
+    #: of a known-in-advance column stop at that edge, because nothing after it is
+    #: delivered, and training cuts its rows into pieces of this length so the
+    #: same windows stop at the same kind of edge there. A validation period is
+    #: rounded to whole lengths for the same reason.
+    #:
+    #: Left `None`, those forward windows are refused; trailing windows of the
+    #: same columns do not need it. Like the horizon, it is a fact about the
+    #: serving contract and the data owner's to state.
+    forecast_length: float | None = None
 
 
 @dataclass
@@ -101,6 +119,7 @@ class ResolvedSpec:
     #: Carried through unresolved: nothing can fill it in, so `None` stays `None`
     #: and means "no lag offsets are legal".
     forecast_horizon: float | None = None
+    forecast_length: float | None = None
 
 
 def detect_task_type(y: pd.Series) -> str:
@@ -172,6 +191,11 @@ def resolve_taskspec(spec: TaskSpec, y: pd.Series) -> ResolvedSpec:
             "gap to the earliest row you predict; zero would mean the row's own period "
             "is already observed, in which case there is nothing to forecast."
         )
+    if spec.forecast_length is not None and spec.forecast_length <= 0:
+        raise ValueError(
+            f"forecast_length must be positive, got {spec.forecast_length}. It is how "
+            "many periods one forecast covers."
+        )
     if objective == "poisson":
         target_transform = "none"
     else:
@@ -188,4 +212,5 @@ def resolve_taskspec(spec: TaskSpec, y: pd.Series) -> ResolvedSpec:
         target_transform=target_transform,
         objective=objective,
         forecast_horizon=spec.forecast_horizon,
+        forecast_length=spec.forecast_length,
     )

@@ -1648,7 +1648,7 @@ class FutureWindowEncoder:
     windows look backward, at the covariate's past, which is known, so they cross
     the block start (into stored values at predict time, 0093); nothing crosses a
     series boundary. A block is one stretch of the ordering
-    column of length ``block_length`` (the forecast horizon), tiled backward from
+    column of length ``block_length`` (the forecast length), tiled backward from
     each series' end — because at serving the model is handed exactly one such
     block per series and must compute the same block-local statistic it computed
     in training. That, and nothing about the target, is what makes a forward-
@@ -1693,7 +1693,7 @@ class FutureWindowEncoder:
 
     kind = "future_window"
 
-    def __init__(self, by, value: str, order: str, block_length: float,
+    def __init__(self, by, value: str, order: str, block_length: float | None,
                  aggregates=(), lookback: bool = True):
         self.by = [str(c) for c in by]
         #: Whether trailing windows reach back across the block start (0093).
@@ -1710,12 +1710,21 @@ class FutureWindowEncoder:
         self.spacing_: float | None = None
         self.value = str(value)
         self.order = str(order)
-        self.block_length = float(block_length)
+        #: `None` only when every aggregate is trailing: those cross block
+        #: starts and never look for a block end.
+        self.block_length = None if block_length is None else float(block_length)
         self.aggregates = _clean_future_aggregates(aggregates)
-        if self.block_length <= 0:
+        if self.block_length is not None and self.block_length <= 0:
             raise ValueError(
                 f"block_length must be positive, got {self.block_length:g}; it is "
-                "the forecast horizon, the length of one delivered serving block."
+                "the forecast length, the periods one delivered serving block covers."
+            )
+        blocked = sorted({s["family"] for s in self.aggregates if s["family"] != "trailing"})
+        if self.block_length is None and blocked:
+            raise ValueError(
+                f"{' and '.join(blocked)} aggregates stop at the end of the delivered "
+                "block, so they need its length: set TaskSpec.forecast_length to how "
+                "many periods one forecast covers. Trailing windows do not need it."
             )
         if not self.aggregates:
             raise ValueError(
@@ -1930,10 +1939,13 @@ class FutureWindowEncoder:
         # Block index within each series, tiled backward from the series end so the
         # newest block is 0 and matches the single block delivered at serving. A row
         # with no ordering value gets NaN and drops out of every group below.
-        gmax = work.groupby("_key")["_p"].transform("max").to_numpy()
-        with np.errstate(invalid="ignore"):
-            block = np.floor((gmax - work["_p"].to_numpy()) / self.block_length + 1e-9)
-        work["_block"] = block
+        if self.block_length is None:  # trailing only: no block end is read
+            work["_block"] = np.where(np.isnan(work["_p"].to_numpy()), np.nan, 0.0)
+        else:
+            gmax = work.groupby("_key")["_p"].transform("max").to_numpy()
+            with np.errstate(invalid="ignore"):
+                block = np.floor((gmax - work["_p"].to_numpy()) / self.block_length + 1e-9)
+            work["_block"] = block
         past = self._with_stored_past(work, known_past) if self.lookback else work
 
         results: dict[str, pd.Series] = {}

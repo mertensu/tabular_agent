@@ -605,7 +605,7 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "
         run's owner can assert which it is.
 
         Period and forward aggregates stay within one series and one delivered
-        serving block (one forecast horizon long): at serving you are handed
+        serving block (one forecast length long): at serving you are handed
         exactly one such block per series, and nothing after it. Trailing windows
         look back across the block start into the covariate's own past, which the
         encoder stores when it is fitted. No target is read.

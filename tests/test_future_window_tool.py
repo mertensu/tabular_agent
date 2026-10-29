@@ -31,7 +31,8 @@ def session(tmp_path):
     path = tmp_path / "shops.csv"
     df.to_csv(path, index=False)
     s = RunSession(str(tmp_path / "run"), str(path),
-                   TaskSpec(target="y", n_splits=3, forecast_horizon=14.0),
+                   TaskSpec(target="y", n_splits=3, forecast_horizon=1.0,
+                            forecast_length=14.0),
                    split_on="date", future_known=["open"], workflow="forecast")
     inspect_data(s)
     return s
@@ -50,6 +51,32 @@ def test_windows_first_then_the_filter_is_the_supported_order(session):
     table = pd.read_parquet(f"{session.run_dir}/{filtered['table']}")
     # Computed before the filter, the window still saw the closed days.
     assert (table["shop_open_roll7_sum"] < 7).any()
+
+
+def test_forward_windows_stop_at_the_declared_forecast_length(session):
+    """Blocks are the forecast's length, not its horizon (a 1-day lead here)."""
+    out = fit_future_covariate_window(
+        session, "open", [{"family": "forward", "window": 21, "stat": "sum"}], by=["shop"])
+    assert out["block_length"] == 14.0
+    table = pd.read_parquet(f"{session.run_dir}/{out['table']}")
+    assert table["shop_open_fwd21_sum"].max() <= 14
+
+
+def test_forward_windows_without_a_forecast_length_are_refused(tmp_path):
+    days = pd.date_range("2020-01-01", periods=120)
+    df = pd.DataFrame({"shop": "a", "date": days, "open": 1, "y": 1.0})
+    path = tmp_path / "shops.csv"
+    df.to_csv(path, index=False)
+    s = RunSession(str(tmp_path / "run"), str(path),
+                   TaskSpec(target="y", n_splits=3, forecast_horizon=1.0),
+                   split_on="date", future_known=["open"], workflow="forecast")
+    inspect_data(s)
+    with pytest.raises(ValueError, match="forecast_length"):
+        fit_future_covariate_window(
+            s, "open", [{"family": "forward", "window": 7, "stat": "sum"}], by=["shop"])
+    # Trailing windows only read the past and need no length.
+    out = fit_future_covariate_window(s, "open", WINDOWS, by=["shop"])
+    assert out["block_length"] is None
 
 
 def test_the_holdout_scores_training_only_fits_with_validation_as_the_known_past(
@@ -74,7 +101,8 @@ def test_the_holdout_scores_training_only_fits_with_validation_as_the_known_past
     path = tmp_path / "shops.csv"
     df.to_csv(path, index=False)
     s = RunSession(str(tmp_path / "run"), str(path),
-                   TaskSpec(target="y", n_splits=3, forecast_horizon=14.0),
+                   TaskSpec(target="y", n_splits=3, forecast_horizon=1.0,
+                            forecast_length=14.0),
                    split_on="date", future_known=["open"], workflow="forecast",
                    holdout_fraction=0.15)
     inspect_data(s)

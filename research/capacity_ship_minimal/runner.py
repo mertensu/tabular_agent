@@ -96,7 +96,10 @@ DATASETS = {
         "future_known": [],
         "prep": "prep_rossmann",
         "identifiers": "reject",
-        "forecast_horizon": 48.0,
+        # Training ends 31 July 2015 and the competition block is 1 August to
+        # 17 September: the first forecast day is 1 day out, the block 48 days long.
+        "forecast_horizon": 1.0,
+        "forecast_length": 48.0,
         "agent": {"val_fraction": 0.05, "fit_time_budget_s": 20 * 60},
         "prompt": (
             "Build the best safe, replayable model you can for this daily store-sales "
@@ -365,6 +368,7 @@ def main(name: str, tag: str = "r1") -> int:
         "identifier_columns": plan.identifier_columns,
         "n_serving_columns": len(plan.serving_columns),
         "future_known": list(plan.future_known or []),
+        plan.forecast_length = cfg.get("forecast_length", getattr(prep, "FORECAST_LENGTH", None))
         "streams": sorted(plan.streams),
     }
     (HERE / f"result_{name}_{tag}.json").write_text(json.dumps(result, indent=2) + "\n")

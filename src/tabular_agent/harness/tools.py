@@ -1682,12 +1682,6 @@ def fit_future_covariate_window(
             "covariate could be known across: future-covariate windows are for a "
             "forecast, where a block of future rows is delivered together."
         )
-    if spec.forecast_horizon is None or spec.forecast_horizon <= 0:
-        raise ValueError(
-            "future-covariate windows need the task to declare its forecast horizon; "
-            "it is the length of one delivered serving block, the unit each aggregate "
-            "resets on. Set TaskSpec.forecast_horizon to a positive lead."
-        )
     order = session.split_on
 
     # Presence is not permission (0091): only a column the owner declared known
@@ -1742,7 +1736,7 @@ def fit_future_covariate_window(
         )
 
     train_features, encoder = _fit_future_covariate_window(
-        df, by, value, order, spec.forecast_horizon, aggregates,
+        df, by, value, order, spec.forecast_length, aggregates,
     )
 
     out = df.join(train_features)
@@ -1765,7 +1759,7 @@ def fit_future_covariate_window(
         "group_by": by,
         "value_column": value,
         "order_column": order,
-        "block_length": spec.forecast_horizon,
+        "block_length": spec.forecast_length,
         "aggregates": [dict(s) for s in encoder.aggregates],
         "new_columns": new_columns,
         "n_steps": len(lineage.steps),
@@ -1782,7 +1776,9 @@ def fit_future_covariate_window(
     note = (
         "This table is scored above; build on it to keep the new columns. Period "
         "and forward aggregates stay within one series and one delivered serving "
-        f"block (one forecast horizon, {spec.forecast_horizon:g} in {order!r}), so at "
+        "block (one forecast, "
+        + (f"{spec.forecast_length:g} in {order!r}" if spec.forecast_length else "not declared")
+        + "), so at "
         "serving — where you are handed exactly one block per series — they "
         "recompute the same statistic. Trailing windows reach back across the block "
         "start into the covariate's past, which the encoder stores at fit, so "
@@ -1805,7 +1801,7 @@ def fit_future_covariate_window(
         # {column: rows filled}. A column all-NaN means the ordering column did not
         # parse for those rows, not that the covariate was empty.
         "rows_filled": filled,
-        "block_length": spec.forecast_horizon,
+        "block_length": spec.forecast_length,
         "note": note,
     }
 

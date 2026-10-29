@@ -87,6 +87,9 @@ class DataPlan:
     #: whatever the metric implies). See `TaskSpec.objective`.
     objective: str | None = None
     forecast_horizon: float | None = None
+    #: How many periods one forecast covers (`TaskSpec.forecast_length`). Optional:
+    #: only forward windows of `future_known` columns need it.
+    forecast_length: float | None = None
     #: Serving columns whose values over the forecast horizon are known at issue
     #: time (0091) — a weather forecast, a planned promotion, a published price.
     #: The owner's assertion about the data, never inferred: it is what lets
@@ -212,6 +215,11 @@ class DataPlan:
                 *(() if self.forecast_horizon else (
                     "set: plan.forecast_horizon = <positive lead>",
                 )),
+            )
+            lines.append(
+                f"  (i) forecast_length    {self.forecast_length:g}" if self.forecast_length
+                else "  (i) forecast_length    (none) — periods one forecast covers; "
+                     "set: plan.forecast_length = <periods>"
             )
             # Optional, not a gate: an empty future_known is a valid, complete plan
             # (behaviour identical to a run without it), so this is an info line
@@ -745,7 +753,8 @@ class Agent:
         return review_capabilities(run_dir, model=self._resolved_model())
 
     def _validate_workflow(self, plan: DataPlan) -> None:
-        if plan.split_on is not False or plan.forecast_horizon is not None:
+        if (plan.split_on is not False or plan.forecast_horizon is not None
+                or plan.forecast_length is not None):
             raise ValueError(
                 "Agent is for independent rows and requires plan.split_on = False; "
                 "use ForecastingAgent for predictions into the future"
@@ -759,6 +768,7 @@ class Agent:
         data_path, manifest = plan.materialize(run_dir)
         manifest["workflow"] = self.workflow
         manifest["forecast_horizon"] = plan.forecast_horizon
+        manifest["forecast_length"] = plan.forecast_length
         spec = TaskSpec(
             target=str(plan.target),
             task_type=plan.task_type,
@@ -770,6 +780,7 @@ class Agent:
             target_transform=plan.target_transform,
             objective=plan.objective,
             forecast_horizon=plan.forecast_horizon,
+            forecast_length=plan.forecast_length,
         )
         session = RunSession(
             str(run_dir),

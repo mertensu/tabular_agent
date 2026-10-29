@@ -417,8 +417,8 @@ class RunSession:
                     )
             else:
                 cut_val = n
-            if self.workflow == "forecast":
-                cut_work = self._whole_horizons(values[order], cut_work, cut_val)
+            if self.workflow == "forecast" and self.spec.forecast_length:
+                cut_work = self._whole_forecasts(values[order], cut_work, cut_val)
             val_pos = order[cut_work:cut_val]
             holdout_pos = order[cut_val:]
         else:
@@ -481,39 +481,40 @@ class RunSession:
         self._split = (work_path, val_path, holdout_path if self.holdout_fraction else None)
         return self._split
 
-    def _whole_horizons(self, ordered, cut_work: int, val_end: int) -> int:
-        """Move the work/validation cut so validation spans whole forecast horizons.
+    def _whole_forecasts(self, ordered, cut_work: int, val_end: int) -> int:
+        """Move the work/validation cut so validation spans whole forecasts.
 
         Validation rehearses a forecast, so it has to be at least one forecast
         long: a window over the whole delivered block, or anything counted across
         it, is otherwise computed over fewer periods in validation than in
         training and at prediction time, and scored on a different scale than it
         was learned on. ``val_fraction`` sets the size; this rounds it to the
-        nearest whole number of horizons, covering the periods in
-        ``(end - k * horizon, end]`` the way window encoders tile their blocks.
+        nearest whole number of forecast lengths, covering the periods in
+        ``(end - k * length, end]`` the way window encoders tile their blocks.
+        Without a declared ``forecast_length`` the cut stays where the fraction put it.
 
-        At least two horizons when the data allows it, so a table is judged on
+        At least two forecasts when the data allows it, so a table is judged on
         more than one forecast's stretch of the calendar. This does not lower
         the noise bar a gain must clear (0090's ``block_sd`` is the spread of
         the gain between periods, which more periods estimate but do not
         shrink); it makes the gain an average over more of the conditions the
         model will forecast into. What ships is refitted on the validation rows
         too (0092), so the longer period costs the shipped model nothing. Data
-        too short for two horizons plus training gets one.
+        too short for two forecasts plus training gets one.
         """
         from ..encoders import to_periods
 
         periods = to_periods(ordered)
-        horizon = float(self.spec.forecast_horizon)
+        length = float(self.spec.forecast_length)
         end = periods[val_end - 1]
-        k = max(2, int(round((end - periods[cut_work]) / horizon)))
+        k = max(2, int(round((end - periods[cut_work]) / length)))
         for k in range(k, 0, -1):
-            cut = int(np.searchsorted(periods, end - k * horizon, side="right"))
+            cut = int(np.searchsorted(periods, end - k * length, side="right"))
             if cut >= MIN_SPLIT_ROWS:
                 return cut
         raise ValueError(
-            f"cannot cut a validation period of one forecast horizon "
-            f"({horizon:g} in {self.split_on!r}) and keep {MIN_SPLIT_ROWS} "
+            f"cannot cut a validation period of one forecast "
+            f"({length:g} in {self.split_on!r}) and keep {MIN_SPLIT_ROWS} "
             "work rows: the data is shorter than one forecast plus training."
         )
 
@@ -560,6 +561,7 @@ class RunSession:
             ),
             "split_on": self.split_on,
             "forecast_horizon": self.spec.forecast_horizon,
+            "forecast_length": self.spec.forecast_length,
             "future_known": list(self.future_known),
             "seed": self.spec.seed,
             "val_fraction": self.val_fraction,

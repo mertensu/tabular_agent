@@ -213,6 +213,10 @@ SPLIT_ON = "visit_date"
 #: `block_span` beside them; which to use is the agent's call (0029).
 FORECAST_HORIZON = 1.0
 
+#: Days one forecast covers: the competition window, 2017-04-23 to 2017-05-31.
+#: Forward windows of a known-in-advance column stop at its end.
+FORECAST_LENGTH = 39.0
+
 #: The run's second inputs (0062). Declared here because which column is *when a
 #: booking is for* and which is *when it was made* is a fact about the download
 #: that no profiler recovers — and the wrong way round builds a feature out of the
@@ -533,12 +537,13 @@ def main() -> int:
 
     print("\nto start a run:")
     print("    from scripts.prep_restaurant import (ABOUT, COLUMN_NOTES, "
-          "FORECAST_HORIZON,")
+          "FORECAST_HORIZON, FORECAST_LENGTH,")
     print("                                         METRIC, SPLIT_ON, STREAMS)")
     print("    RunSession(run_dir, OUT,")
     print(f"               TaskSpec(target='visitors', metric='{METRIC}',")
     print("                        notes=ABOUT, column_notes=COLUMN_NOTES,")
-    print(f"                        forecast_horizon={FORECAST_HORIZON}),")
+    print(f"                        forecast_horizon={FORECAST_HORIZON},")
+    print(f"                        forecast_length={FORECAST_LENGTH}),")
     print(f"               split_on='{SPLIT_ON}', streams=STREAMS)")
     return 0
 
