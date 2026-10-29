@@ -124,8 +124,12 @@ def work_fit_predict(run: Run, raw: pd.DataFrame, streams: dict) -> np.ndarray |
               for e in b["fitted_on"]["refit_of"]]
     work_bundle = {**b, "pipeline": _load_lineage(str(source), b["task_type"]),
                    "models": models}
-    return np.asarray(predict_bundle(work_bundle, run.bundle._prepare(raw), streams=streams),
-                      dtype=float)
+    # The work-only fits stored the known covariates' past up to the end of the
+    # work rows; the validation rows are what lies between it and the test days.
+    val = pd.read_parquet(root / "data" / "val.parquet")
+    known_past = val.drop(columns=[c for c in val.columns if c not in raw.columns])
+    return np.asarray(predict_bundle(work_bundle, run.bundle._prepare(raw), streams=streams,
+                                     known_past=known_past), dtype=float)
 
 
 def score(metric, y, p):

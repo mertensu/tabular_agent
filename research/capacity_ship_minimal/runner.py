@@ -170,6 +170,15 @@ TAG_OVERRIDES = {
     # windows the flash model never did?
     ("rossmann", "r12"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
                           "model": "gpt-6.1-terra@eu", "reasoning_effort": "medium"},
+    # r13 repeats r12 on the code after 0096 (streams cut at issue; Rossmann has
+    # none) and 0097 (60 tables / 30 minutes instead of six without improvement).
+    # r13's search was cut short: the machine slept from 23:09 to 06:59 and the
+    # 30-minute clock ran on, so it got about six minutes and 14 tables.
+    ("rossmann", "r13"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
+                          "model": "gpt-6.1-terra@eu", "reasoning_effort": "medium"},
+    # r14 repeats r13 under `caffeinate -i`, so the machine cannot sleep mid-run.
+    ("rossmann", "r14"): {"future_known": ["Open", "Promo", "SchoolHoliday"],
+                          "model": "gpt-6.1-terra@eu", "reasoning_effort": "medium"},
     # Restaurant r3: r2's setup on the current code (0094, 0095, serving types
     # restored, two-horizon validation) with r12's stronger agent model.
     ("restaurant", "r3"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium"},
@@ -189,6 +198,18 @@ TAG_OVERRIDES = {
                            "streams": True},
     ("restaurant", "r8"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium",
                            "streams": True},
+    # r9 repeats r7/r8, now with the transcript saved and the table count recorded
+    # when the inventory is shown and at finalize.
+    ("restaurant", "r9"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium",
+                           "streams": True},
+    # r10 repeats r9 with streams read as they stood when each block's forecast was
+    # issued (0096), in training, validation and the refit.
+    ("restaurant", "r10"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium",
+                            "streams": True},
+    # r11 repeats r10 with the run bounded by 60 tables and 30 minutes instead of
+    # six tables without improvement, and the budget shown in every result (0097).
+    ("restaurant", "r11"): {"model": "gpt-6.1-terra@eu", "reasoning_effort": "medium",
+                            "streams": True},
 }
 
 
@@ -347,6 +368,7 @@ def main(name: str, tag: str = "r1") -> int:
         plan.notes, plan.column_notes = prep.ABOUT, prep.COLUMN_NOTES
         plan.split_on = cfg["split_on"]
         plan.forecast_horizon = cfg.get("forecast_horizon", getattr(prep, "FORECAST_HORIZON", None))
+        plan.forecast_length = cfg.get("forecast_length", getattr(prep, "FORECAST_LENGTH", None))
         plan.future_known = cfg["future_known"]
         if cfg.get("streams"):
             plan.streams = _run_streams(name, cfg)
@@ -368,7 +390,6 @@ def main(name: str, tag: str = "r1") -> int:
         "identifier_columns": plan.identifier_columns,
         "n_serving_columns": len(plan.serving_columns),
         "future_known": list(plan.future_known or []),
-        plan.forecast_length = cfg.get("forecast_length", getattr(prep, "FORECAST_LENGTH", None))
         "streams": sorted(plan.streams),
     }
     (HERE / f"result_{name}_{tag}.json").write_text(json.dumps(result, indent=2) + "\n")

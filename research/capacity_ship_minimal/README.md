@@ -843,3 +843,142 @@ finishes. Otherwise r6's setup.
   14:35:20 → 14:37:07), which the final fits account for, and neither built more
   tables than r6. Most likely the agent read it and finished.
 - r8 is the closest any gpt-6.1 run has come to r2 (0.0018 on the test days).
+
+## Restaurant r9 (2026-10-28): r7/r8 with the transcript and the inventory's timing
+
+Two additions to the harness, otherwise r7/r8's setup. Each run now writes its full
+transcript to `messages.json` in its run directory (what the agent said, every tool
+call and what it was told), however the run ends. The journal records how many
+tables existed when the inventory was shown (`stop.inventory_shown.tables`) and at
+finalize (`stop.tables_at_finalize`); equal numbers mean the agent finished
+straight after reading it. The run used these changes uncommitted on top of
+ff6ef65, the commit `result_restaurant_r9.json` names.
+
+| | r2 | r8 | r9 |
+|---|---|---|---|
+| tables / minutes | 24 / – | 17 / 4.1 | 12 / 33.7 |
+| shipped table | t21 | t12 | t4 |
+| run's validation probe | 0.5105 | 0.5250 | 0.5166 |
+| shipped on our test days | **0.5225** | 0.5243 | 0.5250 |
+| probe / lgbm_es / catboost_es | 0.521 / 0.521 / 0.519 | 0.525 / 0.525 / 0.524 | 0.524 / 0.523 / 0.523 |
+
+- **The inventory was never shown.** The stop rule ended the search at 12 tables:
+  the seven after t4 were all inside the noise. The agent's next call was
+  `finalize_run`, and the inventory is skipped once the stop rule has ended the
+  search. The agent never asked to finish on its own. r9 reads like r4 and r5, not
+  like r7 and r8.
+- The seven tables after t4 were mostly siblings built on t3 (encodings, holiday
+  windows, genre × weekday and store × holiday history, HPG bookings), not steps on
+  t4. Only the last request, HPG bookings on t4, built on the winner, and that was
+  the one refused.
+- r9 shipped t4: calendar, store history ≥90, store × weekday history ≥90, AirREGI
+  bookings at leads 1/7/28/45. Validation → test +0.009, between r7's +0.014 (also
+  1-day bookings) and r8's −0.001 (none shipped).
+- In its closing message the agent flagged its own 1-day booking lead: "those
+  features may have contained more information in validation than would be
+  available at the forecast cutoff, so real-world accuracy could be worse."
+- After the run was finalized it called `finalize_run` a second time and was told
+  the run was already finalized. The tool's docstring says the first call returns an
+  overview; when the stop rule has ended the search, the first call finishes instead.
+- The 33.7 minutes are two tool calls (store × weekday history 17.5 min, AirREGI
+  bookings 9.5 min), not the gateway. The full test suite ran alongside on the same
+  machine; after it was stopped the remaining tables came in seconds, as in r8 (5–10 s
+  per table, with the same windows and a 180-day median). Contention is the only
+  difference found; whether it explains a hundredfold slowdown was not checked.
+
+### Would the table the agent trusted have done better? (`terminal_check.py`)
+
+r9's shipped recipe (7 models, parameters, blend weights) refitted on its training +
+validation rows, once on t4 as shipped and once on t3's columns only (t4 without
+the 12 AirREGI booking columns). Streams hold only bookings made before the first
+test day.
+
+| test days | t4 (shipped) | t3 (what the agent built on) |
+|---|---|---|
+| all | 0.5250 (reproduces the shipped 0.5250) | 0.5287 |
+| week 1 / 2 / 3 | 0.5288 / 0.5212 / 0.5381 | 0.5416 / 0.5261 / 0.5435 |
+| week 4 / 5 / 6 | 0.5392 / 0.5136 / 0.4977 | 0.5388 / 0.5111 / 0.4979 |
+
+- **t4 is better by 0.0037 [0.0013, 0.0060].** Shipping t3, as the agent's judgement
+  suggested, would have cost that. The gain is all in the first three weeks, where
+  the cut-off bookings still cover the visit; from week 4 the two are level.
+- Validation put the same step at +0.010. The agent was right that validation
+  overstates the bookings and wrong that they were worth nothing.
+- Why validation overstates: the run declares a forecast horizon of 1 day (the gap
+  to the first forecast day), so leads of 1 day pass the stream tool's
+  lead ≥ horizon check. Each validation row then sees its bookings up to 1 day before
+  its visit, while a served row 30 days into the forecast sees only those made before
+  the forecast was issued.
+
+## Restaurant r10 (2026-10-28): r9 with streams read as of the forecast's issue (0096)
+
+| | r8 | r9 | r10 |
+|---|---|---|---|
+| tables / minutes | 17 / 4.1 | 12 / 33.7 | 17 / 3.6 |
+| shipped table | t12 | t4 | t8 |
+| run's validation probe | 0.5250 | 0.5166 | 0.5285 |
+| shipped on our test days | 0.5243 | 0.5250 | 0.5248 |
+| validation → test | −0.001 | +0.009 | **−0.004** |
+| probe / lgbm_es / catboost_es | 0.525 / 0.525 / 0.524 | 0.524 / 0.523 / 0.523 | 0.528 / 0.528 / 0.524 |
+
+- **AirREGI bookings at leads 1/7/30 now gain +0.0037 on validation** built on the
+  encodings (t3), +0.0009 on store history (t7, t11), inside the noise. r9's same
+  step gained +0.010 on validation and +0.004 on the test days: the cut removed the
+  overstatement, and what is left is about what the test days gave.
+- Shipped t8: calendar, target encodings, store history ≥90 with a 180-day median.
+  No booking feature. Test days level with r8 and r9; validation is no longer
+  optimistic.
+- **The agent finished on its own** after 17 tables, at the same moment the stop
+  rule's patience (6 tables without beating the best, t12–t17) ran out. No call
+  was refused, but the inventory was not shown either: it is skipped once the stop
+  rule considers the search ended.
+- The agent never saw the stop rule's progress line: it is attached to training
+  results only, and the minimal agent builds tables without training.
+
+## Rossmann r13, r14 (2026-10-29): r12 after 0096 and 0097
+
+r12's setup on the code with 0096 (Rossmann declares no stream: no effect) and 0097
+(a run is bounded by 60 tables and 30 minutes; no stop after six tables without
+improvement; the budget in every table result). rmspe on our 48 test days, lower is
+better.
+
+| | r12 | r13 | r14 |
+|---|---|---|---|
+| tables / minutes of search | 26 / 24 | 14 / ~6 (asleep) | 33 / 23 |
+| shipped table | t26 | t14 | t20 |
+| shipped on our test days | 0.1189 | 0.1247 | **0.1186** |
+| probe / lgbm_es / catboost_es | 0.122 / 0.119 / 0.121 | 0.126 / 0.121 / 0.120 | 0.122 / 0.119 / 0.118 |
+| training-only fit | 0.1202 | 0.1296 | 0.1232 |
+
+- **r13 is not a reading of 0097.** The machine slept from 23:09 to 06:59; the run
+  advanced only in ~2-second dark wakes, and the 30-minute clock ran on, so the
+  agent saw no time left after t14 and finished. Runs now go under `caffeinate -i`,
+  lid open.
+- **r14: level with r12 on the test days** (0.1186 vs 0.1189). It searched 33
+  tables in 23 minutes and finished on its own with 7 minutes left. First run in
+  which the inventory was shown (at 33 tables); it finalized straight after
+  (`tables_at_finalize` 33). Shipped t20: calendar, store × weekday history, forward
+  and trailing `Open` / `Promo` windows, a training-only filter.
+- Of its best tables, t17 (+0.011), t20 and t23 came after table 15. Under the old
+  six-table rule the run would have ended around t16 (t10 was the best for t11–t16).
+- r14's lid was closed at 07:54, during the refit: 39 minutes instead of ~4, and
+  the agent's closing message failed on a dropped connection after the bundle was
+  written. `result_rossmann_r14.json` was written from the run directory afterwards.
+- `evaluate.py` and `submit.py` now pass `known_past` (0095) where a bundle's stored
+  past ends before the rows it predicts: the validation rows for the training-only
+  fit, our test days for Kaggle "as shipped". r12 (also a trailing `Open` window) is
+  scored here for the first time with `evaluate.py`.
+- A general bug seen in r14: one-hot columns named `PromoInterval_Jan,Apr,Jul,Oct`
+  make LightGBM refuse the table ("special JSON characters in feature name"), so the
+  probe cannot score it. The agent worked around it. Fixed after r14: LightGBM and
+  XGBoost models rename their input to names they accept (`_safe_names.py`).
+
+**Kaggle (private / public):**
+
+| | r12 | r13 | r14 |
+|---|---|---|---|
+| refit on all rows | **0.1233** / **0.1070** | 0.1340 / 0.1200 | 0.1245 / 0.1109 |
+| as shipped, our test days as `known_past` | 0.1303 / 0.1133 | 0.1334 / 0.1251 | **0.1263** / 0.1185 |
+
+r14 is 0.0012 behind r12 on private for the all-rows refit and 0.004 ahead as
+shipped: level, as on our test days. The median is 0.1297.

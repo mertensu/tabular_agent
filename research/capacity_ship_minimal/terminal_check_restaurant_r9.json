@@ -1,0 +1,57 @@
+{
+  "dataset": "restaurant",
+  "tag": "r9",
+  "shipped_table": "refit/t4.parquet",
+  "ancestor": "t3",
+  "dropped_columns": [
+    "air_reserve_air_store_id_reserve_visitors_lead1_count",
+    "air_reserve_air_store_id_reserve_visitors_lead1_sum",
+    "air_reserve_air_store_id_reserve_visitors_lead1_mean",
+    "air_reserve_air_store_id_reserve_visitors_lead7_count",
+    "air_reserve_air_store_id_reserve_visitors_lead7_sum",
+    "air_reserve_air_store_id_reserve_visitors_lead7_mean",
+    "air_reserve_air_store_id_reserve_visitors_lead28_count",
+    "air_reserve_air_store_id_reserve_visitors_lead28_sum",
+    "air_reserve_air_store_id_reserve_visitors_lead28_mean",
+    "air_reserve_air_store_id_reserve_visitors_lead45_count",
+    "air_reserve_air_store_id_reserve_visitors_lead45_sum",
+    "air_reserve_air_store_id_reserve_visitors_lead45_mean"
+  ],
+  "test_days": {
+    "shipped": 0.525013,
+    "t3": 0.528687
+  },
+  "ancestor_gain": {
+    "gain": -0.003675,
+    "ci95": [
+      -0.006047,
+      -0.001263
+    ]
+  },
+  "by_week": {
+    "0": {
+      "shipped": 0.5288,
+      "t3": 0.5416
+    },
+    "1": {
+      "shipped": 0.5212,
+      "t3": 0.5261
+    },
+    "2": {
+      "shipped": 0.5381,
+      "t3": 0.5435
+    },
+    "3": {
+      "shipped": 0.5392,
+      "t3": 0.5388
+    },
+    "4": {
+      "shipped": 0.5136,
+      "t3": 0.5111
+    },
+    "5": {
+      "shipped": 0.4977,
+      "t3": 0.4979
+    }
+  }
+}

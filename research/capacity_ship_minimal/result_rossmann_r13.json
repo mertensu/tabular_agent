@@ -1,0 +1,16 @@
+{
+  "dataset": "rossmann",
+  "tag": "r13",
+  "model": "gpt-6.1-terra@eu",
+  "git_commit": "ff6ef6545b5f701463304b2e22e063feab9e89ae",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/rossmann/runs/20261028T220332Z-1f27bc38",
+  "elapsed_min": 501.44,
+  "identifier_columns": [],
+  "n_serving_columns": 16,
+  "future_known": [
+    "Open",
+    "Promo",
+    "SchoolHoliday"
+  ],
+  "streams": []
+}

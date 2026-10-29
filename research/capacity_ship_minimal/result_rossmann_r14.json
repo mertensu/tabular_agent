@@ -1,0 +1,17 @@
+{
+  "dataset": "rossmann",
+  "tag": "r14",
+  "model": "gpt-6.1-terra@eu",
+  "git_commit": "ff6ef6545b5f701463304b2e22e063feab9e89ae",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/rossmann/runs/20261029T062510Z-c8e9bb91",
+  "elapsed_min": 66.49,
+  "identifier_columns": [],
+  "n_serving_columns": 16,
+  "future_known": [
+    "Open",
+    "Promo",
+    "SchoolHoliday"
+  ],
+  "streams": [],
+  "note": "written after the run: the agent finalized, then the gateway dropped the connection on its closing message and the runner raised before writing this"
+}

@@ -114,7 +114,12 @@ def main(name: str, tag: str, table_id: str | None = None) -> int:
                   np.asarray(predict_bundle(refit, run.bundle._prepare(raw), streams=streams),
                              dtype=float)),)
     else:
-        shipped = np.asarray(run.bundle.predict(raw, streams=streams), dtype=float)
+        # The shipped bundle's data ends before our test days; they are what lies
+        # between it and Kaggle's first day, for any window over a known covariate.
+        audit = pd.read_parquet(OUT / name / "audit.parquet")
+        known_past = audit[[c for c in audit.columns if c in raw.columns]]
+        shipped = np.asarray(run.bundle.predict(raw, streams=streams, known_past=known_past),
+                             dtype=float)
         refit = all_rows_bundle(run, cfg, streams=streams)
         all_rows = np.asarray(predict_bundle(refit, run.bundle._prepare(raw), streams=streams),
                               dtype=float)
