@@ -982,3 +982,58 @@ better.
 
 r14 is 0.0012 behind r12 on private for the all-rows refit and 0.004 ahead as
 shipped: level, as on our test days. The median is 0.1297.
+
+## Re-ranking Rossmann r14 and Restaurant r10 (2026-10-29): does the probe pick the table a fitted model would?
+
+The r1/r2 re-ranking covered House and Porto only. These are the two forecasting
+runs on the current code (0094–0097), with 33 and 17 tables. `rerank.py` now
+replays forecast lineages as the run did: validation rows read the streams cut at
+their issue time and no known past; the test days read the streams cut at their
+first day and the validation rows as known past. Every fit is on the work rows only,
+as during the search, so test-day scores sit above what shipped; the comparison is
+between tables, not against the shipped number.
+
+**Prediction, written before the run.**
+
+- Rank agreement (Spearman, validation rows) probe vs lgbm_es ≥ 0.7 on both runs:
+  most steps here are large (calendar, store history), not near-ties.
+- Where a fitted ruler picks a different table than the probe, the gain on the test
+  days, under that ruler's model, is within ±0.003 and its interval includes zero.
+
+**Decision rule.** If on either run a fitted ruler's pick beats the probe's pick by
+≥ 0.003 with the store-bootstrap interval excluding zero, ranking tables with an
+early-stopped fit is worth building. Otherwise the probe's ranking costs nothing
+measurable on these datasets, and the next lever is elsewhere.
+
+**Reading.** The refitted probe reproduces the journal on every scored table of both
+runs (Rossmann's work table was never probed in the run; t1 there was unscorable).
+Test-day scores, fits on work rows only; intervals are store-bootstrap.
+
+| | Restaurant r10 (rmsle, 17 tables) | Rossmann r14 (rmspe, 33 tables) |
+|---|---|---|
+| Spearman probe vs lgbm_es / catboost_es | 0.71 / 0.54 | 0.63 / 0.81 |
+| probe's pick | t11 | t29 |
+| lgbm_es's pick, vs the probe's (under lgbm_es) | t14, **+0.0047 [0.0033, 0.0063]** | t24, +0.0011 [0.0002, 0.0020] |
+| catboost_es's pick, vs the probe's (under catboost_es) | t12, **+0.0045 [0.0027, 0.0063]** | t10, −0.0007 [−0.0019, 0.0004] |
+| table that shipped (0094's bar) | t8 | t20 |
+| best table on the test days, any ruler | t3 | t21 / t22 |
+
+- **Against the prediction.** Rank agreement ≥ 0.7 held for lgbm_es on Restaurant
+  and catboost_es on Rossmann only. "Inside noise" held on Rossmann and failed on
+  Restaurant, where both fitted rulers' picks beat the probe's by ~0.0046.
+- **Against the decision rule.** Met on Restaurant by both fitted rulers; not on
+  Rossmann (lgbm_es clear of zero but 0.001, catboost_es inside noise).
+- **Why Restaurant needs a second look before building.** These are work-only fits,
+  and Restaurant's test days begin about three months after the work rows end. Every
+  ruler's best table on the test days is t3, ~0.02 better than anything the search
+  went on to prefer on validation: history features going stale across the gap,
+  which no ruler sees. The picks' difference is measured through that staleness.
+  Refitting each table on training + validation rows (what ships since 0092) removes
+  it.
+- **Where the probe misleads most** is early in a run. On Rossmann t2–t6 the probe
+  read 0.19–0.21 and lgbm_es 0.12–0.13; t7 looked like a 0.06 step to the probe and
+  a 0.006 loss to lgbm_es. Once store history was in (t9 on), all three rulers sat
+  within ~0.01 of each other and the tables were near-ties.
+- **Cost.** lgbm_es + catboost_es took about 4 minutes per Rossmann table here,
+  against ~10 seconds for the probe; an early-stopped ruler inside a 30-minute
+  budget would allow far fewer tables.
