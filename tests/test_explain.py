@@ -211,3 +211,34 @@ def test_a_poisson_member_is_additive_in_log_space(tmp_path, model_types):
     np.testing.assert_allclose(
         np.exp(explanation.predicted), predict_bundle(bundle, X), rtol=1e-4
     )
+
+
+def test_columns_the_boosting_libraries_refuse_are_fitted_and_explained():
+    """A one-hot of the category value "Jan,Apr,Jul,Oct" is an ordinary column.
+
+    LightGBM refuses commas and brackets in feature names and XGBoost brackets,
+    so a table with such a column could not be scored at all.
+    """
+    import pickle
+
+    import numpy as np
+    import pandas as pd
+
+    from tabular_agent.explain import _member_contributions
+    from tabular_agent.models import _make_model, predict_model
+
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame({"PromoInterval_Jan,Apr,Jul,Oct": rng.integers(0, 2, 200),
+                      "x[1]": rng.normal(size=200), "x_1_": rng.normal(size=200),
+                      'q:{"a"}': rng.normal(size=200)}).astype(float)
+    y = X.iloc[:, 0] * 2 + X["x[1]"] + rng.normal(0, 0.1, 200)
+
+    for model_type in ("lgbm", "xgb"):
+        model = _make_model(model_type, "regression", None, 0)
+        model.fit(X, y)
+        restored = pickle.loads(pickle.dumps(model))
+        preds = predict_model(restored, X, "regression")
+        assert np.corrcoef(preds, y)[0, 1] > 0.9
+        contribs, base = _member_contributions(restored, X, "regression")
+        assert contribs.shape == X.shape
+        assert np.allclose(contribs.sum(axis=1) + base, preds, atol=1e-3)

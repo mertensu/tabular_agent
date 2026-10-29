@@ -128,6 +128,18 @@ def _baseline_contributions(model, X: pd.DataFrame, task_type: str,
     return zeros, float(np.log(p / (1.0 - p)))
 
 
+_TREE_LIBRARIES = ("lightgbm", "xgboost", "catboost")
+
+
+def _library(model) -> str:
+    """The library a model comes from, through the renaming wrappers of `_safe_names`."""
+    for cls in type(model).__mro__:
+        root = cls.__module__.split(".")[0]
+        if root in _TREE_LIBRARIES:
+            return root
+    return type(model).__module__.split(".")[0]
+
+
 def _tree_contributions(model, X: pd.DataFrame) -> tuple[np.ndarray, float]:
     """Native TreeSHAP for an lgbm / xgb / catboost member.
 
@@ -136,14 +148,16 @@ def _tree_contributions(model, X: pd.DataFrame) -> tuple[np.ndarray, float]:
     output. The three are the same object under different spellings; the base
     column is peeled off here so the caller sees a uniform ``(contribs, base)``.
     """
-    module = type(model).__module__.split(".")[0]
+    module = _library(model)
     if module == "lightgbm":
         raw = np.asarray(model.predict(X, pred_contrib=True), dtype=float)
     elif module == "xgboost":
         import xgboost as xgb
 
         booster = model.get_booster()
-        dmatrix = xgb.DMatrix(X, feature_names=list(X.columns))
+        from ._safe_names import safe_feature_names
+
+        dmatrix = xgb.DMatrix(X, feature_names=safe_feature_names(X.columns))
         raw = np.asarray(booster.predict(dmatrix, pred_contribs=True), dtype=float)
     elif module == "catboost":
         from catboost import Pool
@@ -176,8 +190,7 @@ def _member_contributions(model, X: pd.DataFrame, task_type: str,
     why the blend is combined there and the link is applied, if at all, only once
     the caller reads :attr:`Explanation.space`.
     """
-    module = type(model).__module__.split(".")[0]
-    if module in ("lightgbm", "xgboost", "catboost"):
+    if _library(model) in _TREE_LIBRARIES:
         return _tree_contributions(model, X)
     if type(model).__name__ == "_Baseline":
         return _baseline_contributions(model, X, task_type, objective)

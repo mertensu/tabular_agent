@@ -594,16 +594,17 @@ def _make_model(model_type: str, task_type: str, params: dict | None, seed: int,
     if model_type == "elasticnet":
         return _make_elasticnet(task_type, params, seed, metric, objective)
     if model_type == "lgbm":
-        import lightgbm as lgb
+        # Renames its input to names LightGBM accepts; see `_safe_names`.
+        from . import _safe_names as safe
 
         kw = _resolve_params({"random_state": seed, "n_estimators": 200, "verbose": -1}, params)
-        cls = lgb.LGBMRegressor if task_type == "regression" else lgb.LGBMClassifier
+        cls = safe.LGBMRegressor if task_type == "regression" else safe.LGBMClassifier
         return cls(**_with_objective(kw, model_type, objective))
     if model_type == "xgb":
-        import xgboost as xgb
+        from . import _safe_names as safe
 
         kw = _resolve_params({"random_state": seed, "n_estimators": 200, "verbosity": 0}, params)
-        cls = xgb.XGBRegressor if task_type == "regression" else xgb.XGBClassifier
+        cls = safe.XGBRegressor if task_type == "regression" else safe.XGBClassifier
         return cls(**_with_objective(kw, model_type, objective))
     if model_type == "catboost":
         from catboost import CatBoostClassifier, CatBoostRegressor
