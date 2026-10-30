@@ -165,6 +165,64 @@ def _finite(X):
     return np.where(np.isfinite(X), X, np.nan)
 
 
+#: Most levels of one categorical a linear member gets an indicator for. The rest
+#: share the all-zero row with missing and unseen values. A bound on memory, not a
+#: tuned number: an indicator per level of an 800-level store id is a dense
+#: matrix of 800 columns per categorical.
+MAX_LINEAR_LEVELS = 32
+
+
+class _OneHotCategories(TransformerMixin, BaseEstimator):
+    """Category-dtype columns as indicators, numeric columns as they are.
+
+    The linear member's reading of a declared categorical (0074): one indicator
+    per level for its ``MAX_LINEAR_LEVELS`` most frequent levels on the rows it
+    was fitted on, so per fold, like every other step here. A table without
+    categoricals passes through unchanged. ``groups_`` maps each output column
+    back to the input column it came from, so attribution can add the
+    indicators' contributions up to the column the caller knows.
+    """
+
+    def fit(self, X, y=None):
+        self.columns_ = list(X.columns) if isinstance(X, pd.DataFrame) else None
+        self.levels_ = {}
+        if self.columns_ is None:
+            self.groups_ = None
+            return self
+        groups = []
+        for i, col in enumerate(self.columns_):
+            if isinstance(X[col].dtype, pd.CategoricalDtype):
+                counts = X[col].value_counts(dropna=True)
+                levels = [v for v, n in counts.items() if n > 0][:MAX_LINEAR_LEVELS]
+                self.levels_[col] = levels
+                groups += [i] * len(levels)
+            else:
+                groups.append(i)
+        self.groups_ = np.asarray(groups, dtype=int)
+        return self
+
+    def transform(self, X):
+        if not self.levels_:
+            return X
+        parts = []
+        for col in self.columns_:
+            if col in self.levels_:
+                values = X[col].astype(object)
+                parts += [(values == level).to_numpy(dtype=float) for level in self.levels_[col]]
+            else:
+                parts.append(pd.to_numeric(X[col], errors="coerce").to_numpy(dtype=float))
+        return np.column_stack(parts) if parts else np.empty((len(X), 0))
+
+    def get_feature_names_out(self, input_features=None):
+        if not self.levels_:
+            return np.asarray(self.columns_ or input_features, dtype=object)
+        names = []
+        for col in self.columns_:
+            names += ([f"{col}={v}" for v in self.levels_[col]] if col in self.levels_
+                      else [col])
+        return np.asarray(names, dtype=object)
+
+
 class _ClipToFitRange(TransformerMixin, BaseEstimator):
     """Each column clipped to the range it had on the rows the model was fitted on.
 
@@ -507,6 +565,7 @@ def _make_elasticnet(task_type: str, params: dict | None, seed: int,
         )
 
     return make_pipeline(
+        _OneHotCategories(),
         FunctionTransformer(_finite, feature_names_out="one-to-one"),
         _ClipToFitRange(),
         # `keep_empty_features` so an all-NaN column in one fold does not silently
@@ -603,11 +662,14 @@ def _make_model(model_type: str, task_type: str, params: dict | None, seed: int,
     if model_type == "xgb":
         from . import _safe_names as safe
 
-        kw = _resolve_params({"random_state": seed, "n_estimators": 200, "verbosity": 0}, params)
+        # `enable_categorical`: columns of category dtype are split as categories.
+        kw = _resolve_params({"random_state": seed, "n_estimators": 200, "verbosity": 0,
+                              "enable_categorical": True}, params)
         cls = safe.XGBRegressor if task_type == "regression" else safe.XGBClassifier
         return cls(**_with_objective(kw, model_type, objective))
     if model_type == "catboost":
-        from catboost import CatBoostClassifier, CatBoostRegressor
+        # Declares category-dtype columns as `cat_features`; see `_safe_names`.
+        from ._safe_names import CatBoostClassifier, CatBoostRegressor
 
         kw = _resolve_params(
             {"random_state": seed, "n_estimators": 200, "verbose": False,

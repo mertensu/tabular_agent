@@ -106,6 +106,13 @@ def _linear_pipeline_contributions(model, X: pd.DataFrame) -> tuple[np.ndarray, 
     coef = np.asarray(estimator.coef_, dtype=float).reshape(-1)
     intercept = float(np.ravel(estimator.intercept_)[0])
     contribs = z * coef  # (n, f)
+    # A declared categorical became one indicator per level; its contribution is
+    # theirs added up, so the caller still gets one column per input column.
+    groups = getattr(model.steps[0][1], "groups_", None)
+    if groups is not None and len(groups) == contribs.shape[1] != X.shape[1]:
+        summed = np.zeros((len(contribs), X.shape[1]))
+        np.add.at(summed.T, groups, contribs.T)
+        contribs = summed
     return contribs, intercept
 
 
@@ -157,13 +164,18 @@ def _tree_contributions(model, X: pd.DataFrame) -> tuple[np.ndarray, float]:
         booster = model.get_booster()
         from ._safe_names import safe_feature_names
 
-        dmatrix = xgb.DMatrix(X, feature_names=safe_feature_names(X.columns))
+        dmatrix = xgb.DMatrix(X.set_axis(safe_feature_names(X.columns), axis=1),
+                              enable_categorical=True)
         raw = np.asarray(booster.predict(dmatrix, pred_contribs=True), dtype=float)
     elif module == "catboost":
         from catboost import Pool
 
+        from ._safe_names import catboost_frame
+
+        frame, cats = catboost_frame(X)
         raw = np.asarray(
-            model.get_feature_importance(Pool(X), type="ShapValues"), dtype=float
+            model.get_feature_importance(Pool(frame, cat_features=cats or None),
+                                         type="ShapValues"), dtype=float
         )
     else:
         raise NotImplementedError(

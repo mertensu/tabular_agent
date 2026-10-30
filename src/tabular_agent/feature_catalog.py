@@ -39,6 +39,14 @@ def _encoder_description(stored: dict) -> tuple[list[str], str, str]:
             "Declared category order converted to numeric ranks.",
             json.dumps(recipe, sort_keys=True),
         )
+    if kind == "categorical":
+        sources = list(stored["columns"])
+        return (
+            sources,
+            "The column as a category with its training-set levels; unseen values "
+            "become missing.",
+            f"categorical {sources}",
+        )
     if kind == "group_stats":
         sources = [*stored["by"], stored["value"]]
         recipe = {key: stored[key] for key in ("by", "value", "stat")}

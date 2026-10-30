@@ -295,6 +295,66 @@ class OrdinalEncoder:
         return enc
 
 
+class CategoricalEncoder:
+    """A column handed to the models as a category, its level set fitted state (0074).
+
+    The other encodings turn a category into a number. This one keeps it a
+    category: ``<col>_cat`` is a pandas categorical whose levels are the values
+    seen at fit, in sorted order, and the model layer declares every such column
+    to the model as categorical (`models._make_model`). LightGBM, XGBoost and
+    CatBoost then split on groups of levels rather than on an arbitrary order.
+
+    The levels are learned and stored, not read off the rows at predict time: a
+    category's codes are positions in its level list, so a batch holding a few of
+    the levels would otherwise code the same value differently from the table the
+    model was fitted on. A value missing at fit or first seen at predict is
+    missing in the output; the models read missing as its own branch.
+
+    Any column can be declared, a numeric one included: an integer code whose
+    order means nothing is the case it exists for. Its levels are the values as
+    text, so a code reads the same whether it arrives as ``7`` or ``"7"``.
+    """
+
+    kind = "categorical"
+
+    def __init__(self, columns: list[str]):
+        self.columns = [str(c) for c in columns]
+        self.levels_: dict[str, list[str]] = {}
+
+    @property
+    def output_columns(self) -> list[str]:
+        return [c + "_cat" for c in self.columns]
+
+    @staticmethod
+    def _text(values: pd.Series) -> pd.Series:
+        return values.astype(str).where(values.notna())
+
+    def fit(self, df: pd.DataFrame, y=None) -> "CategoricalEncoder":
+        for col in self.columns:
+            levels = sorted(self._text(df[col]).dropna().unique().tolist())
+            if not levels:
+                raise ValueError(f"column {col!r} has no values to take levels from")
+            self.levels_[col] = levels
+        return self
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        out = df.copy()
+        for col in self.columns:
+            text = self._text(df[col])
+            text = text.where(text.isin(self.levels_[col]))  # unseen -> missing
+            out[col + "_cat"] = pd.Categorical(text, categories=self.levels_[col])
+        return out
+
+    def to_dict(self) -> dict:
+        return {"kind": self.kind, "columns": self.columns, "levels": self.levels_}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "CategoricalEncoder":
+        enc = cls(d["columns"])
+        enc.levels_ = {c: list(v) for c, v in d["levels"].items()}
+        return enc
+
+
 #: Separator joining a multi-column group key into the single string a JSON
 #: object can use as a name. A control character rather than ``"_"`` or ``"|"``
 #: because it cannot appear in a category label, so ``("a_b", "c")`` and
@@ -2020,6 +2080,7 @@ ENCODER_CLASSES: dict[str, type] = {
     "target": TargetEncoder,
     "frequency": FrequencyEncoder,
     "ordinal": OrdinalEncoder,
+    "categorical": CategoricalEncoder,
     "group_stats": GroupStatsEncoder,
     "history": HistoryEncoder,
     "stream_aggregate": StreamAggregateEncoder,
@@ -2051,6 +2112,8 @@ def fit_encoding(df, columns, method="target", *, y=None, folds=None,
     requires neither. ``method="ordinal"`` requires ``categories`` -- the level
     order per column -- and no target either; use it when the column's
     categories are genuinely ordered, frequency/target when they are nominal.
+    ``method="categorical"`` keeps the column a category for the models to split
+    on directly (:class:`CategoricalEncoder`).
 
     ``stats`` applies to ``method="target"`` only and defaults to the mean, i.e.
     target encoding as it has always been. Ask for more of
@@ -2079,8 +2142,13 @@ def fit_encoding(df, columns, method="target", *, y=None, folds=None,
         enc = OrdinalEncoder({c: categories[c] for c in columns}, unknown=unknown).fit(df)
         new = [c + "_ord" for c in columns]
         return enc.transform(df)[new], enc
+    if method == "categorical":
+        enc = CategoricalEncoder(columns).fit(df)
+        new = [c + "_cat" for c in columns]
+        return enc.transform(df)[new], enc
     raise ValueError(
-        f"unknown encoding method: {method!r} (use 'target', 'frequency' or 'ordinal')"
+        f"unknown encoding method: {method!r} "
+        "(use 'target', 'frequency', 'ordinal' or 'categorical')"
     )
 
 

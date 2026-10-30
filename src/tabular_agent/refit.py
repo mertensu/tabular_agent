@@ -104,6 +104,8 @@ def _refit_encoder(e: dict, df: pd.DataFrame, spec: ResolvedSpec, order: str | N
     if kind == "ordinal":
         return fit_encoding(df, e["columns"], "ordinal", categories=e["categories"],
                             unknown=e["unknown"])
+    if kind == "categorical":
+        return fit_encoding(df, e["columns"], "categorical")
     if kind == "group_stats":
         return fit_group_stats(df, e["by"], e["value"], e["stat"], folds=folds())
     if kind == "history":

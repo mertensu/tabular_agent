@@ -315,15 +315,16 @@ def _refuse_if_unservable(
 
 
 def _feature_frame(df: pd.DataFrame, target: str) -> tuple[pd.DataFrame, list[str]]:
-    """Numeric feature matrix + the names of the columns that had to be dropped.
+    """Model feature matrix + the names of the columns that had to be dropped.
 
-    v1 models are GBDTs fed a numeric matrix; raw strings would crash the fit.
-    Dropping them (loudly) is the honest behaviour: the way to *use* a
-    categorical column is `fit_encoding`, which learns its parameters per fold
-    and persists them — not an ad-hoc cast that would silently skew train/serve.
+    Numbers, and categoricals built by `fit_encoding(method="categorical")`,
+    whose levels are fitted state the models are told about. Raw strings would
+    crash the fit, so they are dropped (loudly): the way to *use* one is
+    `fit_encoding`, which learns its parameters and persists them — not an ad-hoc
+    cast that would silently skew train/serve.
     """
     features = df.drop(columns=[target])
-    numeric = features.select_dtypes(include="number")
+    numeric = features.select_dtypes(include=["number", "category"])
     dropped = [c for c in features.columns if c not in numeric.columns]
     return numeric, dropped
 
@@ -914,9 +915,10 @@ def fit_encoding(
     ``method="target"`` is the leaky one, and is why this is a tool rather than
     a free-code transform: the table gets **out-of-fold** values (honest to
     train on) while the sidecar stores the **all-rows** encoder (correct at
-    predict). ``method="frequency"`` and ``method="ordinal"`` never look at the
-    target; ``ordinal`` needs ``categories`` — the level order per column, which
-    is never inferred.
+    predict). ``method="frequency"``, ``"ordinal"`` and ``"categorical"`` never look
+    at the target; ``ordinal`` needs ``categories`` — the level order per column,
+    which is never inferred. ``categorical`` hands the column to the models as a
+    category (`encoders.CategoricalEncoder`).
 
     ``stats`` widens ``method="target"`` past the mean. The mean is a lossy
     summary of a group — two categories with the same average can have very

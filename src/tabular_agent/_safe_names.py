@@ -1,4 +1,4 @@
-"""Gradient-boosted models that accept any column name.
+"""Gradient-boosted models that accept any column name, and declared categoricals.
 
 LightGBM refuses a feature name containing ``" , : [ ] { }`` and XGBoost one
 containing ``[ ] <``. Column names come from the data and from agent code: a
@@ -7,7 +7,11 @@ table the model refuses is a table the run cannot score at all. So the model
 renames its input on the way in, by a fixed function of the column list, and
 everything outside the model keeps the names it had.
 
-Imported lazily by ``models._make_model``, so the two libraries load only when a
+The CatBoost classes below declare category-dtype columns as ``cat_features`` on
+every fit and predict; LightGBM reads that dtype natively and XGBoost with
+``enable_categorical``, so one rule holds for every family (0074).
+
+Imported lazily by ``models._make_model``, so the libraries load only when a
 model of theirs is built. The classes live at module level because fitted models
 are pickled into experiments and bundles.
 """
@@ -73,4 +77,60 @@ class XGBRegressor(_SafeNames, xgb.XGBRegressor):
 
 
 class XGBClassifier(_SafeNames, xgb.XGBClassifier):
+    pass
+
+
+#: What a missing or unseen level becomes for CatBoost, which takes no missing
+#: value in a categorical column. LightGBM and XGBoost read missing natively.
+MISSING_LEVEL = "__missing__"
+
+
+def category_columns(X) -> list[str]:
+    """The columns declared categorical, by dtype (`encoders.CategoricalEncoder`)."""
+    if not isinstance(X, pd.DataFrame):
+        return []
+    return [c for c in X.columns if isinstance(X[c].dtype, pd.CategoricalDtype)]
+
+
+def catboost_frame(X):
+    """``X`` as CatBoost takes it, and the categorical columns to declare."""
+    cats = category_columns(X)
+    if not cats:
+        return X, []
+    X = X.copy()
+    for c in cats:
+        X[c] = X[c].astype(object).where(X[c].notna(), MISSING_LEVEL).astype(str)
+    return X, cats
+
+
+class _DeclaresCategories:
+    """CatBoost told which columns are categorical, from their dtype, at every call."""
+
+    def fit(self, X, y, **kwargs):
+        X, cats = catboost_frame(X)
+        if cats:
+            kwargs["cat_features"] = cats
+        return super().fit(X, y, **kwargs)
+
+    def predict(self, X, *args, **kwargs):
+        return super().predict(catboost_frame(X)[0], *args, **kwargs)
+
+    def predict_proba(self, X, *args, **kwargs):
+        return super().predict_proba(catboost_frame(X)[0], *args, **kwargs)
+
+
+def _catboost_classes():
+    from catboost import CatBoostClassifier as _C, CatBoostRegressor as _R
+
+    return _R, _C
+
+
+_CBR, _CBC = _catboost_classes()
+
+
+class CatBoostRegressor(_DeclaresCategories, _CBR):
+    pass
+
+
+class CatBoostClassifier(_DeclaresCategories, _CBC):
     pass

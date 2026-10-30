@@ -239,7 +239,7 @@ def _build_minimal_agent(model):
         table: str | None = None, categories: dict[str, list] | None = None,
         smoothing: float = 10.0, stats: list[str] | None = None,
     ) -> dict:
-        """Fit a replayable frequency, ordinal, or cross-fitted target encoding."""
+        """Fit a replayable frequency, ordinal, categorical, or cross-fitted target encoding."""
         return _retryable(lambda: tools.fit_encoding(
             ctx.deps.session, columns=columns, method=method, table=table,
             categories=categories, smoothing=smoothing, stats=stats,
@@ -376,9 +376,11 @@ def build_agent(model=DEFAULT_MODEL, *, profile: str = "full", workflow: str = "
         Args:
             columns: The categorical columns to encode.
             method: "frequency" (how common each category is), "ordinal" (ordered
-                categories -> their rank; requires `categories`), or "target"
-                (out-of-fold target mean; strongest, but only worth it for
-                columns with enough rows per category).
+                categories -> their rank; requires `categories`), "categorical"
+                (the column as a category the models split on directly, by
+                groups of levels), or "target" (out-of-fold target mean;
+                strongest, but only worth it for columns with enough rows per
+                category).
             table: Path to the source table. Omit to use the run's work table.
             categories: For method="ordinal" only: {column: [level, ...]} in
                 increasing order. State the real order (e.g. small, medium,
