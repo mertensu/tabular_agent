@@ -1,0 +1,17 @@
+{
+  "dataset": "restaurant",
+  "tag": "r11",
+  "model": "gpt-6.1-terra@eu",
+  "git_commit": "854f11ef532fc94948d591ba467b54dc49c6d525",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/restaurant/runs/20261030T081915Z-d18fcef9",
+  "elapsed_min": 17.62,
+  "identifier_columns": [],
+  "n_serving_columns": 16,
+  "future_known": [
+    "holiday_flg"
+  ],
+  "streams": [
+    "air_reserve",
+    "hpg_reserve"
+  ]
+}

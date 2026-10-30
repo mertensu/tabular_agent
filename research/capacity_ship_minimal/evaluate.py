@@ -65,7 +65,9 @@ def _eval_kwargs(model, Xv, yv):
 
     if isinstance(model, (lgb.LGBMRegressor, lgb.LGBMClassifier)):
         return {"eval_set": [(Xv, yv)], "callbacks": [lgb.early_stopping(PATIENCE, verbose=False)]}
-    return {"eval_set": (Xv, yv), "early_stopping_rounds": PATIENCE}
+    from tabular_agent._safe_names import catboost_frame
+
+    return {"eval_set": (catboost_frame(Xv)[0], yv), "early_stopping_rounds": PATIENCE}
 
 
 def _lgbm(binary):
@@ -77,7 +79,8 @@ def _lgbm(binary):
 
 
 def _catboost(binary):
-    from catboost import CatBoostClassifier, CatBoostRegressor
+    # The product's classes: they declare category-dtype columns as cat_features.
+    from tabular_agent._safe_names import CatBoostClassifier, CatBoostRegressor
 
     cls = CatBoostClassifier if binary else CatBoostRegressor
     return lambda n: cls(iterations=n, learning_rate=LEARNING_RATE, random_seed=SEED,

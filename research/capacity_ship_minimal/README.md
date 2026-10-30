@@ -1095,3 +1095,23 @@ calls the product's own choice (`tools._best_table_path`); no LLM calls.
 - **Cost.** 30.5 minutes for 32 Rossmann tables, as long as the search budget.
 - **Ceiling.** 7 of the 32 tables stopped at or within a few rounds of 5000 (t2–t6,
   t15, t19), so their scores are likely pessimistic; t19, second, stopped at 4996.
+
+### House r3 and Restaurant r11 (2026-10-30): first runs with `fit_encoding(method="categorical")`
+
+Both on `c81144a`+, the agent told nothing beyond the tool's own description.
+
+- **House r3** (minimal profile, so no fitted ruler at finalize): the agent never
+  tried `categorical`; it frequency- and target-encoded, and noted `MSSubClass` "is an
+  int but categorical" before frequency-encoding it. Shipped t13; on the audit rows it
+  read 0.1458 under the probe against the work table's 0.1360 (gain −0.0097
+  [−0.039, +0.012]); r1 0.1348, r2 0.1411.
+- **Restaurant r11** (full profile, 36 tables, 17.6 min): three categorical steps.
+  The six text columns as categories (t17) +0.0015 under the probe, not sign-stable;
+  every later table descends from it. Store/genre/area × weekday crosses (t20)
+  −0.0063, worse in all five blocks. Fitted ruler shipped t32 over the probe's t29
+  (0.5368 vs 0.5372 on validation). Test days: shipped **0.5137** against r10's
+  0.5248; lgbm_es 0.5150 (r10 0.5284), catboost_es 0.5250 (r10 0.5243).
+- CatBoost did not gain where LightGBM did, and still carries 0.31 of r11's blend
+  weight (two members). Not yet checked: the blend with and without them.
+- `evaluate.py` now fits CatBoost through the product's classes, which declare
+  category columns; it crashed on r11 before.

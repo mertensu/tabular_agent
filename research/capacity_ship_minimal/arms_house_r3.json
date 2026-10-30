@@ -1,0 +1,114 @@
+{
+  "dataset": "house",
+  "metric": "rmsle",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/house/runs/20261030T081227Z-66fa028f",
+  "selected_table": "refit/t13.parquet",
+  "n_selected_features": 129,
+  "n_work_features": 36,
+  "n_work_rows": 1165,
+  "fitted_on": {
+    "fitted_on": "work+validation",
+    "n_rows": 1165,
+    "training_table": "refit/t13.parquet",
+    "refit_of": [
+      "e1"
+    ]
+  },
+  "n_audit_rows": 292,
+  "run_evaluation_score": 0.12289,
+  "audit_scores": {
+    "probe": 0.145769,
+    "shipped_work_fit": 0.146053,
+    "lgbm_es": 0.143847,
+    "catboost_es": 0.131174,
+    "work_probe": 0.136031,
+    "work_lgbm_es": 0.137758,
+    "work_catboost_es": 0.135383
+  },
+  "vs_probe": {
+    "shipped_work_fit": {
+      "gain": -0.000284,
+      "ci95": [
+        -0.007732,
+        0.006947
+      ]
+    },
+    "lgbm_es": {
+      "gain": 0.001921,
+      "ci95": [
+        -0.005029,
+        0.008633
+      ]
+    },
+    "catboost_es": {
+      "gain": 0.014595,
+      "ci95": [
+        0.005244,
+        0.023053
+      ]
+    },
+    "work_probe": {
+      "gain": 0.009738,
+      "ci95": [
+        -0.01215,
+        0.039387
+      ]
+    },
+    "work_lgbm_es": {
+      "gain": 0.00801,
+      "ci95": [
+        -0.010053,
+        0.029936
+      ]
+    },
+    "work_catboost_es": {
+      "gain": 0.010385,
+      "ci95": [
+        -0.006802,
+        0.030916
+      ]
+    }
+  },
+  "feature_gain": {
+    "at_probe": {
+      "gain": -0.009738,
+      "ci95": [
+        -0.039387,
+        0.01215
+      ]
+    },
+    "at_lgbm_es": {
+      "gain": -0.006089,
+      "ci95": [
+        -0.022602,
+        0.007963
+      ]
+    },
+    "at_catboost_es": {
+      "gain": 0.00421,
+      "ci95": [
+        -0.009652,
+        0.015809
+      ]
+    }
+  },
+  "fits": {
+    "probe_refit_max_abs_diff": 0.0,
+    "lgbm_es": {
+      "rounds": 234,
+      "seconds": 3.1
+    },
+    "catboost_es": {
+      "rounds": 1098,
+      "seconds": 3.0
+    },
+    "work_lgbm_es": {
+      "rounds": 265,
+      "seconds": 2.9
+    },
+    "work_catboost_es": {
+      "rounds": 853,
+      "seconds": 1.0
+    }
+  }
+}

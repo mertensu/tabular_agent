@@ -1,0 +1,14 @@
+{
+  "dataset": "house",
+  "tag": "r3",
+  "model": "fireworks/deepseek-v4.1-flash-1017",
+  "git_commit": "854f11ef532fc94948d591ba467b54dc49c6d525",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/capacity_ship_minimal/house/runs/20261030T081227Z-66fa028f",
+  "elapsed_min": 3.45,
+  "identifier_columns": [
+    "Id"
+  ],
+  "n_serving_columns": 80,
+  "future_known": [],
+  "streams": []
+}
