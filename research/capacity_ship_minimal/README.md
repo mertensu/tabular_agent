@@ -1075,3 +1075,23 @@ the best table on the test days.
 both, clear of zero: +0.0049 (Restaurant, refitted) and +0.0011 (Rossmann,
 work-only). Picking by catboost_es did not, in either. Each is one choice per run,
 so two runs are two draws, not a rate.
+
+### What finalize's fitted ruler ships on the finished runs (`fitted_choice_replay.py`)
+
+Since `6499326` finalize picks the shipped table with an early-stopped LightGBM
+(lr 0.03, up to 5000 rounds) under 0094's rule. The replay copies a finished run and
+calls the product's own choice (`tools._best_table_path`); no LLM calls.
+
+| | Restaurant r10 | Rossmann r14 |
+|---|---|---|
+| shipped (probe's choice) | t8 | t20 |
+| fitted ruler's choice | t14 | t24 |
+| eligible tables | — | t3, t5, t14, t19, t24, t29 (t20 not among them) |
+| minutes at finalize | 1.6 | 30.5 |
+
+- On Rossmann t24 is the best of all 32 tables under the ruler (0.1113 vs 0.1168 for
+  t20 on validation); in the work-only re-rank above it read 0.1226 on the test days
+  against t20's 0.1272.
+- **Cost.** 30.5 minutes for 32 Rossmann tables, as long as the search budget.
+- **Ceiling.** 7 of the 32 tables stopped at or within a few rounds of 5000 (t2–t6,
+  t15, t19), so their scores are likely pessimistic; t19, second, stopped at 4996.
