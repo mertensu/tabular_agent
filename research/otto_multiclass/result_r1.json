@@ -1,0 +1,18 @@
+{
+  "tag": "r1",
+  "model": "gpt-6.1-terra@eu",
+  "reasoning_effort": "medium",
+  "git_commit": "5aef4f8ef9a882af8f4cbd61b11bb1939386c054",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/otto_multiclass/r1/runs/20261103T123430Z-e9cb5869",
+  "elapsed_min": 1.88,
+  "identifier_columns": [
+    "id"
+  ],
+  "n_train": 49502,
+  "n_test": 12376,
+  "prediction_shape": [
+    12376,
+    9
+  ],
+  "test_logloss": 0.472778
+}

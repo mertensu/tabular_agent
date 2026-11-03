@@ -1,0 +1,14 @@
+{
+  "tag": "r1",
+  "model": "gpt-6.1-terra@eu",
+  "reasoning_effort": "medium",
+  "git_commit": "5aef4f8ef9a882af8f4cbd61b11bb1939386c054",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/ieee_cross_row/r1/runs/20261103T125655Z-991a4ca2",
+  "elapsed_min": 81.71,
+  "identifier_columns": [
+    "TransactionID"
+  ],
+  "n_train": 420061,
+  "n_test": 85431,
+  "test_auc": 0.918035
+}

@@ -1,0 +1,11 @@
+{
+  "n_train": 49502,
+  "n_test": 12376,
+  "rounds": {
+    "lgbm_es": 751
+  },
+  "test_logloss": {
+    "probe": 0.470459,
+    "lgbm_es": 0.45517
+  }
+}

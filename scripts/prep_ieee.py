@@ -56,12 +56,11 @@ See 0074 for the capability that does not exist yet.
 Not done here, and deliberately left open:
 
 * **`TransactionID` is kept.** It exists in the test file, so it is genuinely
-  available at predict time and 0030 has no objection to it. What makes it
-  interesting is stated in `COLUMN_NOTES` as a fact and not as advice: it
-  increases with `TransactionDT` (r = 0.998) and every test value is larger than
-  every training value. This is the `Id` trap from house-prices run 1 (0019) and
-  the `Customers` trap from Rossmann, in its third shape — and, as there, whether
-  to use a column is the agent's decision (0029).
+  available at predict time and 0030 has no objection to it. It increases with
+  `TransactionDT` (r = 0.998) and every test value is larger than every training
+  value: the `Id` trap from house-prices run 1 (0019) in a third shape. Its note
+  says only what the competition says; the identifier proposal and the owner deal
+  with it, and the analysis is not handed to the agent.
 * **The 339 `V` columns are kept in full.** They are Vesta's engineered features
   and heavily redundant; deciding that here would be feature selection performed
   by the prep script.
@@ -108,12 +107,7 @@ DECLARED_CATEGORICAL = (
 #: repetition. Only the columns whose meaning is not recoverable from the name and
 #: the profile are described.
 _NOTES: dict[str, str] = {
-    "TransactionID": (
-        "the identifier of the transaction. Present in the test file too, so it "
-        "is available at prediction time. It increases with TransactionDT "
-        "(r = 0.998) and every value in the test block is larger than every value "
-        "in this table."
-    ),
+    "TransactionID": "the identifier of the transaction.",
     "isFraud": "the target: whether the transaction was reported fraudulent.",
     "TransactionDT": (
         "a timedelta from a given reference datetime, NOT an actual timestamp. "

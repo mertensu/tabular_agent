@@ -1,0 +1,11 @@
+{
+  "n_train": 420061,
+  "n_test": 85431,
+  "rounds": {
+    "lgbm_es": 1171
+  },
+  "minutes": 1.2,
+  "test_auc": {
+    "lgbm_es": 0.902887
+  }
+}
