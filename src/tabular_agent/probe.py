@@ -296,8 +296,12 @@ def fit_fitted_ruler(
 
     started = time.monotonic()
     model = make(FITTED_RULER_MAX_ROUNDS)
-    model.fit(X.iloc[inner], y_fit.iloc[inner],
-              eval_X=(X.iloc[stop_rows],), eval_y=(y_fit.iloc[stop_rows],),
+    # The stopping fit only finds the round count, so classes go in as integer codes:
+    # LightGBM encodes string labels for the training rows but not for `eval_y`.
+    y_stop = (pd.Series(np.searchsorted(classes, y_fit.to_numpy()))
+              if classes is not None else y_fit)
+    model.fit(X.iloc[inner], y_stop.iloc[inner],
+              eval_X=(X.iloc[stop_rows],), eval_y=(y_stop.iloc[stop_rows],),
               callbacks=[lgb.early_stopping(FITTED_RULER_PATIENCE, verbose=False)])
     rounds = max(1, int(model.best_iteration_ or FITTED_RULER_MAX_ROUNDS))
     model = make(rounds)

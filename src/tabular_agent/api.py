@@ -50,6 +50,20 @@ class JoinProposal:
         return self
 
 
+def _typed_split_column(values: pd.Series) -> pd.Series:
+    """The ordering column as the run reads it: date strings become datetimes.
+
+    A numeric column keeps its own units. ``pd.to_datetime`` would read numbers
+    as nanoseconds since 1970 without complaint, so an event log ordered in
+    seconds would shrink to a fraction of a second and every horizon declared in
+    those seconds would stop fitting the data.
+    """
+    if pd.api.types.is_numeric_dtype(values):
+        return values
+    parsed = pd.to_datetime(values, errors="coerce")
+    return parsed if parsed.notna().all() else values
+
+
 @dataclass
 class DataPlan:
     """Editable inspection result. Proposed facts are not modeling decisions."""
@@ -408,9 +422,7 @@ class DataPlan:
         # but the feature agent and every fitted encoder must never see them.
         frame = frame.drop(columns=list(self.identifier_columns or []), errors="raise")
         if isinstance(self.split_on, str):
-            parsed = pd.to_datetime(frame[self.split_on], errors="coerce")
-            if parsed.notna().all():
-                frame[self.split_on] = parsed
+            frame[self.split_on] = _typed_split_column(frame[self.split_on])
         path = save_parquet(frame, str(prepared / "train.parquet"))
         manifest = {
             "training_table": self.training_table,
@@ -490,9 +502,7 @@ class Bundle:
                 result = result.drop(columns=[join["right_on"]])
         split_on = self._plan.get("split_on")
         if isinstance(split_on, str) and split_on in result:
-            parsed = pd.to_datetime(result[split_on], errors="coerce")
-            if parsed.notna().all():
-                result[split_on] = parsed
+            result[split_on] = _typed_split_column(result[split_on])
         hidden = [
             *list(self._plan.get("identifier_columns") or []),
             *([self._plan["target"]] if self._plan.get("target") else []),

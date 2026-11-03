@@ -209,6 +209,30 @@ def test_minimal_ships_the_early_stopped_fit_not_the_probe(tmp_path):
     assert shipped["learning_rate"] == params["learning_rate"]
 
 
+def test_minimal_ships_an_early_stopped_refit_for_string_class_labels(tmp_path):
+    rng = np.random.default_rng(0)
+    n = 600
+    x = rng.normal(size=(n, 2))
+    labels = np.array(["Class_a", "Class_b", "Class_c"])
+    df = pd.DataFrame({"x1": x[:, 0], "x2": x[:, 1],
+                       "y": labels[(x[:, 0] > 0).astype(int) + (x[:, 1] > 0.5)]})
+    path = tmp_path / "data.csv"
+    df.to_csv(path, index=False)
+    session = RunSession(str(tmp_path / "run"), str(path),
+                         TaskSpec(target="y", metric="logloss", n_splits=3),
+                         profile="minimal")
+    inspect_data(session)
+    out = finalize_run(session)
+
+    bundle = load_bundle(os.path.join(session.run_dir, out["bundle_dir"]))
+    assert bundle["fitted_on"]["fitted_on"] == "work+validation"
+    model = bundle["models"][0]
+    assert model.get_params()["learning_rate"] == 0.03
+    assert list(model.classes_) == list(labels)
+    preds = predict_bundle(bundle, df.drop(columns=["y"]).head(5))
+    assert np.asarray(preds).shape == (5, 3)
+
+
 def test_minimal_selects_the_best_scored_table_without_an_interval(tmp_path):
     # The minimal profile records no paired interval, so the full profile's
     # demonstrated-gain gate would reject every table and ship the work table.

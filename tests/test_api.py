@@ -192,6 +192,22 @@ def test_accepted_static_join_materializes_without_changing_rows(tmp_path):
     assert manifest["joins"][0]["decision"] == "accepted"
 
 
+def test_a_numeric_ordering_column_keeps_its_own_units(tmp_path):
+    seconds = [86_400, 172_800, 259_200, 345_600]
+    pd.DataFrame({"t": seconds, "x": [1.0, 2.0, 3.0, 4.0], "y": [0, 1, 0, 1]}).to_csv(
+        tmp_path / "train.csv", index=False)
+    plan = ta.Agent(model=object()).inspect(tmp_path)
+    plan.target = "y"
+    plan.split_on = "t"
+    plan.serving_columns = ["t", "x"]
+    plan.identifier_columns = []
+
+    path, _ = plan.materialize(tmp_path / "run")
+    prepared = pd.read_parquet(path)
+
+    assert prepared["t"].tolist() == seconds
+
+
 def test_bundle_predict_replays_static_join(monkeypatch, tmp_path):
     bundle_dir = tmp_path / "bundle"
     static = bundle_dir / "static"

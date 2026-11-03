@@ -751,7 +751,12 @@ def _fit_frame(X, y, task_type, target_transform, reference_target, objective):
             "reference_target applies to regression only; classification targets "
             "are class labels, not quantities relative to a row-wise reference"
         )
-    y_reference = pd.Series(apply_reference_target(y, X, reference_target))
+    # Class labels pass through untouched: they are not quantities, and a cast to
+    # float would refuse any class named by a string.
+    y_reference = (
+        pd.Series(apply_reference_target(y, X, reference_target))
+        if task_type == "regression" else y
+    )
     check_target_domain(target_transform, y_reference, task_type)
     y_fit = (
         pd.Series(apply_target(target_transform, y_reference))
