@@ -85,6 +85,18 @@ def test_identifier_role_is_proposed_confirmed_and_removed_before_modeling(tmp_p
     assert manifest["identifier_columns"] == ["PassengerId"]
 
 
+def test_a_leading_id_is_an_id_shaped_name_but_a_word_starting_with_id_is_not():
+    from tabular_agent.inspect import propose_identifier_columns
+
+    unique = [1.0, 2.0, 3.0, 4.0]
+    frame = pd.DataFrame({
+        "IDpol": unique, "IdCustomer": unique, "Idle": unique, "Identity": unique,
+        "IDENTITY": unique, "IDrepeat": [1, 1, 2, 2],
+    })
+
+    assert propose_identifier_columns(frame) == ["IDpol", "IdCustomer"]
+
+
 def test_inspect_picks_up_a_data_description_into_notes(tmp_path):
     _tables(tmp_path)
     (tmp_path / "data_description.txt").write_text(

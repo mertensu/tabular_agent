@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import re
 
 import numpy as np
 import pandas as pd
@@ -31,6 +32,10 @@ def propose_identifier_columns(
     unique), and an ``id``-shaped name alone is not enough (``store_id`` may be a
     repeated, useful entity). Requiring both keeps this a proposal narrow enough
     to put in front of the owner without silently deciding the role.
+
+    A leading ``ID`` counts as an id-shaped name too (``IDpol``, ``IdCustomer``),
+    but not a word that merely starts with the letters (``Idle``, ``IDENTITY``):
+    ``ID`` must be followed by a lowercase letter, ``Id`` by an uppercase one.
     """
     available = (
         set(serving_columns) if serving_columns is not None else set(frame.columns)
@@ -45,6 +50,7 @@ def propose_identifier_columns(
             or name.startswith("id_")
             or raw_name.endswith("Id")
             or raw_name.endswith("ID")
+            or re.match(r"ID[a-z]|Id[A-Z]", raw_name) is not None
         )
         series = frame[column]
         if column in available and named and series.notna().all() and series.is_unique:
