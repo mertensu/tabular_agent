@@ -199,7 +199,7 @@ what ships:
 | | `ta.Agent()` (default `profile="minimal"`) | `ta.ForecastingAgent()` (always `profile="full"`) |
 |---|---|---|
 | Agent tools | 6: inspect, encode, group statistics, row filter, row-local transform, finalize | 13: the same, plus `fit_history`, `fit_stream_aggregate`, `fit_future_covariate_window`, `fit_reference_target`, and read-only tools for attribution, residuals and the run journal |
-| What ships | one fixed LightGBM (the model that ranked the tables), refitted on the selected table | a blend of lgbm, xgb, catboost and elasticnet fits, weighted by their cross-validation stability |
+| What ships | one LightGBM on the selected table, its number of trees stopped early on training rows ([0098](docs/decisions/0098-the-minimal-profile-ships-an-early-stopped-fit.md)); the fixed 200-tree model that ranked the tables does not ship | a blend of lgbm, xgb, catboost and elasticnet fits, weighted by their cross-validation stability |
 | Fitted on | training + validation rows: after the table is chosen, its features and the model are refitted on every row except the test rows | the same: features and every blend member refitted on training + validation |
 | Splits | work / evaluation / sealed audit slice (20% by default, `holdout_fraction=None` turns it off) | work / validation, plus an optional sealed test slice (`holdout_fraction=`) |
 | Report | evaluation score, audit score (scored once), trivial baseline, selected table | the above, plus the search's pick vs. what shipped and each model's optimism on the sealed slice |
@@ -247,6 +247,18 @@ search score and reads optimistic. The audit score comes from rows set aside bef
 the run and scored once, after the table was chosen; it is the number to expect on
 new rows. With the full profile the report also separates the search winner from
 what actually ships, and shows each model's optimism.
+
+**The model that ranks is not the model that ships**
+([0098](docs/decisions/0098-the-minimal-profile-ships-an-early-stopped-fit.md)).
+During the search every table is scored by the same fixed LightGBM (200 trees, the
+library's default learning rate), so two tables differ only in their features. That
+budget is wrong for most tables: too many trees on a small one, too few on a large
+one. So under `ta.Agent()`, finalize fits the selected table again at learning rate
+0.03 and stops adding trees once 15% of the training rows stop improving. The
+validation rows are not used for this, and that early-stopped model is what ships
+and what the evaluation score describes. On UCI credit default, replayed on nine
+runs, this added +0.012 to +0.022 AUC over the fixed model
+(`research/credit_default_tabfm/`).
 
 **What ships is refitted before it ships**
 ([0092](docs/decisions/0092-what-ships-is-refitted-on-every-row-the-search-could-use.md)).
