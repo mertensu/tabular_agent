@@ -3553,7 +3553,7 @@ def _finalize_minimal_run(session: RunSession) -> dict:
 
 
 def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
-    """One selected table, one fixed model, one evaluation score."""
+    """One selected table, one early-stopped model, one evaluation score."""
     if journal.stop_state(session.run_dir).get("finalized"):
         raise ValueError("this run has already been finalized")
 
@@ -3577,9 +3577,23 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         raise ValueError(refusal["reason"])
     y = df[spec.target]
 
-    fit = fit_probe(
-        X, y, spec.task_type, spec.metric, spec.target_transform, spec.objective,
-    )
+    # The probe chose the table; what ships on it is the probe's family fitted to
+    # the table's own capacity, its rounds stopped early on a share of the training
+    # rows (never the validation rows, which still score it). The probe's fixed 200
+    # rounds overshoot on small tables and undershoot on large ones. If the
+    # early-stopped fit fails, the probe ships.
+    order = df[session.split_on] if session.split_on and session.split_on in df.columns else None
+    try:
+        fit = fit_fitted_ruler(
+            X, y, spec.task_type, spec.metric, spec.target_transform, spec.objective,
+            order=order,
+        )
+        ship_params = {**fit.spec["params"], "n_estimators": fit.spec["rounds"]}
+    except Exception:  # noqa: BLE001 - a run must still finalize
+        fit = fit_probe(
+            X, y, spec.task_type, spec.metric, spec.target_transform, spec.objective,
+        )
+        ship_params = dict(PROBE_PARAMS)
     evaluation_score, _, unavailable, _ = _score_on_val(
         session, path, [fit.model], fit.feature_names, spec, y,
         target_transform=fit.target_transform,
@@ -3614,7 +3628,7 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
     meta = {
         "id": exp_id,
         "model_type": PROBE_MODEL_TYPE,
-        "params": dict(PROBE_PARAMS),
+        "params": dict(ship_params),
         "seed": PROBE_SEED,
         "target_transform": fit.target_transform,
         "task_type": spec.task_type,
@@ -3630,7 +3644,7 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
     model_row = {
         "id": exp_id,
         "model_type": PROBE_MODEL_TYPE,
-        "params": dict(PROBE_PARAMS),
+        "params": dict(ship_params),
         "target_transform": fit.target_transform,
         "features": list(fit.feature_names),
         "source_table": table_rel,
@@ -3701,7 +3715,8 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
         )
     report_lines += [
         f"- **Baseline score:** {baseline_score:.6g}",
-        f"- **Model:** {PROBE_MODEL_TYPE}",
+        f"- **Model:** {PROBE_MODEL_TYPE}, {ship_params['n_estimators']} rounds"
+        + (", stopped early" if ship_params != PROBE_PARAMS else ""),
         f"- **Selected table:** `{table_rel}`",
         f"- **Features:** {', '.join(fit.feature_names)}",
         f"- **Split:** {split.get('n_work')} work / {split.get('n_val')} evaluation"

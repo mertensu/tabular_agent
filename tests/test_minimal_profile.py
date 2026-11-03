@@ -187,6 +187,28 @@ def test_minimal_finalize_ships_one_model_without_cv_or_blend(tmp_path):
         assert removed_concept not in report
 
 
+def test_minimal_ships_the_early_stopped_fit_not_the_probe(tmp_path):
+    from tabular_agent.probe import FITTED_RULER_PARAMS, PROBE_PARAMS
+
+    session = _session(tmp_path)
+    inspect_data(session)
+    out = finalize_run(session)
+
+    j = journal.load(session.run_dir)
+    trained = [row for row in j["leaderboard"] if row["model_type"] != "baseline"]
+    params = trained[0]["params"]
+    assert params != PROBE_PARAMS
+    assert params["learning_rate"] == FITTED_RULER_PARAMS["learning_rate"]
+    assert 1 <= params["n_estimators"] < 5000
+
+    # The refit on training + validation rows keeps the stopped round count.
+    bundle = load_bundle(os.path.join(session.run_dir, out["bundle_dir"]))
+    assert bundle["fitted_on"]["fitted_on"] == "work+validation"
+    shipped = bundle["models"][0].get_params()
+    assert shipped["n_estimators"] == params["n_estimators"]
+    assert shipped["learning_rate"] == params["learning_rate"]
+
+
 def test_minimal_selects_the_best_scored_table_without_an_interval(tmp_path):
     # The minimal profile records no paired interval, so the full profile's
     # demonstrated-gain gate would reject every table and ship the work table.

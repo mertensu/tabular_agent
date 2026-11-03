@@ -114,7 +114,8 @@ PROBE_PARAMS: dict = {"n_estimators": 200}
 #: runs, or cross-run comparison measures the seed as much as the change.
 PROBE_SEED = 0
 
-#: The fitted ruler, used once per run at finalize to choose the table that ships.
+#: The fitted ruler, used once per run at finalize: the full profile chooses the
+#: table that ships with it, and the minimal profile ships it on the probe's choice.
 #: The probe's fixed 200 rounds suit some tables and not others, and it ranks the
 #: rest by how close each happens to come to that budget rather than by what a
 #: model fitted to the table could make of it. The same family stopped early on
