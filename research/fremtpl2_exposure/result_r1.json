@@ -1,0 +1,12 @@
+{
+  "tag": "r1",
+  "model": "gpt-6.1-terra@eu",
+  "reasoning_effort": "medium",
+  "git_commit": "f39609fd4a00eb81352c8ce4f5026fbfa6b535fc",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/fremtpl2_exposure/r1/runs/20261103T122111Z-80de2e0f",
+  "elapsed_min": 1.99,
+  "identifier_columns": [],
+  "n_train": 542410,
+  "n_test": 135603,
+  "test_poisson_deviance": 0.229123
+}

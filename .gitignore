@@ -30,6 +30,12 @@ seguro_driver_prediction/
 # `credit_default/`: UCI_Credit_Card.csv from the Kaggle dataset
 # uciml/default-of-credit-card-clients-dataset; notes in scripts/prep_credit.py.
 credit_default/
+# `fremtpl2/`: freMTPL2freq.parquet from OpenML 41214 (sklearn fetch_openml);
+# notes in scripts/prep_fremtpl2.py.
+fremtpl2/
+# `otto_group/`: otto-group-product-classification-challenge; notes in
+# scripts/prep_otto.py.
+otto_group/
 # `restaurant_visitor/`: recruit-restaurant-visitor-forecasting. Six CSVs plus the
 # public leaderboard; `hpg_reserve.csv` alone is 126MB. `train_joined.parquet` and
 # `test_joined.parquet` are built from them by `scripts/prep_restaurant.py` —

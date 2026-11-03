@@ -1,0 +1,37 @@
+{
+  "n_train": 542410,
+  "n_test": 135603,
+  "test_poisson_deviance": {
+    "null": 0.327874,
+    "glm_offset": 0.311613,
+    "lgbm_feature": 0.287851,
+    "lgbm_offset": 0.299937
+  },
+  "rounds": {
+    "lgbm_feature": 2067,
+    "lgbm_offset": 1832
+  },
+  "vs_lgbm_feature": {
+    "null": {
+      "gain": -0.039996,
+      "interval": [
+        -0.042912,
+        -0.037063
+      ]
+    },
+    "glm_offset": {
+      "gain": -0.023746,
+      "interval": [
+        -0.026024,
+        -0.021558
+      ]
+    },
+    "lgbm_offset": {
+      "gain": -0.012068,
+      "interval": [
+        -0.013659,
+        -0.010527
+      ]
+    }
+  }
+}
