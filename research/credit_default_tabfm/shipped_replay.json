@@ -1,0 +1,65 @@
+[
+  {
+    "n_train": 1000,
+    "seed": 0,
+    "rounds": 51,
+    "shipped_before": 0.729118,
+    "shipped_0098": 0.749082
+  },
+  {
+    "n_train": 1000,
+    "seed": 1,
+    "rounds": 51,
+    "shipped_before": 0.737095,
+    "shipped_0098": 0.746528
+  },
+  {
+    "n_train": 1000,
+    "seed": 2,
+    "rounds": 64,
+    "shipped_before": 0.728967,
+    "shipped_0098": 0.754767
+  },
+  {
+    "n_train": 5000,
+    "seed": 0,
+    "rounds": 69,
+    "shipped_before": 0.755893,
+    "shipped_0098": 0.774489
+  },
+  {
+    "n_train": 5000,
+    "seed": 1,
+    "rounds": 69,
+    "shipped_before": 0.74824,
+    "shipped_0098": 0.769684
+  },
+  {
+    "n_train": 5000,
+    "seed": 2,
+    "rounds": 152,
+    "shipped_before": 0.733451,
+    "shipped_0098": 0.75934
+  },
+  {
+    "n_train": 24000,
+    "seed": 0,
+    "rounds": 126,
+    "shipped_before": 0.780277,
+    "shipped_0098": 0.789484
+  },
+  {
+    "n_train": 24000,
+    "seed": 1,
+    "rounds": 136,
+    "shipped_before": 0.776571,
+    "shipped_0098": 0.791402
+  },
+  {
+    "n_train": 24000,
+    "seed": 2,
+    "rounds": 138,
+    "shipped_before": 0.774309,
+    "shipped_0098": 0.786283
+  }
+]

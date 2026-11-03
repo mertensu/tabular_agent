@@ -1,0 +1,13 @@
+{
+  "n_train": 24000,
+  "seed": 2,
+  "model": "gpt-6.1-terra@eu",
+  "reasoning_effort": "medium",
+  "git_commit": "4a5982d6b3918bbba08ab30a504805eecb98d513",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/credit_default_tabfm/n24000_s2/runs/20261103T085839Z-5be67aeb",
+  "elapsed_min": 1.16,
+  "identifier_columns": [
+    "ID"
+  ],
+  "test_auc": 0.774309
+}

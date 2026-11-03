@@ -27,6 +27,9 @@ rossmann_store_sales/
 # runner exists for it yet — it is a third dataset waiting to be used, not part of
 # any finding recorded so far.
 seguro_driver_prediction/
+# `credit_default/`: UCI_Credit_Card.csv from the Kaggle dataset
+# uciml/default-of-credit-card-clients-dataset; notes in scripts/prep_credit.py.
+credit_default/
 # `restaurant_visitor/`: recruit-restaurant-visitor-forecasting. Six CSVs plus the
 # public leaderboard; `hpg_reserve.csv` alone is 126MB. `train_joined.parquet` and
 # `test_joined.parquet` are built from them by `scripts/prep_restaurant.py` —

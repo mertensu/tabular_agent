@@ -1,0 +1,92 @@
+[
+  {
+    "n_train": 1000,
+    "seed": 0,
+    "fitted_rows": 1000,
+    "n_columns": 32,
+    "rounds": 35,
+    "selected_lgbm_es": 0.749043,
+    "raw_lgbm_es": 0.738195,
+    "features_gain": 0.010848
+  },
+  {
+    "n_train": 1000,
+    "seed": 1,
+    "fitted_rows": 1000,
+    "n_columns": 30,
+    "rounds": 70,
+    "selected_lgbm_es": 0.749871,
+    "raw_lgbm_es": 0.741173,
+    "features_gain": 0.008698
+  },
+  {
+    "n_train": 1000,
+    "seed": 2,
+    "fitted_rows": 1000,
+    "n_columns": 34,
+    "rounds": 60,
+    "selected_lgbm_es": 0.754865,
+    "raw_lgbm_es": 0.745974,
+    "features_gain": 0.008891
+  },
+  {
+    "n_train": 5000,
+    "seed": 0,
+    "fitted_rows": 5000,
+    "n_columns": 33,
+    "rounds": 97,
+    "selected_lgbm_es": 0.774713,
+    "raw_lgbm_es": 0.763909,
+    "features_gain": 0.010804
+  },
+  {
+    "n_train": 5000,
+    "seed": 1,
+    "fitted_rows": 5000,
+    "n_columns": 38,
+    "rounds": 151,
+    "selected_lgbm_es": 0.766587,
+    "raw_lgbm_es": 0.766065,
+    "features_gain": 0.000522
+  },
+  {
+    "n_train": 5000,
+    "seed": 2,
+    "fitted_rows": 5000,
+    "n_columns": 34,
+    "rounds": 70,
+    "selected_lgbm_es": 0.766359,
+    "raw_lgbm_es": 0.766965,
+    "features_gain": -0.000606
+  },
+  {
+    "n_train": 24000,
+    "seed": 0,
+    "fitted_rows": 24000,
+    "n_columns": 48,
+    "rounds": 155,
+    "selected_lgbm_es": 0.788726,
+    "raw_lgbm_es": 0.783561,
+    "features_gain": 0.005165
+  },
+  {
+    "n_train": 24000,
+    "seed": 1,
+    "fitted_rows": 24000,
+    "n_columns": 69,
+    "rounds": 212,
+    "selected_lgbm_es": 0.789401,
+    "raw_lgbm_es": 0.783561,
+    "features_gain": 0.00584
+  },
+  {
+    "n_train": 24000,
+    "seed": 2,
+    "fitted_rows": 24000,
+    "n_columns": 36,
+    "rounds": 181,
+    "selected_lgbm_es": 0.785517,
+    "raw_lgbm_es": 0.783561,
+    "features_gain": 0.001956
+  }
+]
