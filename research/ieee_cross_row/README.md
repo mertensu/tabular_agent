@@ -74,3 +74,23 @@ which reached the shipped table.
   230k), and the 30-day gap costs less than that gains.
 - **Exploration was rare.** 2 `explore_table` and 2 `explain_table` calls against
   about 37 building calls.
+
+**Kaggle, 2026-11-04 (`submit.py`, one submission each).** Ranks against the board
+saved on 2026-08-17 (6,355 teams; private median 0.911, top 10% 0.928, first
+0.946).
+
+| file | private | rank | public |
+|---|---|---|---|
+| r1's features and blend, refitted on all 590k labelled rows | **0.9159** | top 41% | 0.9383 |
+| early-stopped LightGBM, raw columns, same rows | 0.9023 | top 65% | 0.9273 |
+| r1's bundle as shipped (never saw the last 60 labelled days) | 0.8948 | top 72% | 0.9159 |
+| August run (0075) | 0.8995 | top 69% | 0.9282 |
+
+- The features are worth **+0.0136 on the private board**, against +0.015 on our own
+  test block: the local reading held.
+- The first run of this project above a Kaggle median on IEEE-CIS, by 0.005. Top 10%
+  is 0.012 further.
+- Staleness costs 0.021: the bundle as shipped is fitted on rows that end 90 days
+  before Kaggle's test block. That is a property of scoring a finished competition,
+  not of the product, which refits on every row it was given (0092).
+- All three files predate 0099: the blend in them still runs at 200 rounds.
