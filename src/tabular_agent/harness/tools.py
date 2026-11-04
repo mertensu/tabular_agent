@@ -3179,6 +3179,9 @@ def _terminal_fits(session: RunSession) -> list[dict]:
     A model type that fails is skipped, not fatal: three candidates exist so that
     the run survives one of them being wrong for this data, and the blend simply
     averages whatever survived.
+
+    Without `session.blend` only the fitted ruler's own fit is made, and it ships
+    alone (0100).
     """
     j = journal.load(session.run_dir)
     table = _best_table_path(session, j)
@@ -3200,7 +3203,7 @@ def _terminal_fits(session: RunSession) -> list[dict]:
     stopping = _StoppingRows(session, table, target_transform)
     chosen_by = j.get("terminal_selection") or {}
     done = []
-    for model_type in TERMINAL_MODEL_TYPES:
+    for model_type in (TERMINAL_MODEL_TYPES if session.blend else (PROBE_MODEL_TYPE,)):
         # The ruler's candidate is the ruler's *fit*, not merely its model type:
         # same parameters and same seed. Porto Seguro v4 is why the distinction
         # is spelled out — with the type alone on the ballot and the run's seed
@@ -3230,7 +3233,7 @@ def _terminal_fits(session: RunSession) -> list[dict]:
     # A second fixed config per boosted family (0087), same table/transform, added
     # to the blend for error diversity. Never the probe fit, so no special seed;
     # a failure or a budget overrun is skipped exactly like a default family above.
-    for model_type, extra_params in EXTRA_TERMINAL_CONFIGS:
+    for model_type, extra_params in (EXTRA_TERMINAL_CONFIGS if session.blend else ()):
         try:
             out = train_tabular_model(
                 session, table=table, model_type=model_type, enforce_stop=False,

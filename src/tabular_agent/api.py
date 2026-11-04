@@ -711,8 +711,13 @@ class Agent:
         # one number the search could not tune against. None turns it off.
         holdout_fraction: float | None = 0.2,
         fit_time_budget_s: float | None = None,
+        # The full profile only. False ships one early-stopped LightGBM on the
+        # chosen table; True fits and ships the whole blend, which on a large table
+        # takes hours at finalize (0100).
+        blend: bool = False,
     ):
         self.model = model
+        self.blend = blend
         self.profile = profile
         self.run_root = Path(run_root).expanduser().resolve()
         self.val_fraction = val_fraction
@@ -805,6 +810,7 @@ class Agent:
             streams=plan.streams or None,
             profile=self.profile,
             workflow=self.workflow,
+            blend=self.blend,
         )
         try:
             run_agent(
@@ -866,6 +872,7 @@ class ForecastingAgent(Agent):
         val_fraction: float = 0.2,
         holdout_fraction: float | None = None,
         fit_time_budget_s: float | None = None,
+        blend: bool = False,
     ):
         super().__init__(
             model,
@@ -874,6 +881,7 @@ class ForecastingAgent(Agent):
             val_fraction=val_fraction,
             holdout_fraction=holdout_fraction,
             fit_time_budget_s=fit_time_budget_s,
+            blend=blend,
         )
 
     def _validate_workflow(self, plan: DataPlan) -> None:

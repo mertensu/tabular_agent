@@ -7,7 +7,7 @@ was rejected, and what it cost. They are written for someone who knows data
 science but has never seen this codebase — project-specific vocabulary is
 explained where it first matters.
 
-This directory holds the twenty that still carry the product: its architecture,
+This directory holds the twenty-one that still carry the product: its architecture,
 its safety invariants, how it measures, what it ships, and its public contracts.
 The other eighty — measurements, refuted mechanisms, dataset findings, plans that
 were superseded — are in [`research/archive/decisions/`](../../research/archive/decisions/),
@@ -82,6 +82,8 @@ Vocabulary used throughout:
   *(revises the minimal profile's one model for ranking and shipping)*
 - [0099 — The full profile's blend members stop early, not at 200 rounds](0099-the-blend-members-stop-early.md)
   *(revises the member parameters of 0035 and 0087)*
+- [0100 — The full profile ships one early-stopped LightGBM by default](0100-the-full-profile-ships-one-early-stopped-lightgbm-by-default.md)
+  *(revises 0044 as a default; the blend remains behind `blend=True`)*
 
 ### Public contracts
 

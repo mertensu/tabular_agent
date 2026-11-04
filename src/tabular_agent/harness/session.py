@@ -71,6 +71,7 @@ class RunSession:
         streams: dict[str, dict] | None = None,
         profile: str = "full",
         workflow: str = "general",
+        blend: bool = True,
     ):
         if profile not in {"full", "minimal"}:
             raise ValueError(f"unknown run profile {profile!r}; use 'full' or 'minimal'")
@@ -114,6 +115,9 @@ class RunSession:
         self.source_path = os.path.abspath(data_path)
         self.spec = spec
         self.profile = profile
+        #: Whether the full profile's finalize fits and ships the whole member set
+        #: (0044) or only the fitted ruler's fit on the chosen table (0100).
+        self.blend = blend
         self.workflow = workflow
         # How long this run is allowed to keep going without getting better
         # (§19.3). On the session rather than as a module constant because it is

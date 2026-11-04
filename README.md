@@ -199,16 +199,17 @@ what ships:
 | | `ta.Agent()` (default `profile="minimal"`) | `ta.ForecastingAgent()` (always `profile="full"`) |
 |---|---|---|
 | Agent tools | 6: inspect, encode, group statistics, row filter, row-local transform, finalize | 13: the same, plus `fit_history`, `fit_stream_aggregate`, `fit_future_covariate_window`, `fit_reference_target`, and read-only tools for attribution, residuals and the run journal |
-| What ships | one LightGBM on the selected table, its number of trees stopped early on training rows ([0098](docs/decisions/0098-the-minimal-profile-ships-an-early-stopped-fit.md)); the fixed 200-tree model that ranked the tables does not ship | a blend of lgbm, xgb, catboost and elasticnet fits, weighted by their cross-validation stability; each boosted member's number of trees stopped early on training rows ([0099](docs/decisions/0099-the-blend-members-stop-early.md)) |
-| Fitted on | training + validation rows: after the table is chosen, its features and the model are refitted on every row except the test rows | the same: features and every blend member refitted on training + validation |
+| What ships | one LightGBM on the selected table, its number of trees stopped early on training rows ([0098](docs/decisions/0098-the-minimal-profile-ships-an-early-stopped-fit.md)); the fixed 200-tree model that ranked the tables does not ship | the same by default ([0100](docs/decisions/0100-the-full-profile-ships-one-early-stopped-lightgbm-by-default.md)); `blend=True` ships a blend of lgbm, xgb, catboost and elasticnet fits instead, weighted by their cross-validation stability, each boosted member stopped early ([0099](docs/decisions/0099-the-blend-members-stop-early.md)) |
+| Fitted on | training + validation rows: after the table is chosen, its features and the model are refitted on every row except the test rows | the same: features and the model (or every blend member) refitted on training + validation |
 | Splits | work / evaluation / sealed audit slice (20% by default, `holdout_fraction=None` turns it off) | work / validation, plus an optional sealed test slice (`holdout_fraction=`) |
 | Report | evaluation score, audit score (scored once), trivial baseline, selected table | the above, plus the search's pick vs. what shipped and each model's optimism on the sealed slice |
 
 `fit_history` summarises a series' own past; for a covariate you declare
 `future_known`, `fit_future_covariate_window` aggregates its horizon values forward
 — total irradiance over the delivered day, a rolling mean of forecast temperature.
-For independent rows you can opt into the full profile's blend with
-`ta.Agent(profile="full")`; the time-aware tools stay forecast-only.
+For independent rows you can opt into the full profile with
+`ta.Agent(profile="full")`, and into its blend with `blend=True`; the time-aware
+tools stay forecast-only.
 
 You confirm by setting these attributes on the plan — plain Python, no wizard. If
 you forget one, `agent.run(plan)` refuses before doing any work and names exactly

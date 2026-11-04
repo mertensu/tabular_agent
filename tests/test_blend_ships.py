@@ -330,3 +330,22 @@ def test_every_boosted_member_runs_at_the_rounds_it_stopped_at(run):
     chosen = j["terminal_selection"]
     ruler = next(r for r in boosted if r["model_type"] == "lgbm" and "subsample" not in r["params"])
     assert ruler["params"]["n_estimators"] == chosen["rounds"][chosen["chosen"]]
+
+
+@pytest.mark.fitted_ruler
+def test_without_the_blend_one_early_stopped_lightgbm_ships(tmp_path):
+    """0100: the default. The fitted ruler's fit on the chosen table, and nothing else."""
+    run = _session(tmp_path, _frame(), TaskSpec(target="y", n_splits=3), blend=False)
+    inspect_data(run)
+    fit_encoding(run, ["city"], "frequency")
+    out = finalize_run(run)
+
+    bundle = load_bundle(os.path.join(run.run_dir, out["bundle_dir"]))
+    assert len(bundle["models"]) == 1
+    assert "blend_members" not in out
+    j = journal.load(run.run_dir)
+    fits = [r for r in j["leaderboard"] if r["model_type"] != "baseline"]
+    chosen = j["terminal_selection"]
+    assert [r["model_type"] for r in fits] == ["lgbm"]
+    assert fits[0]["params"] == {"learning_rate": 0.03,
+                                 "n_estimators": chosen["rounds"][chosen["chosen"]]}
