@@ -1,0 +1,10 @@
+{
+  "tag": "k1",
+  "run_dir": "/Users/ulfmertens/Documents/tabular_agent/_runs/ieee_cross_row/k1/runs/20261104T080234Z-33a8468e",
+  "shipped": "one early-stopped lgbm (0100)",
+  "table": "t7",
+  "rounds": 564,
+  "val_auc": 0.912952,
+  "submission": "/Users/ulfmertens/Documents/tabular_agent/_runs/ieee_cross_row/k1/submission_k1_lgbm.csv",
+  "mean_prediction": 0.032
+}

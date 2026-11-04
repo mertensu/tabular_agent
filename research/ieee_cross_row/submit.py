@@ -14,6 +14,13 @@ reading, never a choice (0075: the board is not for tuning against):
   the raw columns, fitted the same way on every labelled row. Against `all_rows`:
   what the run's features are worth on the private board.
 
+    uv run python research/ieee_cross_row/submit.py r1 single
+
+Writes only `submission_<tag>_single_all_rows.csv`: the same features refitted on
+every labelled row, under one LightGBM at the fitted ruler's learning rate and the
+rounds it stopped at on the run's training rows, as 0100 ships. Against `all_rows`:
+the blend or the single model, on one set of features.
+
 No LLM calls; nothing is re-chosen.
 """
 
@@ -35,14 +42,15 @@ from tabular_agent.api import Run  # noqa: E402
 from tabular_agent.harness.tools import _fit_recipe, _load_lineage  # noqa: E402
 from tabular_agent.models import fit_final_model  # noqa: E402
 from tabular_agent.pipeline import predict_bundle  # noqa: E402
+from tabular_agent.probe import FITTED_RULER_PARAMS, PROBE_MODEL_TYPE, PROBE_SEED  # noqa: E402
 from tabular_agent.refit import refit_lineage  # noqa: E402
 from tabular_agent.taskspec import ResolvedSpec  # noqa: E402
 
 ID = "TransactionID"
 
 
-def all_rows_bundle(run: Run, train: pd.DataFrame) -> dict:
-    """The shipped bundle's recipe refitted on every labelled row."""
+def all_rows_bundle(run: Run, train: pd.DataFrame, single: bool = False) -> dict:
+    """The shipped bundle's recipe refitted on every labelled row, or 0100's one model."""
     b = run.bundle._bundle
     j = run.journal
     split = j["split"]
@@ -65,6 +73,19 @@ def all_rows_bundle(run: Run, train: pd.DataFrame) -> dict:
         source = Path(run.run_dir) / "data" / Path(b["training_table"]).name
     table, pipeline = refit_lineage(_load_lineage(str(source), spec.task_type), rows, spec,
                                     order=split["split_on"])
+    if single:
+        chosen = j["terminal_selection"]
+        rounds = chosen["rounds"][chosen["chosen"]]
+        model = fit_final_model(
+            table[b["feature_names"]], table[spec.target], spec.task_type, spec.metric,
+            model_type=PROBE_MODEL_TYPE,
+            params={**FITTED_RULER_PARAMS, "n_estimators": rounds}, seed=PROBE_SEED,
+            target_transform=meta0.get("target_transform", "none"),
+            reference_target=meta0.get("reference_target"), objective=spec.objective,
+        )
+        print(f"  refitted one lgbm at {rounds} rounds on {len(table)} rows", flush=True)
+        return {**b, "pipeline": pipeline, "models": [model], "weights": np.array([1.0]),
+                "fitted_on": {"fitted_on": "all labelled rows", "n_rows": int(len(table))}}
     models = []
     for exp_id in b["fitted_on"]["refit_of"]:
         meta = json.loads((Path(run.run_dir) / "experiments" / exp_id / "meta.json").read_text())
@@ -106,7 +127,7 @@ def positive(p) -> np.ndarray:
     return p[:, -1] if p.ndim == 2 else p
 
 
-def main(tag: str = "r1") -> int:
+def main(tag: str = "r1", variant: str | None = None) -> int:
     run = Run(json.loads((HERE / f"result_{tag}.json").read_text())["run_dir"])
     train = pd.read_parquet(prep.OUT)
     test = pd.read_parquet(prep.TEST_OUT)
@@ -119,6 +140,10 @@ def main(tag: str = "r1") -> int:
         pd.DataFrame({ID: test[ID], TARGET: preds}).to_csv(path, index=False)
         print(f"{label}: {path} ({len(preds)} rows, mean {preds.mean():.4f})", flush=True)
 
+    if variant == "single":
+        refit = all_rows_bundle(run, train, single=True)
+        write(f"{tag}_single_all_rows", positive(predict_bundle(refit, run.bundle._prepare(raw))))
+        return 0
     write(f"{tag}_shipped", positive(run.bundle.predict(raw)))
     refit = all_rows_bundle(run, train)
     write(f"{tag}_all_rows", positive(predict_bundle(refit, run.bundle._prepare(raw))))
@@ -127,4 +152,4 @@ def main(tag: str = "r1") -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(*sys.argv[1:2]))
+    raise SystemExit(main(*sys.argv[1:3]))

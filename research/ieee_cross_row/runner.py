@@ -6,6 +6,10 @@ The competition's geometry, rebuilt inside its labelled table: the last 30 days 
 `train_joined.parquet` are the test block, the 30 days before them are dropped (the
 competition's gap), and the agent gets everything earlier. Writes
 `result_<tag>.json` with the shipped bundle's AUC on the test block. See README.md.
+
+A tag starting with `k` is the competition's own split instead: the agent gets every
+labelled row, and the shipped bundle predicts Kaggle's test file into
+`_runs/ieee_cross_row/<tag>/submission_<tag>.csv`, to be submitted once.
 """
 
 import json
@@ -50,7 +54,11 @@ def main(tag: str = "r1") -> int:
     from runner import agent_model
     from tabular_agent.metrics import compute_metric
 
-    train, test = split()
+    kaggle = tag.startswith("k")
+    if kaggle:
+        train, test = pd.read_parquet(prep.OUT), pd.read_parquet(prep.TEST_OUT)
+    else:
+        train, test = split()
     files = OUT / tag / "files"
     files.mkdir(parents=True, exist_ok=True)
     train.to_parquet(files / "train.parquet", index=False)
@@ -78,9 +86,14 @@ def main(tag: str = "r1") -> int:
     started = time.time()
     run = agent.run(plan, prompt=PROMPT)
     elapsed = time.time() - started
-    p = np.asarray(run.bundle.predict(test.drop(columns=[TARGET])), dtype=float)
+    p = np.asarray(run.bundle.predict(test.drop(columns=[TARGET], errors="ignore")),
+                   dtype=float)
     if p.ndim == 2:
         p = p[:, -1]
+    if kaggle:
+        path = OUT / tag / f"submission_{tag}.csv"
+        pd.DataFrame({"TransactionID": test["TransactionID"], TARGET: p}).to_csv(path,
+                                                                                  index=False)
     result = {
         "tag": tag,
         "model": MODEL,
@@ -92,7 +105,8 @@ def main(tag: str = "r1") -> int:
         "identifier_columns": plan.identifier_columns,
         "n_train": len(train),
         "n_test": len(test),
-        "test_auc": round(float(compute_metric("auc", test[TARGET].to_numpy(), p)), 6),
+        "test_auc": None if kaggle else round(
+            float(compute_metric("auc", test[TARGET].to_numpy(), p)), 6),
     }
     (HERE / f"result_{tag}.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2), flush=True)
