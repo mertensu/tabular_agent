@@ -7,7 +7,7 @@ import pytest
 from tabular_agent.harness import journal
 from tabular_agent.harness.session import RunSession
 from tabular_agent.harness.tools import finalize_run, inspect_data, transform_features
-from tabular_agent.probe import FITTED_RULER_MAX_ROUNDS, fit_fitted_ruler, probe_predict
+from tabular_agent.probe import FITTED_RULER_MAX_ROUNDS, fit_fitted_ruler, probe_predict, stopped_rounds
 from tabular_agent.taskspec import TaskSpec
 
 #: Turns a string column holding the signal into a number: a real step.
@@ -68,3 +68,14 @@ def test_finalize_ships_the_eligible_table_by_the_fitted_ruler(session):
     assert chosen["scores"]["t1"] < chosen["scores"]["work"]
     assert "probe_choice" in chosen
     assert t2["table"] != chosen["table"]
+
+
+@pytest.mark.parametrize("model_type", ["lgbm", "xgb", "catboost"])
+def test_every_boosted_family_stops_where_held_back_rows_stop_improving(model_type):
+    rng = np.random.default_rng(1)
+    X = pd.DataFrame({"a": rng.normal(size=600), "b": rng.normal(size=600)})
+    y = (X["a"] + rng.normal(scale=1.0, size=600) > 0).astype(int)
+
+    rounds = stopped_rounds(model_type, X, y, "binary", "auc", params={"learning_rate": 0.3})
+
+    assert 1 <= rounds < FITTED_RULER_MAX_ROUNDS

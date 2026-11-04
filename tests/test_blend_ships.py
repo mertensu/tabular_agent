@@ -308,3 +308,25 @@ def test_the_report_names_the_blend_and_prints_the_gap(sealed):
     assert "## Per-fold metrics" not in text
     assert "- **CV score:**" not in text
     assert "The gap to the CV score" not in text
+
+
+@pytest.mark.fitted_ruler
+def test_every_boosted_member_runs_at_the_rounds_it_stopped_at(run):
+    """A fixed 200 rounds is a different model size in each library; each boosted
+    member instead runs at the fitted ruler's learning rate for as many rounds as
+    it kept improving on the latest training rows. The default lgbm member is the
+    fitted ruler's own fit on the chosen table, at the rounds recorded for it."""
+    inspect_data(run)
+    fit_encoding(run, ["city"], "frequency")
+    finalize_run(run)
+
+    j = journal.load(run.run_dir)
+    boosted = [r for r in j["leaderboard"] if r["model_type"] in ("lgbm", "xgb", "catboost")]
+    assert sorted(r["model_type"] for r in boosted) == ["catboost", "catboost", "lgbm", "lgbm",
+                                                        "xgb", "xgb"]
+    for r in boosted:
+        assert r["params"]["learning_rate"] == 0.03
+        assert 1 <= r["params"]["n_estimators"] < 5000
+    chosen = j["terminal_selection"]
+    ruler = next(r for r in boosted if r["model_type"] == "lgbm" and "subsample" not in r["params"])
+    assert ruler["params"]["n_estimators"] == chosen["rounds"][chosen["chosen"]]

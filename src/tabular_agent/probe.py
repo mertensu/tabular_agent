@@ -98,6 +98,7 @@ __all__ = [
     "describe_probe",
     "fit_fitted_ruler",
     "fit_probe",
+    "stopped_rounds",
 ]
 
 #: The ruler. A gradient-boosted tree because that is the family the terminal fit
@@ -248,6 +249,85 @@ def probe_predict(fit: ProbeFit, X: pd.DataFrame, task_type: str) -> np.ndarray:
     return preds
 
 
+def _fit_frame(X, y, task_type, target_transform, objective):
+    """The rows a fit can use, the target on its fitted scale, and the classes."""
+    X = X.reset_index(drop=True)
+    y = pd.Series(np.asarray(y)).reset_index(drop=True)
+    check_target_domain(target_transform, y, task_type)
+    y_fit = pd.Series(apply_target(target_transform, y)) if target_transform != "none" else y
+    check_objective(objective, y_fit, target_transform)
+    fittable = poisson_fit_rows(objective, y_fit)
+    classes = np.unique(y.to_numpy()) if task_type in ("binary", "multiclass") else None
+    return (X[fittable].reset_index(drop=True), y_fit[fittable].reset_index(drop=True),
+            fittable, classes)
+
+
+def _stopping_rounds(model_type, X, y_fit, classes, task_type, metric, objective, params,
+                     seed, order=None, fittable=None) -> int:
+    """Rounds at which ``model_type`` stops improving on rows it does not train on.
+
+    The latest `FITTED_RULER_STOP_FRACTION` of the rows when ``order`` is given, a
+    random share otherwise; patience `FITTED_RULER_PATIENCE`, ceiling
+    `FITTED_RULER_MAX_ROUNDS`. The stopping fit only finds the count, so classes go
+    in as integer codes: LightGBM encodes string labels for the training rows but
+    not for its evaluation rows.
+    """
+    n_stop = max(1, int(round(len(X) * FITTED_RULER_STOP_FRACTION)))
+    if order is not None:
+        order = np.asarray(order)
+        if fittable is not None:
+            order = order[np.asarray(fittable)]
+        ranked = np.argsort(order, kind="stable")
+    else:
+        ranked = np.random.default_rng(PROBE_SEED).permutation(len(X))
+    inner, stop_rows = ranked[:-n_stop], ranked[-n_stop:]
+    y_stop = (pd.Series(np.searchsorted(classes, y_fit.to_numpy()))
+              if classes is not None else y_fit)
+    X_in, y_in = X.iloc[inner], y_stop.iloc[inner]
+    X_out, y_out = X.iloc[stop_rows], y_stop.iloc[stop_rows]
+
+    model = _make_model(model_type, task_type,
+                        {**(params or {}), "n_estimators": FITTED_RULER_MAX_ROUNDS},
+                        seed, metric, objective)
+    if model_type == "lgbm":
+        import lightgbm as lgb
+
+        model.fit(X_in, y_in, eval_X=(X_out,), eval_y=(y_out,),
+                  callbacks=[lgb.early_stopping(FITTED_RULER_PATIENCE, verbose=False)])
+        best = model.best_iteration_
+    elif model_type == "xgb":
+        from ._safe_names import _safe_frame
+
+        model.set_params(early_stopping_rounds=FITTED_RULER_PATIENCE)
+        model.fit(X_in, y_in, eval_set=[(_safe_frame(X_out), y_out)], verbose=False)
+        best = model.best_iteration + 1
+    elif model_type == "catboost":
+        from ._safe_names import catboost_frame
+
+        model.fit(X_in, y_in, eval_set=(catboost_frame(X_out)[0], y_out),
+                  early_stopping_rounds=FITTED_RULER_PATIENCE)
+        best = model.get_best_iteration() + 1
+    else:
+        raise ValueError(f"no early stopping for model_type {model_type!r}")
+    return max(1, int(best or FITTED_RULER_MAX_ROUNDS))
+
+
+def stopped_rounds(model_type: str, X: pd.DataFrame, y, task_type: str, metric: str,
+                   target_transform: str | None = None, objective: str | None = None,
+                   params: dict | None = None, seed: int = PROBE_SEED, order=None) -> int:
+    """How many rounds ``model_type`` at ``params`` earns on these rows, by early stopping.
+
+    Read on the rows themselves, as `fit_fitted_ruler` reads its own, so a run's
+    validation rows are never consulted. For the full profile's terminal fits,
+    which otherwise run every boosted family at a fixed 200 rounds.
+    """
+    if target_transform is None:
+        target_transform = default_target_transform(metric, task_type)
+    X, y_fit, fittable, classes = _fit_frame(X, y, task_type, target_transform, objective)
+    return _stopping_rounds(model_type, X, y_fit, classes, task_type, metric, objective,
+                            params, seed, order=order, fittable=fittable)
+
+
 def fit_fitted_ruler(
     X: pd.DataFrame,
     y,
@@ -267,44 +347,18 @@ def fit_fitted_ruler(
     """
     import time
 
-    import lightgbm as lgb
-
     if target_transform is None:
         target_transform = default_target_transform(metric, task_type)
 
-    X = X.reset_index(drop=True)
-    y = pd.Series(np.asarray(y)).reset_index(drop=True)
-    check_target_domain(target_transform, y, task_type)
-    y_fit = pd.Series(apply_target(target_transform, y)) if target_transform != "none" else y
-    check_objective(objective, y_fit, target_transform)
-    fittable = poisson_fit_rows(objective, y_fit)
-    X, y_fit = X[fittable].reset_index(drop=True), y_fit[fittable].reset_index(drop=True)
-    classes = np.unique(y.to_numpy()) if task_type in ("binary", "multiclass") else None
-
-    n_stop = max(1, int(round(len(X) * FITTED_RULER_STOP_FRACTION)))
-    if order is not None:
-        ranked = np.argsort(np.asarray(order)[np.asarray(fittable)], kind="stable")
-    else:
-        ranked = np.random.default_rng(PROBE_SEED).permutation(len(X))
-    inner, stop_rows = ranked[:-n_stop], ranked[-n_stop:]
-
-    def make(rounds):
-        return _make_model(
-            PROBE_MODEL_TYPE, task_type,
-            {**FITTED_RULER_PARAMS, "n_estimators": rounds}, PROBE_SEED, metric, objective,
-        )
-
     started = time.monotonic()
-    model = make(FITTED_RULER_MAX_ROUNDS)
-    # The stopping fit only finds the round count, so classes go in as integer codes:
-    # LightGBM encodes string labels for the training rows but not for `eval_y`.
-    y_stop = (pd.Series(np.searchsorted(classes, y_fit.to_numpy()))
-              if classes is not None else y_fit)
-    model.fit(X.iloc[inner], y_stop.iloc[inner],
-              eval_X=(X.iloc[stop_rows],), eval_y=(y_stop.iloc[stop_rows],),
-              callbacks=[lgb.early_stopping(FITTED_RULER_PATIENCE, verbose=False)])
-    rounds = max(1, int(model.best_iteration_ or FITTED_RULER_MAX_ROUNDS))
-    model = make(rounds)
+    X, y_fit, fittable, classes = _fit_frame(X, y, task_type, target_transform, objective)
+    rounds = _stopping_rounds(PROBE_MODEL_TYPE, X, y_fit, classes, task_type, metric,
+                              objective, FITTED_RULER_PARAMS, PROBE_SEED, order=order,
+                              fittable=fittable)
+    model = _make_model(
+        PROBE_MODEL_TYPE, task_type,
+        {**FITTED_RULER_PARAMS, "n_estimators": rounds}, PROBE_SEED, metric, objective,
+    )
     model.fit(X, y_fit)
     elapsed = round(time.monotonic() - started, 2)
 

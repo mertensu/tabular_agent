@@ -17,6 +17,7 @@ import fcntl
 import json
 import os
 import shutil
+import time
 
 import joblib
 import numpy as np
@@ -37,10 +38,11 @@ from ..encoders import to_periods as _to_periods
 from ..inspect import profile_dataframe, profile_stream
 from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
-from ..models import _make_model, fit_final_model, predict_model, train_cv
+from ..models import TrainingTooSlow, _make_model, fit_final_model, predict_model, train_cv
 from ..pipeline import Pipeline, input_dtypes, save_bundle
 from ..probe import (
-    PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_fitted_ruler, fit_probe, probe_predict,
+    FITTED_RULER_PARAMS, PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_fitted_ruler,
+    fit_probe, probe_predict, stopped_rounds,
 )
 from ..blend import apply_blend, blend_weights
 from ..report import (
@@ -2957,8 +2959,8 @@ def explore_table(
 #: 0.28351 against lgbm's 0.29066 — so the 0.08 spread at library defaults was
 #: mostly `n_estimators=200` meaning very different things to three libraries,
 #: not one family being better. Enumerating *defaults* measures the libraries;
-#: comparing families fairly needs a common budget or early stopping, which is a
-#: design and a record, not a constant picked off this table.
+#: since 0099 every boosted family stops early at one common learning rate
+#: (`_StoppingRows`).
 TERMINAL_MODEL_TYPES = (PROBE_MODEL_TYPE, "xgb", "catboost", "elasticnet")
 
 #: A second, fixed configuration per gradient-boosted family, added to the
@@ -2969,7 +2971,8 @@ TERMINAL_MODEL_TYPES = (PROBE_MODEL_TYPE, "xgb", "catboost", "elasticnet")
 #: only over features; the harness ships a larger *fixed* member set.
 #:
 #: The diversity is **row/column subsampling and a different seed at the default's
-#: full strength** — same depth, rounds and learning rate — not a shallower or more
+#: full strength** — same depth and learning rate, rounds stopped early on their own
+#: (0099) — not a shallower or more
 #: regularized model. That is deliberate and was measured: a first attempt used
 #: weaker (shallow, slow) partners and it *regressed Rossmann by 0.057 rmspe* while
 #: helping House Prices, because 0080 weights members by fold *stability*, not by
@@ -3105,6 +3108,64 @@ def _choose_by_fitted_ruler(session: RunSession, run_journal: dict, candidates: 
     return choice
 
 
+#: The boosted families whose terminal fits stop early instead of running 200 rounds.
+STOPPED_MODEL_TYPES = ("lgbm", "xgb", "catboost")
+
+
+class _StoppingRows:
+    """Early-stopped round counts for the terminal fits, read on the table's own rows.
+
+    Each boosted member runs at `FITTED_RULER_PARAMS`' learning rate for as many
+    rounds as it improves on the latest share of the training rows, as the fitted
+    ruler does: at a fixed 200 rounds the three libraries' defaults are not the
+    same model size (xgb at learning rate 0.3 stops at about 130 rounds where it is
+    still short of capacity, catboost needs thousands), so the blend measured the
+    defaults rather than the families. A family whose stopping fit fails keeps its
+    library defaults. Elasticnet has no rounds and is untouched.
+    """
+
+    def __init__(self, session: RunSession, table: str, target_transform: str | None):
+        self.session, self.table, self.target_transform = session, table, target_transform
+        self._frame = None
+
+    def _rows(self):
+        if self._frame is None:
+            spec = self.session.resolved()
+            df = load_table(self.session.resolve_table(self.table))
+            X, _ = _feature_frame(df, spec.target)
+            split_on = self.session.split_on
+            order = df[split_on] if split_on and split_on in df.columns else None
+            self._frame = (X, df[spec.target], order)
+        return self._frame
+
+    def params(self, model_type: str, extra: dict, seed: int,
+               rounds: int | None = None) -> dict | None:
+        if model_type not in STOPPED_MODEL_TYPES:
+            return dict(extra) or None
+        params = {**extra, **FITTED_RULER_PARAMS}
+        if rounds is None:
+            spec = self.session.resolved()
+            X, y, order = self._rows()
+            started = time.monotonic()
+            try:
+                rounds = stopped_rounds(model_type, X, y, spec.task_type, spec.metric,
+                                        self.target_transform, spec.objective,
+                                        params=params, seed=seed, order=order)
+            except Exception:  # noqa: BLE001 - library defaults, as before
+                return dict(extra) or None
+            # The member is one fit per fold and a final one, each about as long as
+            # the stopping fit. If that cannot finish inside the run's budget, say
+            # so now rather than after the folds have spent it.
+            budget = self.session.fit_time_budget_s
+            projected = (time.monotonic() - started) * (spec.n_splits + 1)
+            if budget is not None and projected > budget:
+                raise TrainingTooSlow(
+                    f"{model_type} stopped at {rounds} rounds; its folds would take about "
+                    f"{projected / 60:.0f} min against a budget of {budget / 60:.0f} min"
+                )
+        return {**params, "n_estimators": int(rounds)}
+
+
 def _terminal_fits(session: RunSession) -> list[dict]:
     """Fit the enumerated set on the best table, and leave them all on the board.
 
@@ -3134,21 +3195,30 @@ def _terminal_fits(session: RunSession) -> list[dict]:
     else:
         target_transform = session.resolved().target_transform
         reference_target = None
+    spec_seed = session.resolved().seed
 
+    stopping = _StoppingRows(session, table, target_transform)
+    chosen_by = j.get("terminal_selection") or {}
     done = []
     for model_type in TERMINAL_MODEL_TYPES:
-        # The probe's candidate is the probe's *fit*, not merely its model type:
+        # The ruler's candidate is the ruler's *fit*, not merely its model type:
         # same parameters and same seed. Porto Seguro v4 is why the distinction
         # is spelled out — with the type alone on the ballot and the run's seed
         # underneath it, the terminal lgbm scored 0.00279 of gini below the probe
         # on the very table the probe had chosen, because lgbm moves 0.003 of auc
         # between seeds at that scale. A near-copy of the ruler is not the ruler.
-        probe_fit = model_type == PROBE_MODEL_TYPE
+        # Since the fitted ruler chooses the table, that is its fit, at the rounds
+        # it stopped at on this table, read back rather than found again.
+        ruler_fit = model_type == PROBE_MODEL_TYPE
+        rounds = (chosen_by.get("rounds") or {}).get(chosen_by.get("chosen")) if (
+            ruler_fit and chosen_by.get("table") == table) else None
         try:
+            params = (stopping.params(model_type, {}, PROBE_SEED, rounds) if ruler_fit
+                      else stopping.params(model_type, {}, spec_seed))
             out = train_tabular_model(
                 session, table=table, model_type=model_type, enforce_stop=False,
-                params=dict(PROBE_PARAMS) if probe_fit else None,
-                seed=PROBE_SEED if probe_fit else None,
+                params=params,
+                seed=PROBE_SEED if ruler_fit else None,
                 target_transform=target_transform,
                 reference_target=reference_target,
             )
@@ -3164,7 +3234,7 @@ def _terminal_fits(session: RunSession) -> list[dict]:
         try:
             out = train_tabular_model(
                 session, table=table, model_type=model_type, enforce_stop=False,
-                params=dict(extra_params),
+                params=stopping.params(model_type, extra_params, spec_seed),
                 target_transform=target_transform,
                 reference_target=reference_target,
             )

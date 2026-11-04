@@ -182,13 +182,15 @@ def test_an_unservable_table_is_scored_as_unscorable(session):
     assert best_table(j["tables"], "rmsle") is None
 
 
-def test_the_terminal_phase_reproduces_the_probe_exactly(session):
+@pytest.mark.fitted_ruler
+def test_the_terminal_phase_reproduces_the_fitted_ruler_exactly(session):
     """The invariant, and the reason it is about the *fit* and not the model type.
 
     Porto Seguro v4 put `PROBE_MODEL_TYPE` on the terminal ballot but fitted it
-    with the run's seed rather than the probe's, and the result came in 0.00279 of
-    gini under the probe on the table the probe had chosen — lgbm moves 0.003 of
-    auc between seeds at 476k rows. So this asserts equality, not membership.
+    with the run's seed rather than the ruler's, and the result came in 0.00279 of
+    gini under the ruler on the table the ruler had chosen — lgbm moves 0.003 of
+    auc between seeds at 476k rows. So this asserts equality, not membership. Since
+    0099 the ruler is the fitted ruler that chose the table, not the probe.
     """
     from tabular_agent.probe import PROBE_MODEL_TYPE
 
@@ -200,11 +202,11 @@ def test_the_terminal_phase_reproduces_the_probe_exactly(session):
     tools.finalize_run(session)
 
     j = journal.load(session.run_dir)
-    row = next(r for r in j["leaderboard"] if r["model_type"] == PROBE_MODEL_TYPE)
-    if row["source_table"] == session.rel(session.data_path):
-        winner_probe = j["work_probe"]
-    else:
-        winner_probe = _table_row(session, row["source_table"])
-    # `probe_score` is rounded to 6 dp on the journal row; the fit itself is
+    chosen = j["terminal_selection"]
+    row = next(r for r in j["leaderboard"]
+               if r["model_type"] == PROBE_MODEL_TYPE and r["source_table"] == chosen["table"]
+               and "subsample" not in (r.get("params") or {}))
+    assert row["params"]["n_estimators"] == chosen["rounds"][chosen["chosen"]]
+    # The fitted ruler's score is rounded to 6 dp in the journal; the fit itself is
     # bit-identical, so this is the storage precision and not a tolerance.
-    assert row["val_score"] == pytest.approx(winner_probe["probe_score"], abs=5e-7)
+    assert row["val_score"] == pytest.approx(chosen["scores"][chosen["chosen"]], abs=5e-7)
