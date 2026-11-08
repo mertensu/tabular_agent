@@ -32,6 +32,12 @@ def test_accuracy_from_binary_probs():
     assert compute_metric("accuracy", y, p) == pytest.approx(2 / 3)
 
 
+def test_accuracy_at_threshold_boundary():
+    y = np.array([1, 0])
+    p = np.array([0.5, 0.49])
+    assert compute_metric("accuracy", y, p) == pytest.approx(1.0)
+
+
 def test_multiclass_accuracy_from_proba_matrix():
     y = np.array([0, 1, 2])
     p = np.array([[0.7, 0.2, 0.1], [0.1, 0.8, 0.1], [0.2, 0.2, 0.6]])
