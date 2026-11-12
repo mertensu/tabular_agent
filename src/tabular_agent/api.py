@@ -8,12 +8,13 @@ import json
 import os
 from pathlib import Path
 import shutil
+import warnings
 from typing import Any
 from uuid import uuid4
 
 import pandas as pd
 
-from .dashboard import update_dashboard_contract
+from .dashboard import add_dashboard_warning, update_dashboard_contract
 from .capability_review import REVIEW_FILENAME, review_capabilities
 from .harness.agent import gateway_model, run as run_agent
 from .harness.session import RunSession
@@ -48,6 +49,34 @@ class JoinProposal:
     def reject(self) -> JoinProposal:
         self.decision = "rejected"
         return self
+
+
+def _warn_if_serving_rows_fail(run: "Run", plan: "DataPlan") -> None:
+    """Predict the plan's serving table once with the finished bundle; report a failure.
+
+    Every code step was already run on these rows as it was built. This catches
+    what that cannot: a step the check skipped, or the shipped refit behaving
+    differently. A run cannot be undone at this point, so a failure is written into
+    the report as a warning and raised as a Python warning, not as an error.
+    """
+    name = plan.serving_table
+    if not name or name == plan.training_table or name not in plan.tables:
+        return
+    try:
+        run.bundle.predict(plan.tables[name]["path"])
+    except Exception as error:  # noqa: BLE001 - reported, not raised
+        message = f"{type(error).__name__}: {error}"
+        if len(message) > 800:
+            message = message[:800] + " ..."
+        text = (f"The bundle could not predict the serving table {name!r} as given. "
+                f"{message}")
+        add_dashboard_warning(str(run.run_dir), "danger",
+                              "Serving table cannot be predicted", text)
+        warnings.warn(text, stacklevel=3)
+
+
+def _existing(path: Path) -> str | None:
+    return str(path) if path.exists() else None
 
 
 def _typed_split_column(values: pd.Series) -> pd.Series:
@@ -424,6 +453,7 @@ class DataPlan:
         if isinstance(self.split_on, str):
             frame[self.split_on] = _typed_split_column(frame[self.split_on])
         path = save_parquet(frame, str(prepared / "train.parquet"))
+        self._materialize_serving(prepared)
         manifest = {
             "training_table": self.training_table,
             "serving_table": self.serving_table,
@@ -441,6 +471,34 @@ class DataPlan:
         with open(prepared / "api_plan.json", "w") as handle:
             json.dump(manifest, handle, indent=2)
         return path, manifest
+
+    def _materialize_serving(self, prepared: Path) -> str | None:
+        """Write the rows the bundle will be asked to predict, as the bundle reads them.
+
+        Code the agent writes is run during the search on training and validation
+        rows only. Rows to be predicted can hold values neither half has: a later
+        date, a new year, a category first seen at serving. Code written against
+        the first can fail on the second, or quietly return missing values, and
+        nothing would show it until the first prediction. With these rows on disk
+        the run replays each code step on them as it is built.
+
+        They carry no target, and nothing is fitted or scored on them: lineage is
+        only replayed over them, with state fitted on training rows, which is what
+        predict does later anyway. No agent tool can load them. Written only when
+        the plan names a serving table distinct from the training table.
+        """
+        name = self.serving_table
+        if not name or name == self.training_table or name not in self.tables:
+            return None
+        rows = self._apply_joins(load_table(self.tables[name]["path"]))
+        keep = [c for c in rows.columns
+                if c != self.target
+                and c not in set(self.identifier_columns or [])
+                and (self.serving_columns is None or c in self.serving_columns)]
+        rows = rows[keep]
+        if isinstance(self.split_on, str) and self.split_on in rows.columns:
+            rows[self.split_on] = _typed_split_column(rows[self.split_on])
+        return save_parquet(rows, str(prepared / "serving.parquet"))
 
 
 
@@ -805,6 +863,7 @@ class Agent:
             holdout_fraction=self.holdout_fraction,
             split_on=plan.split_on if isinstance(plan.split_on, str) else None,
             serving_columns=plan.serving_columns,
+            serving_path=_existing(run_dir / "prepared" / "serving.parquet"),
             future_known=plan.future_known,
             fit_time_budget_s=self.fit_time_budget_s,
             streams=plan.streams or None,
@@ -851,7 +910,9 @@ class Agent:
         with open(bundle_path / "api_plan.json", "w") as handle:
             json.dump(manifest, handle, indent=2)
         update_dashboard_contract(str(run_dir), manifest)
-        return Run(run_dir)
+        run = Run(run_dir)
+        _warn_if_serving_rows_fail(run, plan)
+        return run
 
 
 class ForecastingAgent(Agent):

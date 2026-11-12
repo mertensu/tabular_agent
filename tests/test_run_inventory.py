@@ -46,8 +46,8 @@ def test_the_inventory_is_shown_once_and_finishes_nothing(session):
     inventory = run_inventory(session)
 
     assert inventory["finalized"] is False
-    assert inventory["would_ship"]["table"] == "t1"
-    assert inventory["would_ship"]["steps"] == ["t1: encoding"]
+    assert inventory["best_by_probe"]["table"] == "t1"
+    assert inventory["best_by_probe"]["steps"] == ["t1: encoding"]
     assert inventory["tables_by_kind"]["encoding"] == {"built": 1, "passed": 1}
     assert inventory["tables_by_kind"]["transform"]["passed"] == 0
     assert "fit_history" in inventory["tools_never_called"]

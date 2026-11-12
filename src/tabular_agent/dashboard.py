@@ -453,6 +453,24 @@ def write_dashboard_artifacts(run_ctx, markdown: str, data: dict[str, Any]) -> d
     return paths
 
 
+def add_dashboard_warning(run_dir: str, level: str, title: str, message: str) -> None:
+    """Add one warning to a finished report: the JSON, the HTML and the Markdown."""
+    json_path = os.path.join(run_dir, "run_report.json")
+    if os.path.exists(json_path):
+        with open(json_path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        data.setdefault("warnings", []).append(
+            {"level": level, "title": title, "message": message}
+        )
+        _atomic_text(json_path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        _atomic_text(os.path.join(run_dir, "run_report.html"), render_dashboard_html(data))
+    md_path = os.path.join(run_dir, "run_report.md")
+    if os.path.exists(md_path):
+        with open(md_path, encoding="utf-8") as handle:
+            text = handle.read()
+        _atomic_text(md_path, text.rstrip("\n") + f"\n\n> **{title}.** {message}\n")
+
+
 def update_dashboard_contract(run_dir: str, plan: dict) -> None:
     """Enrich a facade report after its confirmed plan is copied into the bundle."""
     json_path = os.path.join(run_dir, "run_report.json")

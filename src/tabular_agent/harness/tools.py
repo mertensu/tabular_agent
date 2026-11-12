@@ -39,7 +39,7 @@ from ..inspect import profile_dataframe, profile_stream
 from ..io import load_table, save_parquet
 from ..metrics import compute_metric, describe_metric, greater_is_better
 from ..models import TrainingTooSlow, _make_model, fit_final_model, predict_model, train_cv
-from ..pipeline import Pipeline, input_dtypes, save_bundle
+from ..pipeline import Pipeline, conform_input_dtypes, input_dtypes, save_bundle
 from ..probe import (
     FITTED_RULER_PARAMS, PROBE_MODEL_TYPE, PROBE_PARAMS, PROBE_SEED, fit_fitted_ruler,
     fit_probe, probe_predict, stopped_rounds,
@@ -55,7 +55,7 @@ from ..report import (
 )
 from ..refit import refit_lineage
 from ..rows import select_rows
-from ..sandbox import SandboxError, run_readonly
+from ..sandbox import SandboxError, run_readonly, run_transform
 from ..target import (
     TARGET_TRANSFORMS,
     invert_reference_target,
@@ -1940,6 +1940,110 @@ def filter_rows(
     }
 
 
+
+#: A new column missing on this much larger a share of the serving rows than of
+#: the training rows is reported back. Below it, a difference in missingness is
+#: ordinary variation between periods rather than code that stops working.
+SERVING_MISSING_JUMP = 0.1
+
+
+def _serving_rows_at(session: RunSession, source_path: str) -> pd.DataFrame | None:
+    """The serving rows replayed through ``source_path``'s lineage, or ``None``.
+
+    ``None`` when the run has no serving rows, or when a step that is not the
+    agent's code under test cannot be replayed on them (a window that needs a
+    past the caller must pass, a stream): that is the harness's limit or the
+    caller's input, not a fault in the new code, and this check does not judge it.
+    State is replayed, never fitted: the rows carry no target and nothing is
+    learned from them. They follow the validation rows in time, so validation is
+    the known past a forward window reads, as for the holdout.
+    """
+    if not session.serving_path:
+        return None
+    spec = session.resolved()
+    rows = load_table(session.serving_path).drop(columns=[spec.target], errors="ignore")
+    rows, _ = conform_input_dtypes(rows, _input_dtypes(session))
+    known_past = None
+    if session.split_on is not None:
+        known_past = load_table(session.val_path).drop(columns=[spec.target])
+    try:
+        return _load_lineage(source_path, spec.task_type).transform(
+            rows, streams=_streams_as_issued(session, rows), known_past=known_past,
+        )
+    except Exception:  # noqa: BLE001 - not the code under test; see docstring
+        return None
+
+
+def _describe_serving_rows(session: RunSession, rows: pd.DataFrame) -> str:
+    text = f"{len(rows)} rows"
+    order = session.split_on
+    if order and order in rows.columns and len(rows):
+        values = rows[order]
+        low, high = values.min(), values.max()
+        if pd.api.types.is_datetime64_any_dtype(values) and (values.dt.normalize() == values).all():
+            low, high = low.date(), high.date()
+        text += f", {order} {low} to {high}"
+    return text
+
+
+def _check_code_on_serving_rows(
+    session: RunSession, source_path: str, code: str, out_features: pd.DataFrame,
+    new_columns: list[str], timeout: float,
+) -> dict | None:
+    """Run agent-written code on the rows the bundle will predict, before it is kept.
+
+    The code was just run on the training rows. It re-runs on every served row,
+    and those can hold values the training rows never did: later dates, a year
+    whose holidays the code never computed, an unseen category. Code that raises
+    there gives a bundle that cannot predict, and nothing in the search would show
+    it, because validation rows come from the same file as training. So it is run
+    on the serving rows now, while the agent can still change it:
+
+    * if it raises, or does not produce the columns it produced on training rows,
+      the table is refused and the error is returned;
+    * if it runs but a new column is missing on a much larger share of serving
+      rows than of training rows (the same fault without the exception), the two
+      shares are returned for those columns. Missing values can be legitimate, so
+      this is reported, not refused.
+
+    Only the error text, the rows' count and ordering range, and those shares
+    leave this function: no row and no value distribution of the serving rows.
+    Returns ``None`` when there is nothing to report or nothing to check.
+    """
+    rows = _serving_rows_at(session, source_path)
+    if rows is None:
+        return None
+    where = _describe_serving_rows(session, rows)
+    try:
+        served, _ = run_transform(rows, code, timeout=timeout)
+    except SandboxError as e:
+        message = str(e)
+        if len(message) > 800:
+            message = message[:800] + " ..."
+        raise ValueError(
+            "the code ran on the training rows but raised on the rows this model will "
+            f"be asked to predict ({where}). The code re-runs on those rows at predict "
+            f"time, so nothing was written.\n\n{message}"
+        ) from e
+    absent = [c for c in new_columns if c not in served.columns]
+    if absent:
+        raise ValueError(
+            "the code produced columns on the training rows that it did not produce on "
+            f"the rows this model will be asked to predict ({where}): {absent[:10]}. "
+            "Nothing was written."
+        )
+    shares = {}
+    for col in new_columns:
+        on_training = float(out_features[col].isna().mean())
+        on_serving = float(served[col].isna().mean())
+        if on_serving - on_training >= SERVING_MISSING_JUMP:
+            shares[col] = {"missing_on_training_rows": round(on_training, 3),
+                           "missing_on_serving_rows": round(on_serving, 3)}
+    if not shares:
+        return None
+    return {"rows": where, "columns_missing_more_often": shares}
+
+
 def transform_features(
     session: RunSession,
     code: str,
@@ -1997,6 +2101,10 @@ def transform_features(
             "name derived columns something else"
         )
 
+    serving = _check_code_on_serving_rows(
+        session, path, code, out_features, list(summary["new_columns"]), timeout=timeout,
+    )
+
     out = out_features.join(df[spec.target])
     table_id = journal.next_table_id(session.run_dir)
     out_path = session.ctx.path("tables", f"{table_id}.parquet")
@@ -2030,6 +2138,7 @@ def transform_features(
         "n_cols": len(out.columns),
         "source_table": row["source_table"],
         "non_numeric_columns": still_dropped,
+        **({"serving_rows": serving} if serving else {}),
         **_agent_score_fields(session, scored),
         "note": (
             "This table is scored above; build on it to keep the new columns. The code "
@@ -3866,6 +3975,7 @@ def _finalize_minimal_run_unlocked(session: RunSession) -> dict:
     journal.append_experiments(session.run_dir, [baseline_row, model_row])
     journal.mark_finalized(session.run_dir)
     return {
+        "shipped_table": _shipped_table(session, j, table_rel),
         "best_experiment_id": exp_id,
         "model_type": PROBE_MODEL_TYPE,
         "metric": spec.metric,
@@ -3897,6 +4007,48 @@ _TOOL_OF_METHOD = {
 }
 
 
+
+def _table_kind(t: dict) -> str | None:
+    return "encoding" if t.get("encoded_columns") is not None else t.get("method")
+
+
+def _table_steps(tables: list[dict], table: dict | None) -> list[str]:
+    """``"<id>: <kind>"`` for ``table`` and every table it was built on, oldest first."""
+    by_path = {t.get("path"): t for t in tables}
+    steps, node = [], table
+    while node is not None:
+        steps.append(f"{node['id']}: {_table_kind(node)}")
+        node = by_path.get(node.get("source_table"))
+    return list(reversed(steps))
+
+
+def _shipped_table(session: RunSession, j: dict, table_rel: str) -> dict:
+    """The table the bundle was fitted on, as the agent knows it: id and steps.
+
+    In the full profile what ships is chosen at finalize by fitting every scored
+    table again with the early-stopped model (0094's rule on that fit), and that
+    choice can differ from the table the probe ranked best during the search.
+    When it does, both ids and both fitted scores are given, so the run's own
+    account of what it shipped cannot be read off the search alone.
+    """
+    tables = j.get("tables") or []
+    node = next((t for t in tables if t.get("path") == table_rel), None)
+    out = {"table": node["id"] if node else "work", "steps": _table_steps(tables, node)}
+    chosen = j.get("terminal_selection") or {}
+    probe = chosen.get("probe_choice")
+    if probe and probe != out["table"]:
+        scores = chosen.get("scores") or {}
+        out["probe_choice"] = probe
+        out["fitted_scores"] = {out["table"]: scores.get(out["table"]),
+                                probe: scores.get(probe)}
+        out["note"] = (
+            f"The probe ranked {probe} best during the search. finalize_run fitted every "
+            "scored table again with the early-stopped model and ships the best table "
+            f"by that fit among those whose steps showed a gain: {out['table']}, not {probe}."
+        )
+    return out
+
+
 def run_inventory(session: RunSession) -> dict | None:
     """What the run built, once, when the agent first asks to finish.
 
@@ -3912,11 +4064,9 @@ def run_inventory(session: RunSession) -> dict | None:
         return None
     j = journal.load(session.run_dir)
     tables = j.get("tables") or []
-    by_path = {t.get("path"): t for t in tables}
     metric = (j.get("task") or {}).get("metric") or session.resolved().metric
 
-    def kind(t):
-        return "encoding" if t.get("encoded_columns") is not None else t.get("method")
+    kind = _table_kind
 
     def gain(t):
         interval = (t.get("probe_vs_eligible_ancestor_interval")
@@ -3924,10 +4074,7 @@ def run_inventory(session: RunSession) -> dict | None:
         return interval.get("gain")
 
     winner = stop.best_table(tables, metric)
-    steps, node = [], winner
-    while node is not None:
-        steps.append(f"{node['id']}: {kind(node)}")
-        node = by_path.get(node.get("source_table"))
+    steps = _table_steps(tables, winner)
 
     kinds: dict[str, dict] = {}
     for t in tables:
@@ -3957,12 +4104,21 @@ def run_inventory(session: RunSession) -> dict | None:
     journal.mark_inventory_shown(session.run_dir)
     return {
         "finalized": False,
-        "would_ship": {"table": winner["id"] if winner else None,
-                       "steps": list(reversed(steps))},
+        # The minimal profile ships the probe's best table. The full profile
+        # decides at finalize, on the early-stopped refits, so here it can only
+        # say which table the probe ranked best.
+        ("would_ship" if session.profile == "minimal" else "best_by_probe"): {
+            "table": winner["id"] if winner else None, "steps": steps,
+        },
         "tables_by_kind": kinds,
         "passed_but_not_built_on": loose_ends,
         "tools_never_called": sorted(available - called),
-        "note": "Nothing was finalized. Call finalize_run again to finish.",
+        "note": "Nothing was finalized. Call finalize_run again to finish." + (
+            "" if session.profile == "minimal" else
+            " finalize_run first fits every scored table again with an early-stopped "
+            "model and ships the best by that fit, so the shipped table can differ "
+            "from best_by_probe; its return value names the table that shipped."
+        ),
     }
 
 
@@ -4165,6 +4321,7 @@ def finalize_run(session: RunSession) -> dict:
     shipped = shipped_holdout(holdout)
     work_fit = work_fit_holdout(holdout)
     return {
+        "shipped_table": _shipped_table(session, j, ship["source_table"]),
         "best_experiment_id": best["experiment_id"],
         "model_type": blend["model_type"] if blend else meta["model_type"],
         # Which fits the bundle averages, and their ids, so a reader of the return

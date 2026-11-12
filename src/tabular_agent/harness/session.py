@@ -66,6 +66,7 @@ class RunSession:
         holdout_fraction: float | None = None,
         split_on: str | None = None,
         serving_columns: list[str] | None = None,
+        serving_path: str | None = None,
         future_known: list[str] | None = None,
         fit_time_budget_s: float | None = None,
         streams: dict[str, dict] | None = None,
@@ -157,6 +158,13 @@ class RunSession:
         self.serving_columns = (
             None if serving_columns is None else list(serving_columns)
         )
+        # The rows the bundle will be asked to predict, without a target, when the
+        # owner named them (a test file). Only replayed over, never fitted or
+        # scored on, and outside `resolve_table`'s allowlist: each agent-written
+        # code step is run on them as it is built, so code that only works on the
+        # training rows' values (a date range, a set of categories) is caught
+        # while the agent can still fix it. `None` skips that check.
+        self.serving_path = serving_path
         # Serving columns whose values over the forecast horizon are known at issue
         # time (0091): a weather forecast, a planned promotion, a published price.
         # Declared, for `serving_columns`' reason — presence is not permission, and
